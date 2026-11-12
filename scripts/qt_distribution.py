@@ -17,6 +17,52 @@ def digest(path):
     with path.open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
 
 
+
+def materialize_notice_parts(bundle, target, expected):
+    """Reassemble the exact reviewed notice bytes without weakening source checks.
+
+    GitHub's blob upload transport could not migrate the 8 MB source-notice
+    file in one request. The 27 ordered pieces are source data, not substitute
+    notices. An exact byte count and the historical source-map SHA-256 remain
+    mandatory, and the assembled file is never written into the checkout.
+    """
+    part_root = bundle / 'notices-parts'
+    if part_root.is_symlink() or not part_root.is_dir():
+        raise ValueError('Reviewed Qt notice parts are missing')
+    names = [f'part-{index:02d}.txt' for index in range(27)]
+    if {part.name for part in part_root.iterdir()} != set(names):
+        raise ValueError('Missing, extra, or renamed Qt notice part')
+    if target.exists() or target.is_symlink():
+        raise ValueError('Refusing to overwrite Qt notice destination')
+    if not target.parent.resolve().is_relative_to(target.parents[3].resolve()):
+        raise ValueError('Qt notice destination escapes package')
+    partial = target.with_name(target.name + '.partial')
+    if partial.exists() or partial.is_symlink():
+        raise ValueError('Refusing to overwrite Qt notice partial')
+    digest_state = hashlib.sha256()
+    total = 0
+    try:
+        with partial.open('xb') as output:
+            for name in names:
+                part = part_root / name
+                if part.is_symlink() or not part.is_file() or not part.resolve().is_relative_to(part_root.resolve()):
+                    raise ValueError('Unsafe Qt notice part')
+                with part.open('rb') as source:
+                    while True:
+                        chunk = source.read(128 * 1024)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > expected['bytes']:
+                            raise ValueError('Qt notice parts exceed reviewed size')
+                        digest_state.update(chunk)
+                        output.write(chunk)
+        if total != expected['bytes'] or digest_state.hexdigest() != expected['sha256']:
+            raise ValueError('Qt notice parts differ from reviewed source bytes')
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+
 def prepare(package, bundle=BUNDLE):
     package=Path(package).resolve(strict=True)
     bundle=Path(bundle).resolve(strict=True)
@@ -26,9 +72,17 @@ def prepare(package, bundle=BUNDLE):
         raise ValueError('Corresponding-source identity is not reviewed')
     if mapping.get('source_sbom_mismatches') or not mapping.get('source_sbom_files_compared'):
         raise ValueError('Source/SBOM evidence is incomplete')
+    destination=package/'licenses/qt-open-source/corresponding-source'
+    destination.mkdir(parents=True,exist_ok=True)
+    if destination.is_symlink() or not destination.resolve().is_relative_to(package):
+        raise ValueError('Escaped Qt evidence destination')
     for name,expected in mapping['documents'].items():
         path=bundle/name
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(bundle):
+        if name == 'SOURCE-NOTICES.txt' and not path.exists():
+            path=destination/name
+            materialize_notice_parts(bundle,path,expected)
+        validated_root = destination if name == 'SOURCE-NOTICES.txt' and path.parent == destination else bundle
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(validated_root):
             raise ValueError('Missing or escaped Qt compliance document')
         if path.stat().st_size!=expected['bytes'] or digest(path)!=expected['sha256']:
             raise ValueError('Changed Qt compliance document: '+name)
@@ -51,11 +105,9 @@ def prepare(package, bundle=BUNDLE):
                          'source_commit':SOURCE_COMMIT,'relationship':'Exact shipped raw digest; executable-byte equivalence to source-identified official SDK'})
     if not REQUIRED <= {Path(x['path']).name for x in verified}:
         raise ValueError('Required source-mapped WebEngine/PDF binaries missing')
-    destination=package/'licenses/qt-open-source/corresponding-source'
-    destination.mkdir(parents=True,exist_ok=True)
-    if destination.is_symlink() or not destination.resolve().is_relative_to(package):
-        raise ValueError('Escaped Qt evidence destination')
     for path in bundle.iterdir():
+        if path.name == 'notices-parts' and path.is_dir() and not path.is_symlink():
+            continue
         if not path.is_file() or path.is_symlink(): raise ValueError('Unexpected Qt evidence item')
         shutil.copyfile(path,destination/path.name)
     receipt={'schema_version':1,'source_archive':source,'verified_shipped_binaries':verified,
