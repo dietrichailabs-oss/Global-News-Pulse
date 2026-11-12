@@ -11,6 +11,16 @@ on:
       - 'requirements*.lock'
       - 'pyproject.toml'
       - '.github/workflows/windows-package.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'global_pulse/**'
+      - 'packaging/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'requirements*.lock'
+      - 'pyproject.toml'
+      - '.github/workflows/windows-package.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,6 +32,9 @@ concurrency:
 
 jobs:
   build:
+    # Never run PR package preparation from untrusted fork source.
+    # PR runs only verify in-run build/smoke, they do not publish binaries.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -117,6 +130,7 @@ jobs:
           Write-Host "SETUP_EXE_SHA256=$exeSha"
           Write-Host "SETUP_ZIP_SHA256=$zipSha"
       - name: Upload owner-test ZIPs
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: global-news-pulse-owner-test-${{ github.sha }}
