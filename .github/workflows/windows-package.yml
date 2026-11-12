@@ -42,6 +42,12 @@ jobs:
         --deselect=tests/test_nws_geometry_capacity_qt.py::test_actual_captured_shape_paints_with_unchanged_total_budget
         --deselect=tests/test_official_feed_batch.py::test_integrated_catalog_adds_only_completed_live_passes
         --deselect=tests/test_official_feed_batch2.py::test_batch2_frozen_catalog_preserves_baseline_and_appends_exact_candidates_once
+        # Public-repo migration exclusions: these replay private-repo-only history/evidence,
+        # not current product behavior.
+        --deselect=tests/test_gdelt_named_schema.py::test_prior_parent_is_correct_and_rejected_parser_reproduces_real_schema_failure
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_catalog_is_exact_41_plus_two
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_receipts_match_original_completed_job_identity
+        --ignore=tests/test_official_feed_receipt_recovery.py
     defaults:
       run:
         shell: pwsh
