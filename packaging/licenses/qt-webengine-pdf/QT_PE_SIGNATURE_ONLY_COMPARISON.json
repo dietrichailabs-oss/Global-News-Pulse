@@ -1,0 +1,1377 @@
+{
+  "source_commit": "7d92749d1df3988b148330f401fa8786f1728614",
+  "run_id": "42911646838",
+  "method": "Only final certificate table, its directory entry and PE checksum excluded; no file changed",
+  "comparisons": [
+    {
+      "module": "qtpdf",
+      "sdk_path": "bin/Qt6PdfWidgets.dll",
+      "wheel_path": "PySide6/Qt6PdfWidgets.dll",
+      "sdk": {
+        "raw_sha256": "382b6075006e9bd5bfc6571389f86c930dc93b2ccb6c53da1881141fff5288d3",
+        "bytes": 107832,
+        "unsigned_sha256": "57fd97f96a73b6a093d44f0d97b8eff56d2229b6bb19537eb62a632da368c218",
+        "excluded_ranges": [
+          {
+            "offset": 368,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 448,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 95744,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 44544,
+            "sha256": "dfe36961ea77eb098dea3a27d3e46b6703b7a753c53299922447cef665166b1b"
+          },
+          {
+            "name": ".rdata",
+            "offset": 45568,
+            "bytes": 41472,
+            "sha256": "f72535648e984c154f408c0a3bec7d93a16297d838be995bead7385fe02462c9"
+          },
+          {
+            "name": ".data",
+            "offset": 87040,
+            "bytes": 2560,
+            "sha256": "9243c4c05109ab58429a875266fc493471374a362ef21a091ad7b7e4f5fec122"
+          },
+          {
+            "name": ".pdata",
+            "offset": 89600,
+            "bytes": 3584,
+            "sha256": "8b933ed3199f3699d545c33c46a27ed9af3e55fc81d6e4d6353cefdcb6a37431"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 93184,
+            "bytes": 1536,
+            "sha256": "f53294b891ff8ba973bf0ada9868fadc42d8260d50af5770d29bfb731ac1b497"
+          },
+          {
+            "name": ".reloc",
+            "offset": 94720,
+            "bytes": 1024,
+            "sha256": "603809964e863f86a6677cb1421a87e7eed31a1a082ebe12249b911f66d8d168"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "ee29f027a20bab9f363da8e24009fb896f676c7b9a40872a49e8b21a6867fbde",
+        "bytes": 107832,
+        "unsigned_sha256": "57fd97f96a73b6a093d44f0d97b8eff56d2229b6bb19537eb62a632da368c218",
+        "excluded_ranges": [
+          {
+            "offset": 368,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 448,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 95744,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 44544,
+            "sha256": "dfe36961ea77eb098dea3a27d3e46b6703b7a753c53299922447cef665166b1b"
+          },
+          {
+            "name": ".rdata",
+            "offset": 45568,
+            "bytes": 41472,
+            "sha256": "f72535648e984c154f408c0a3bec7d93a16297d838be995bead7385fe02462c9"
+          },
+          {
+            "name": ".data",
+            "offset": 87040,
+            "bytes": 2560,
+            "sha256": "9243c4c05109ab58429a875266fc493471374a362ef21a091ad7b7e4f5fec122"
+          },
+          {
+            "name": ".pdata",
+            "offset": 89600,
+            "bytes": 3584,
+            "sha256": "8b933ed3199f3699d545c33c46a27ed9af3e55fc81d6e4d6353cefdcb6a37431"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 93184,
+            "bytes": 1536,
+            "sha256": "f53294b891ff8ba973bf0ada9868fadc42d8260d50af5770d29bfb731ac1b497"
+          },
+          {
+            "name": ".reloc",
+            "offset": 94720,
+            "bytes": 1024,
+            "sha256": "603809964e863f86a6677cb1421a87e7eed31a1a082ebe12249b911f66d8d168"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtpdf",
+      "sdk_path": "bin/Qt6PdfQuick.dll",
+      "wheel_path": "PySide6/Qt6PdfQuick.dll",
+      "sdk": {
+        "raw_sha256": "aa58a15bdbfd4f41db46639ecf66260d8340e5a7fd48ef04645aca043c9a3c02",
+        "bytes": 649528,
+        "unsigned_sha256": "6873f283e9d6fceee10d8195f03b6a53edc71707bea221f2a4ff688937ec8c08",
+        "excluded_ranges": [
+          {
+            "offset": 352,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 432,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 637440,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 311296,
+            "sha256": "5e1b8985c37c756c3a7e1c71b20950890a6d6284a025d7b378fd8b4c707f259b"
+          },
+          {
+            "name": ".rdata",
+            "offset": 312320,
+            "bytes": 250368,
+            "sha256": "88da356b926ed46a88dc21411dbd32e39eabd5ffeba7bb0255287f034d610a0f"
+          },
+          {
+            "name": ".data",
+            "offset": 562688,
+            "bytes": 53760,
+            "sha256": "eeab08b344c3bd1a33220c9391790602be14abec3b757a34e5a8bdd440994e85"
+          },
+          {
+            "name": ".pdata",
+            "offset": 616448,
+            "bytes": 13312,
+            "sha256": "0b102b74cb0179e9a706fbc943f55f03bb5468671a654eb3031115984dc50a9f"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 629760,
+            "bytes": 1536,
+            "sha256": "d72b6d1c8d2706525528dea1125ac061ca56de4e8b6efb2ec317dca7ab578aaf"
+          },
+          {
+            "name": ".reloc",
+            "offset": 631296,
+            "bytes": 6144,
+            "sha256": "19afce8d47d517e7c9e35b16b5af5ecfc5cb789853aaa81ff56e7a6a9288cce1"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "9a89638f922c91dce8039a52bcdc6ea0fa4c3b8fbf7a9b9529b2befbbb02647a",
+        "bytes": 649528,
+        "unsigned_sha256": "6873f283e9d6fceee10d8195f03b6a53edc71707bea221f2a4ff688937ec8c08",
+        "excluded_ranges": [
+          {
+            "offset": 352,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 432,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 637440,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 311296,
+            "sha256": "5e1b8985c37c756c3a7e1c71b20950890a6d6284a025d7b378fd8b4c707f259b"
+          },
+          {
+            "name": ".rdata",
+            "offset": 312320,
+            "bytes": 250368,
+            "sha256": "88da356b926ed46a88dc21411dbd32e39eabd5ffeba7bb0255287f034d610a0f"
+          },
+          {
+            "name": ".data",
+            "offset": 562688,
+            "bytes": 53760,
+            "sha256": "eeab08b344c3bd1a33220c9391790602be14abec3b757a34e5a8bdd440994e85"
+          },
+          {
+            "name": ".pdata",
+            "offset": 616448,
+            "bytes": 13312,
+            "sha256": "0b102b74cb0179e9a706fbc943f55f03bb5468671a654eb3031115984dc50a9f"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 629760,
+            "bytes": 1536,
+            "sha256": "d72b6d1c8d2706525528dea1125ac061ca56de4e8b6efb2ec317dca7ab578aaf"
+          },
+          {
+            "name": ".reloc",
+            "offset": 631296,
+            "bytes": 6144,
+            "sha256": "19afce8d47d517e7c9e35b16b5af5ecfc5cb789853aaa81ff56e7a6a9288cce1"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtpdf",
+      "sdk_path": "bin/Qt6Pdf.dll",
+      "wheel_path": "PySide6/Qt6Pdf.dll",
+      "sdk": {
+        "raw_sha256": "aa0e0c688d5991b0b075d241d39901b15a641d3b9c4e4b1f82f4b391b5ed6447",
+        "bytes": 4623672,
+        "unsigned_sha256": "8be28df17548069f282d4668e7d4b543bffc3e4e4d37dcf6fbeabf118b227938",
+        "excluded_ranges": [
+          {
+            "offset": 392,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 472,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 4611584,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 2378752,
+            "sha256": "f8f08abbe2076982e9901f546c642fa134f964d8f1be73800e1827604edfbcac"
+          },
+          {
+            "name": ".rdata",
+            "offset": 2379776,
+            "bytes": 2025472,
+            "sha256": "74c13850f2c7cdd9cd76d17eae6242c5e3023e5464cf6b9e3652388f2915f61a"
+          },
+          {
+            "name": ".data",
+            "offset": 4405248,
+            "bytes": 77312,
+            "sha256": "990dba9d6791661fbfb0495c84d4dbdaa54f08fc4418e15530036094335902ce"
+          },
+          {
+            "name": ".pdata",
+            "offset": 4482560,
+            "bytes": 115200,
+            "sha256": "fabfd87543e201765cf2bb52a84ebc90b1218632e5ab8ea14bd81b99de08607b"
+          },
+          {
+            "name": ".didat",
+            "offset": 4597760,
+            "bytes": 512,
+            "sha256": "37777e8507bffeaec6b0bf456bdd27373272b01b5782b7ebe80de570e43632e3"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 4598272,
+            "bytes": 1536,
+            "sha256": "00d1116c74365f25188f07e09b1b7e5521d5b361b80e9f882bb3cdf742cd9053"
+          },
+          {
+            "name": ".reloc",
+            "offset": 4599808,
+            "bytes": 11776,
+            "sha256": "ca8a68b750742ae6ada43b0c560a162df9b9412f6e333b8d78ca674bfe10bef2"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "5caf5744e017df85455c5c7e11028c5ec2765633a7ca64a11d7b64d127f6c4cc",
+        "bytes": 4623672,
+        "unsigned_sha256": "8be28df17548069f282d4668e7d4b543bffc3e4e4d37dcf6fbeabf118b227938",
+        "excluded_ranges": [
+          {
+            "offset": 392,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 472,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 4611584,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 2378752,
+            "sha256": "f8f08abbe2076982e9901f546c642fa134f964d8f1be73800e1827604edfbcac"
+          },
+          {
+            "name": ".rdata",
+            "offset": 2379776,
+            "bytes": 2025472,
+            "sha256": "74c13850f2c7cdd9cd76d17eae6242c5e3023e5464cf6b9e3652388f2915f61a"
+          },
+          {
+            "name": ".data",
+            "offset": 4405248,
+            "bytes": 77312,
+            "sha256": "990dba9d6791661fbfb0495c84d4dbdaa54f08fc4418e15530036094335902ce"
+          },
+          {
+            "name": ".pdata",
+            "offset": 4482560,
+            "bytes": 115200,
+            "sha256": "fabfd87543e201765cf2bb52a84ebc90b1218632e5ab8ea14bd81b99de08607b"
+          },
+          {
+            "name": ".didat",
+            "offset": 4597760,
+            "bytes": 512,
+            "sha256": "37777e8507bffeaec6b0bf456bdd27373272b01b5782b7ebe80de570e43632e3"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 4598272,
+            "bytes": 1536,
+            "sha256": "00d1116c74365f25188f07e09b1b7e5521d5b361b80e9f882bb3cdf742cd9053"
+          },
+          {
+            "name": ".reloc",
+            "offset": 4599808,
+            "bytes": 11776,
+            "sha256": "ca8a68b750742ae6ada43b0c560a162df9b9412f6e333b8d78ca674bfe10bef2"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "qml/QtWebEngine/qtwebenginequickplugin.dll",
+      "wheel_path": "PySide6/qml/QtWebEngine/qtwebenginequickplugin.dll",
+      "sdk": {
+        "raw_sha256": "dff00535b306dde00379008b15cf772ed3f84e287f2b056b4d246c923ab4c2c2",
+        "bytes": 35128,
+        "unsigned_sha256": "b5fb60d7d8bd66c1dd82683e300341f50f2f51856e3e353513a6294d7bcd67b7",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 23040,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 6144,
+            "sha256": "d2409743f2809c8f77538e84f25d966483ddcf47c6b2b03748cb21dbac7ee8da"
+          },
+          {
+            "name": ".rdata",
+            "offset": 7168,
+            "bytes": 11264,
+            "sha256": "69969ef3937cf8f992ddad90ee47d77e49ffa28a19b719d0846d747d043c343a"
+          },
+          {
+            "name": ".data",
+            "offset": 18432,
+            "bytes": 1024,
+            "sha256": "53d3a079762173ad4a1a66201a3afa046c629f1999ca01ba48818e3c71a71e01"
+          },
+          {
+            "name": ".pdata",
+            "offset": 19456,
+            "bytes": 1024,
+            "sha256": "373224757df3c07c3e08e821ee52c6100e67e27bbe5b65e9d6c5a0289af7bc9f"
+          },
+          {
+            "name": ".qtmetad",
+            "offset": 20480,
+            "bytes": 512,
+            "sha256": "c0bbcc72b2585ec064b446e6d07ab0dd29832cde9c7ea2353c3c42268ef2b24c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 20992,
+            "bytes": 1536,
+            "sha256": "89e4b4cd50cccb17bad885e9190d729b72b78da570e1ffacc84f5a42e3295d05"
+          },
+          {
+            "name": ".reloc",
+            "offset": 22528,
+            "bytes": 512,
+            "sha256": "05384ca595143d0bd482f0aaf084cf601a9bfab35493f53dc59168b2cebdfd6c"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "21b7862246d70d69f65deac132d1122fa2088678b435e25cf2e4a392344ef107",
+        "bytes": 35128,
+        "unsigned_sha256": "b5fb60d7d8bd66c1dd82683e300341f50f2f51856e3e353513a6294d7bcd67b7",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 23040,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 6144,
+            "sha256": "d2409743f2809c8f77538e84f25d966483ddcf47c6b2b03748cb21dbac7ee8da"
+          },
+          {
+            "name": ".rdata",
+            "offset": 7168,
+            "bytes": 11264,
+            "sha256": "69969ef3937cf8f992ddad90ee47d77e49ffa28a19b719d0846d747d043c343a"
+          },
+          {
+            "name": ".data",
+            "offset": 18432,
+            "bytes": 1024,
+            "sha256": "53d3a079762173ad4a1a66201a3afa046c629f1999ca01ba48818e3c71a71e01"
+          },
+          {
+            "name": ".pdata",
+            "offset": 19456,
+            "bytes": 1024,
+            "sha256": "373224757df3c07c3e08e821ee52c6100e67e27bbe5b65e9d6c5a0289af7bc9f"
+          },
+          {
+            "name": ".qtmetad",
+            "offset": 20480,
+            "bytes": 512,
+            "sha256": "c0bbcc72b2585ec064b446e6d07ab0dd29832cde9c7ea2353c3c42268ef2b24c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 20992,
+            "bytes": 1536,
+            "sha256": "89e4b4cd50cccb17bad885e9190d729b72b78da570e1ffacc84f5a42e3295d05"
+          },
+          {
+            "name": ".reloc",
+            "offset": 22528,
+            "bytes": 512,
+            "sha256": "05384ca595143d0bd482f0aaf084cf601a9bfab35493f53dc59168b2cebdfd6c"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "qml/QtWebEngine/ControlsDelegates/qtwebenginequickdelegatesplugin.dll",
+      "wheel_path": "PySide6/qml/QtWebEngine/ControlsDelegates/qtwebenginequickdelegatesplugin.dll",
+      "sdk": {
+        "raw_sha256": "d0a019463e3f6dc898dd3665a929880a710124fc89aad74827edc361c9b57f1c",
+        "bytes": 32056,
+        "unsigned_sha256": "fa009bf48e9f6a79ea7b3c51c0736fb141a6f1c4c99a655bfcafa79a9966f1b7",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 19968,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 5632,
+            "sha256": "76e916aad327fa6bffae14c2546b2afab4d3ebd6dd48829713be646565dc3f66"
+          },
+          {
+            "name": ".rdata",
+            "offset": 6656,
+            "bytes": 8704,
+            "sha256": "5cf180c9fc6b3eff27c20aa83058e7b4851d94ba7463d9d2fed18934c9b52e33"
+          },
+          {
+            "name": ".data",
+            "offset": 15360,
+            "bytes": 1024,
+            "sha256": "3440fedb0e5ef3a6dcb8e4602a33382ef8445a51e135842095374a971c896174"
+          },
+          {
+            "name": ".pdata",
+            "offset": 16384,
+            "bytes": 1024,
+            "sha256": "cb7c8f5a8fb42607e478ff688148124fed97addc1e4a53c7e0a016aa7a2a472a"
+          },
+          {
+            "name": ".qtmetad",
+            "offset": 17408,
+            "bytes": 512,
+            "sha256": "55a264bceeaa587efe947cbf04e11cec99b275e9dde198d7965c4a4a932b4f9c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 17920,
+            "bytes": 1536,
+            "sha256": "4c33d071f445f5c2e5abf430ec176fe1e17d55c42372c939e0a8f51e3b76c9b0"
+          },
+          {
+            "name": ".reloc",
+            "offset": 19456,
+            "bytes": 512,
+            "sha256": "369b0562b847eb2e87cb45ffa31372e8d638575fb00ef9393479eeaddd4aed68"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "bb76d959c50f0cb2dc6f14c9ee8fa6d6dddd2d285a0246a1b8c542644c39fe26",
+        "bytes": 32056,
+        "unsigned_sha256": "fa009bf48e9f6a79ea7b3c51c0736fb141a6f1c4c99a655bfcafa79a9966f1b7",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 19968,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 5632,
+            "sha256": "76e916aad327fa6bffae14c2546b2afab4d3ebd6dd48829713be646565dc3f66"
+          },
+          {
+            "name": ".rdata",
+            "offset": 6656,
+            "bytes": 8704,
+            "sha256": "5cf180c9fc6b3eff27c20aa83058e7b4851d94ba7463d9d2fed18934c9b52e33"
+          },
+          {
+            "name": ".data",
+            "offset": 15360,
+            "bytes": 1024,
+            "sha256": "3440fedb0e5ef3a6dcb8e4602a33382ef8445a51e135842095374a971c896174"
+          },
+          {
+            "name": ".pdata",
+            "offset": 16384,
+            "bytes": 1024,
+            "sha256": "cb7c8f5a8fb42607e478ff688148124fed97addc1e4a53c7e0a016aa7a2a472a"
+          },
+          {
+            "name": ".qtmetad",
+            "offset": 17408,
+            "bytes": 512,
+            "sha256": "55a264bceeaa587efe947cbf04e11cec99b275e9dde198d7965c4a4a932b4f9c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 17920,
+            "bytes": 1536,
+            "sha256": "4c33d071f445f5c2e5abf430ec176fe1e17d55c42372c939e0a8f51e3b76c9b0"
+          },
+          {
+            "name": ".reloc",
+            "offset": 19456,
+            "bytes": 512,
+            "sha256": "369b0562b847eb2e87cb45ffa31372e8d638575fb00ef9393479eeaddd4aed68"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "bin/Qt6WebEngineWidgets.dll",
+      "wheel_path": "PySide6/Qt6WebEngineWidgets.dll",
+      "sdk": {
+        "raw_sha256": "ddebf9e5cfc7bc315ad4dbb1adb04e73cca7cf39bbf626f4b0c7263d1a03d7bc",
+        "bytes": 186680,
+        "unsigned_sha256": "89a9b9a443663b94c4041a094c2d3acb94c454b57118fd05bc80a476f3b475a1",
+        "excluded_ranges": [
+          {
+            "offset": 368,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 448,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 174592,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 62976,
+            "sha256": "ca14406779dc96620f2ac913bb12e0375c04f0e8c083416981eea5058cdc756f"
+          },
+          {
+            "name": ".rdata",
+            "offset": 64000,
+            "bytes": 94720,
+            "sha256": "1c38c7b30f0e6de6455e52cf155243b4a4c0b1cb43778dc0bb446c4349fe9273"
+          },
+          {
+            "name": ".data",
+            "offset": 158720,
+            "bytes": 6144,
+            "sha256": "79a68ae3d1a70f1513b61e789463e9f8a38baafebb1f298a1e7957b0f962e8c6"
+          },
+          {
+            "name": ".pdata",
+            "offset": 164864,
+            "bytes": 5120,
+            "sha256": "e0784449415e0f2081c5413eccbdb5e64233fcf5b5f8051aa1eed0e655e0315c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 169984,
+            "bytes": 1536,
+            "sha256": "24a457d66aad3d63231b90ef3d585e917066ebcf23b86a8ddd2e8c9b6cbbb552"
+          },
+          {
+            "name": ".reloc",
+            "offset": 171520,
+            "bytes": 3072,
+            "sha256": "5f1d106ca7429da2dc3de9420ec161105dae008ae296f5a689735524aadf9643"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "de1e152e5b8891b065cd94a85c3f9ecf99404ba10edd13a3dcf52bbbce05c132",
+        "bytes": 186680,
+        "unsigned_sha256": "89a9b9a443663b94c4041a094c2d3acb94c454b57118fd05bc80a476f3b475a1",
+        "excluded_ranges": [
+          {
+            "offset": 368,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 448,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 174592,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 62976,
+            "sha256": "ca14406779dc96620f2ac913bb12e0375c04f0e8c083416981eea5058cdc756f"
+          },
+          {
+            "name": ".rdata",
+            "offset": 64000,
+            "bytes": 94720,
+            "sha256": "1c38c7b30f0e6de6455e52cf155243b4a4c0b1cb43778dc0bb446c4349fe9273"
+          },
+          {
+            "name": ".data",
+            "offset": 158720,
+            "bytes": 6144,
+            "sha256": "79a68ae3d1a70f1513b61e789463e9f8a38baafebb1f298a1e7957b0f962e8c6"
+          },
+          {
+            "name": ".pdata",
+            "offset": 164864,
+            "bytes": 5120,
+            "sha256": "e0784449415e0f2081c5413eccbdb5e64233fcf5b5f8051aa1eed0e655e0315c"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 169984,
+            "bytes": 1536,
+            "sha256": "24a457d66aad3d63231b90ef3d585e917066ebcf23b86a8ddd2e8c9b6cbbb552"
+          },
+          {
+            "name": ".reloc",
+            "offset": 171520,
+            "bytes": 3072,
+            "sha256": "5f1d106ca7429da2dc3de9420ec161105dae008ae296f5a689735524aadf9643"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "bin/QtWebEngineProcess.exe",
+      "wheel_path": "PySide6/QtWebEngineProcess.exe",
+      "sdk": {
+        "raw_sha256": "5ece6950892c6c4632bc3d7a7b062e9342acfc9238c816b3e2d94196f1659d55",
+        "bytes": 802104,
+        "unsigned_sha256": "d03a5e8c7fcb336fa4173cc47b459803d640d849e8a6cc2ab77c3c7449300c8a",
+        "excluded_ranges": [
+          {
+            "offset": 400,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 480,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 790016,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 544256,
+            "sha256": "2ae4361fbe6e6867f2888ae2359da0bfb96a8f81f812187028d481cfc3be9bf1"
+          },
+          {
+            "name": ".rdata",
+            "offset": 545280,
+            "bytes": 202752,
+            "sha256": "865a30ec5a42cac8ea752aa32048ad31f3011e58d99e37d08a1a3f5fb95eae50"
+          },
+          {
+            "name": ".data",
+            "offset": 748032,
+            "bytes": 2560,
+            "sha256": "7a2f5819dcae0a2a3173a1564070233c7aef9bfdcf01e5bfbd6d45681d03a2c6"
+          },
+          {
+            "name": ".pdata",
+            "offset": 750592,
+            "bytes": 31232,
+            "sha256": "c2d0a6620ec5fc37dd0daa6fc34833bf30e2f5e0fc7f50355bafb66ae3be7f23"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 781824,
+            "bytes": 2048,
+            "sha256": "d9c3ebedd255d69b2246ee81128e7b07ebe504f0f8958c647d7f30c33290ba8c"
+          },
+          {
+            "name": ".reloc",
+            "offset": 783872,
+            "bytes": 6144,
+            "sha256": "e59d06e23ffdaaf36813d420e060d2649f52298826529293951f126a44959aa7"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "91560b137a26e89df4a148479aa830a915870a5b1b3c46715b2c13a7ba21388b",
+        "bytes": 802104,
+        "unsigned_sha256": "d03a5e8c7fcb336fa4173cc47b459803d640d849e8a6cc2ab77c3c7449300c8a",
+        "excluded_ranges": [
+          {
+            "offset": 400,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 480,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 790016,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 544256,
+            "sha256": "2ae4361fbe6e6867f2888ae2359da0bfb96a8f81f812187028d481cfc3be9bf1"
+          },
+          {
+            "name": ".rdata",
+            "offset": 545280,
+            "bytes": 202752,
+            "sha256": "865a30ec5a42cac8ea752aa32048ad31f3011e58d99e37d08a1a3f5fb95eae50"
+          },
+          {
+            "name": ".data",
+            "offset": 748032,
+            "bytes": 2560,
+            "sha256": "7a2f5819dcae0a2a3173a1564070233c7aef9bfdcf01e5bfbd6d45681d03a2c6"
+          },
+          {
+            "name": ".pdata",
+            "offset": 750592,
+            "bytes": 31232,
+            "sha256": "c2d0a6620ec5fc37dd0daa6fc34833bf30e2f5e0fc7f50355bafb66ae3be7f23"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 781824,
+            "bytes": 2048,
+            "sha256": "d9c3ebedd255d69b2246ee81128e7b07ebe504f0f8958c647d7f30c33290ba8c"
+          },
+          {
+            "name": ".reloc",
+            "offset": 783872,
+            "bytes": 6144,
+            "sha256": "e59d06e23ffdaaf36813d420e060d2649f52298826529293951f126a44959aa7"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "bin/Qt6WebEngineCore.dll",
+      "wheel_path": "PySide6/Qt6WebEngineCore.dll",
+      "sdk": {
+        "raw_sha256": "475a605d6a2a2a089f3c6aad4b072bd0f14265d1974b47c5068c98be655979ad",
+        "bytes": 203489592,
+        "unsigned_sha256": "4e3af6f92e81b276449bec2a7102cfa49080a1db5f115567f9a70a366f9c5183",
+        "excluded_ranges": [
+          {
+            "offset": 440,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 520,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 203477504,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1536,
+            "bytes": 148570624,
+            "sha256": "e26e8f503684f6de1c1621f964375bde3628b73bfee63c92f6f7eb242b4a5c25"
+          },
+          {
+            "name": ".rodata",
+            "offset": 148572160,
+            "bytes": 2560,
+            "sha256": "7be30da07d7e7607f844afa2854430e05ee3ee7f0c8f7fb6358cc590b0cf12aa"
+          },
+          {
+            "name": "LZMADEC",
+            "offset": 148574720,
+            "bytes": 4608,
+            "sha256": "6ce3e31322071f1710425b944cd08a03cebf16c78999f357feb5b654d88c1bd1"
+          },
+          {
+            "name": ".rdata",
+            "offset": 148579328,
+            "bytes": 44393472,
+            "sha256": "3b0589758844488df1d97090f528ec87096372e87b8292008d045139a96ce53f"
+          },
+          {
+            "name": ".data",
+            "offset": 192972800,
+            "bytes": 965632,
+            "sha256": "2e96cfc71136ff1410ade4b5fa66f2b060ec972e978e07c7143bfb353393a388"
+          },
+          {
+            "name": ".pdata",
+            "offset": 193938432,
+            "bytes": 7694848,
+            "sha256": "b6f6f2d3dd7bae9d969e534b26e705cb1ad666373af88e1c2497b68afa99e386"
+          },
+          {
+            "name": ".didat",
+            "offset": 201633280,
+            "bytes": 512,
+            "sha256": "21824faa1e5a16e54e007ef353ede402cf58582eeafa6a8e70c8b2625eb8fc58"
+          },
+          {
+            "name": "CPADinfo",
+            "offset": 201633792,
+            "bytes": 512,
+            "sha256": "911d1a12eca8935990172cfcd6768f9c6351ed94b700833b2cf0cf457a1d752d"
+          },
+          {
+            "name": "_RDATA",
+            "offset": 201634304,
+            "bytes": 1024,
+            "sha256": "29ce8e41ac12cb540e7f6a2500f7cdfe63cabb6a56107e0c62b1e610445ddde1"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 201635328,
+            "bytes": 60928,
+            "sha256": "50d4851ef6a89edb44d080e6affb4781f2d4e442c264b610312283aa20b979f8"
+          },
+          {
+            "name": ".reloc",
+            "offset": 201696256,
+            "bytes": 1781248,
+            "sha256": "1ca926abac981f9b73d7781123435ee634f2ae60b3e9cb2e0ea993953eab5e72"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "54488cfc8fea4057377302cec5a1fb1100fb4bc4231cd7e60f43e4fcff28e89e",
+        "bytes": 203489592,
+        "unsigned_sha256": "4e3af6f92e81b276449bec2a7102cfa49080a1db5f115567f9a70a366f9c5183",
+        "excluded_ranges": [
+          {
+            "offset": 440,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 520,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 203477504,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1536,
+            "bytes": 148570624,
+            "sha256": "e26e8f503684f6de1c1621f964375bde3628b73bfee63c92f6f7eb242b4a5c25"
+          },
+          {
+            "name": ".rodata",
+            "offset": 148572160,
+            "bytes": 2560,
+            "sha256": "7be30da07d7e7607f844afa2854430e05ee3ee7f0c8f7fb6358cc590b0cf12aa"
+          },
+          {
+            "name": "LZMADEC",
+            "offset": 148574720,
+            "bytes": 4608,
+            "sha256": "6ce3e31322071f1710425b944cd08a03cebf16c78999f357feb5b654d88c1bd1"
+          },
+          {
+            "name": ".rdata",
+            "offset": 148579328,
+            "bytes": 44393472,
+            "sha256": "3b0589758844488df1d97090f528ec87096372e87b8292008d045139a96ce53f"
+          },
+          {
+            "name": ".data",
+            "offset": 192972800,
+            "bytes": 965632,
+            "sha256": "2e96cfc71136ff1410ade4b5fa66f2b060ec972e978e07c7143bfb353393a388"
+          },
+          {
+            "name": ".pdata",
+            "offset": 193938432,
+            "bytes": 7694848,
+            "sha256": "b6f6f2d3dd7bae9d969e534b26e705cb1ad666373af88e1c2497b68afa99e386"
+          },
+          {
+            "name": ".didat",
+            "offset": 201633280,
+            "bytes": 512,
+            "sha256": "21824faa1e5a16e54e007ef353ede402cf58582eeafa6a8e70c8b2625eb8fc58"
+          },
+          {
+            "name": "CPADinfo",
+            "offset": 201633792,
+            "bytes": 512,
+            "sha256": "911d1a12eca8935990172cfcd6768f9c6351ed94b700833b2cf0cf457a1d752d"
+          },
+          {
+            "name": "_RDATA",
+            "offset": 201634304,
+            "bytes": 1024,
+            "sha256": "29ce8e41ac12cb540e7f6a2500f7cdfe63cabb6a56107e0c62b1e610445ddde1"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 201635328,
+            "bytes": 60928,
+            "sha256": "50d4851ef6a89edb44d080e6affb4781f2d4e442c264b610312283aa20b979f8"
+          },
+          {
+            "name": ".reloc",
+            "offset": 201696256,
+            "bytes": 1781248,
+            "sha256": "1ca926abac981f9b73d7781123435ee634f2ae60b3e9cb2e0ea993953eab5e72"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "bin/Qt6WebEngineQuick.dll",
+      "wheel_path": "PySide6/Qt6WebEngineQuick.dll",
+      "sdk": {
+        "raw_sha256": "994e97f717f86c785d705aaa92c0917c0fc3f0c56c754de94cfed6223322fd17",
+        "bytes": 678712,
+        "unsigned_sha256": "f56bf08b0e7e1f58d73a94ff4bc2573dfbcfb7ab20ffcf34e865366742a5a1ae",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 666624,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 307200,
+            "sha256": "02b0488eff6d86e9798a5c874299576023175b31231280ebd588f2ee64771b12"
+          },
+          {
+            "name": ".rdata",
+            "offset": 308224,
+            "bytes": 270336,
+            "sha256": "b4be673a7dbf7cf3c4c50ac8c206b721681a96972edea1e781d1003262656ab3"
+          },
+          {
+            "name": ".data",
+            "offset": 578560,
+            "bytes": 52736,
+            "sha256": "2bdcf44bbb769306a63ccf7915f6500a9ab4b2523b1ea1470c8229cf1eb42166"
+          },
+          {
+            "name": ".pdata",
+            "offset": 631296,
+            "bytes": 26112,
+            "sha256": "38d3eef4fc2af6825d6ea4aa57558381b037f4b1169a63730598d6050a6dd25e"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 657408,
+            "bytes": 1536,
+            "sha256": "6309fbaf5c4a2d0f449665b6b4e2b458bce679488bbae54575e4fc93c05a73c8"
+          },
+          {
+            "name": ".reloc",
+            "offset": 658944,
+            "bytes": 7680,
+            "sha256": "791ff098aef2433ea761ed6320fd772da2316b5e146ec10d464a8e7b08281780"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "48ebe9e1b1dd6037d39f7d284e503d38d6f3df09c582f3c68c322ab85b5f5a52",
+        "bytes": 678712,
+        "unsigned_sha256": "f56bf08b0e7e1f58d73a94ff4bc2573dfbcfb7ab20ffcf34e865366742a5a1ae",
+        "excluded_ranges": [
+          {
+            "offset": 360,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 440,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 666624,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 307200,
+            "sha256": "02b0488eff6d86e9798a5c874299576023175b31231280ebd588f2ee64771b12"
+          },
+          {
+            "name": ".rdata",
+            "offset": 308224,
+            "bytes": 270336,
+            "sha256": "b4be673a7dbf7cf3c4c50ac8c206b721681a96972edea1e781d1003262656ab3"
+          },
+          {
+            "name": ".data",
+            "offset": 578560,
+            "bytes": 52736,
+            "sha256": "2bdcf44bbb769306a63ccf7915f6500a9ab4b2523b1ea1470c8229cf1eb42166"
+          },
+          {
+            "name": ".pdata",
+            "offset": 631296,
+            "bytes": 26112,
+            "sha256": "38d3eef4fc2af6825d6ea4aa57558381b037f4b1169a63730598d6050a6dd25e"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 657408,
+            "bytes": 1536,
+            "sha256": "6309fbaf5c4a2d0f449665b6b4e2b458bce679488bbae54575e4fc93c05a73c8"
+          },
+          {
+            "name": ".reloc",
+            "offset": 658944,
+            "bytes": 7680,
+            "sha256": "791ff098aef2433ea761ed6320fd772da2316b5e146ec10d464a8e7b08281780"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    },
+    {
+      "module": "qtwebengine",
+      "sdk_path": "bin/Qt6WebEngineQuickDelegatesQml.dll",
+      "wheel_path": "PySide6/Qt6WebEngineQuickDelegatesQml.dll",
+      "sdk": {
+        "raw_sha256": "0a1033f4e46eb9081cd47c0deda260bfdf251fb7657d439874316b50c34e7662",
+        "bytes": 203576,
+        "unsigned_sha256": "af92499fcb952aa8105f3975a55e60a5943c075e1230a1657180bf5a65e33b53",
+        "excluded_ranges": [
+          {
+            "offset": 352,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 432,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 191488,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 79360,
+            "sha256": "a3b8612beba05cacd85dc4e51793333b3abe5a7703d774bd21fa3a3e88cfb1e3"
+          },
+          {
+            "name": ".rdata",
+            "offset": 80384,
+            "bytes": 90112,
+            "sha256": "9edd32c98ccddcaca4484650c9f42251211287befd6ccc76bf342b68c3197a6c"
+          },
+          {
+            "name": ".data",
+            "offset": 170496,
+            "bytes": 13824,
+            "sha256": "9e39c210e8c32650f2e680ce0885e7db6efc8375a9014a4e535ad87da96c70c9"
+          },
+          {
+            "name": ".pdata",
+            "offset": 184320,
+            "bytes": 4096,
+            "sha256": "88de178b01294fee63a090ebf7fbe160eb887a301b5fd37b1ccca14d90c1e211"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 188416,
+            "bytes": 1536,
+            "sha256": "58aa012a1cf050b4372de167498fca78a21355c262ed2d9ccd7b697879cb1117"
+          },
+          {
+            "name": ".reloc",
+            "offset": 189952,
+            "bytes": 1536,
+            "sha256": "24fb85cd4ee4fb845f12e9efd86f3487e2489ab8e39111bcc9bedb7f4a8d5581"
+          }
+        ]
+      },
+      "wheel": {
+        "raw_sha256": "c8802aba5fa3809e1527f159bb02ffea13c0af16d667b42e9b12ca436ecd67f0",
+        "bytes": 203576,
+        "unsigned_sha256": "af92499fcb952aa8105f3975a55e60a5943c075e1230a1657180bf5a65e33b53",
+        "excluded_ranges": [
+          {
+            "offset": 352,
+            "bytes": 4,
+            "kind": "PE checksum"
+          },
+          {
+            "offset": 432,
+            "bytes": 8,
+            "kind": "certificate-table directory"
+          },
+          {
+            "offset": 191488,
+            "bytes": 12088,
+            "kind": "final Authenticode table"
+          }
+        ],
+        "sections": [
+          {
+            "name": ".text",
+            "offset": 1024,
+            "bytes": 79360,
+            "sha256": "a3b8612beba05cacd85dc4e51793333b3abe5a7703d774bd21fa3a3e88cfb1e3"
+          },
+          {
+            "name": ".rdata",
+            "offset": 80384,
+            "bytes": 90112,
+            "sha256": "9edd32c98ccddcaca4484650c9f42251211287befd6ccc76bf342b68c3197a6c"
+          },
+          {
+            "name": ".data",
+            "offset": 170496,
+            "bytes": 13824,
+            "sha256": "9e39c210e8c32650f2e680ce0885e7db6efc8375a9014a4e535ad87da96c70c9"
+          },
+          {
+            "name": ".pdata",
+            "offset": 184320,
+            "bytes": 4096,
+            "sha256": "88de178b01294fee63a090ebf7fbe160eb887a301b5fd37b1ccca14d90c1e211"
+          },
+          {
+            "name": ".rsrc",
+            "offset": 188416,
+            "bytes": 1536,
+            "sha256": "58aa012a1cf050b4372de167498fca78a21355c262ed2d9ccd7b697879cb1117"
+          },
+          {
+            "name": ".reloc",
+            "offset": 189952,
+            "bytes": 1536,
+            "sha256": "24fb85cd4ee4fb845f12e9efd86f3487e2489ab8e39111bcc9bedb7f4a8d5581"
+          }
+        ]
+      },
+      "same_except_signature_metadata": true,
+      "all_sections_identical": true
+    }
+  ],
+  "total": 10,
+  "equivalent": 10,
+  "certificate_trust": "NOT_EVALUATED",
+  "decision": "EVIDENCE_ONLY_PENDING_QA"
+}

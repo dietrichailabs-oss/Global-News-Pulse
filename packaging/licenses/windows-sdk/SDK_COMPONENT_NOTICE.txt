@@ -1,0 +1,23 @@
+Microsoft Windows SDK for .NET projection — distribution evidence
+
+Package: Microsoft.Windows.SDK.NET.Ref 10.0.19041.57
+Copyright (c) Microsoft Corporation. All rights reserved.
+Official package: https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57
+Governing terms: https://aka.ms/WinSDKLicenseURL
+Permitted-file list: https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+
+The official REDIST list permits unmodified listed projection DLLs to accompany
+an application that calls Windows Runtime APIs, subject to the SDK terms.
+Global Pulse provides significant primary news-monitoring functionality and uses
+these files only for its Windows notification component. This is not an SDK
+resale, stand-alone SDK distribution, MIT relicensing, or Microsoft endorsement.
+
+The build verifies the exact NuGet archive and both selected original/published
+DLL identities. Installer and first native-component use expose the accompanying
+component-specific terms. Microsoft terms do not override separately licensed
+LGPL/GPL components. Distributor responsibilities, including the agreement's
+indemnity and downstream-protection requirements, continue to apply; being free
+of charge is not a waiver. No new developer agreement is accepted by this script.
+
+Independent QA must verify the final candidate. This notice is evidence and
+implementation documentation, not a legal opinion or public-release approval.

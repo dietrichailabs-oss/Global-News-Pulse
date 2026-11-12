@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "sdk_version": "10.0.19041.57",
+  "sdk_archive_sha256": "90b18f2cf7d7a23f5b0bfe2b86d8dda45881481f677ce36eccaf6e9ab50b6b4b",
+  "assets": {
+    "Microsoft.Windows.SDK.NET.dll": {
+      "bytes": 24877600,
+      "sha256": "0ec371d93798852e36461c8adddbeadce0f963a04752f0b64e54fe19c1c834a7"
+    },
+    "WinRT.Runtime.dll": {
+      "bytes": 528944,
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db"
+    }
+  },
+  "documents": {
+    "SDK_REDIST.html": {
+      "bytes": 38643,
+      "sha256": "e0c8f0dc979f8703374bcd21ed16e65a90fab5986e1cc4241fca05ff20525d10"
+    },
+    "SDK_COMPONENT_NOTICE.txt": {
+      "bytes": 1429,
+      "sha256": "3dfe9cd8c92cea8be516f8f7854b3d558c833b9a1acb8a017cc548ca9518386d"
+    },
+    "SDK_LICENSE.rtf": {
+      "bytes": 246945,
+      "sha256": "dd07eb178e00c6bba4148457fc00ff77cd4887eb521d504186fe59c9ec8bbe62"
+    },
+    "SDK_TERMS.txt": {
+      "bytes": 30614,
+      "sha256": "43f2959d2e75f41f03bd616e4620acce708c4dfb497c5df14eba0132849df689"
+    }
+  },
+  "official_license_url": "https://aka.ms/WinSDKLicenseURL",
+  "official_redist_url": "https://learn.microsoft.com/en-us/legal/windows-sdk/redist",
+  "status": "ENGINEERING_IMPLEMENTATION_PENDING_EXACT_WINDOWS_BUILD_AND_QA"
+}

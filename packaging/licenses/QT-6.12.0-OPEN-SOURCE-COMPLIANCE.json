@@ -1,0 +1,178 @@
+{
+  "schema_version": 3,
+  "reviewed_for": "Global Pulse Windows 0.1.1/E2 release integration",
+  "qt_core_version": "6.12.0",
+  "pyside_versions": {
+    "PySide6": "6.12.0",
+    "PySide6_Essentials": "6.12.0",
+    "PySide6_Addons": "6.12.0",
+    "PySide6_WebEngine": "6.12.0.140",
+    "PySide6_Pdf": "6.12.0.140",
+    "shiboken6": "6.12.0"
+  },
+  "selected_open_source_route": {
+    "qt_core_and_pyside": "LGPL-3.0-only where the shipped module offers the Qt open-source LGPL route",
+    "qt_webengine": "LGPL-3.0-only for Qt-specific portions plus Chromium/third-party terms",
+    "qt_pdf": "LGPL-3.0-only for Qt-specific portions plus PDFium/third-party terms",
+    "application_license": "NOT SELECTED BY THIS DEPENDENCY RECORD"
+  },
+  "exact_source_archives": [
+    {
+      "scope": "Qt 6.12.0 core/modules other than separately versioned Qt WebEngine/Qt PDF",
+      "name": "Qt 6.12.0 complete source",
+      "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.zip",
+      "bytes": 604643023,
+      "sha256": "a72e89c33726d742e67edf494abf7b625eaffc756673221c9823322ecd1a32d1"
+    },
+    {
+      "scope": "Qt for Python / PySide6 binding source",
+      "name": "PySide6 6.12.0 source",
+      "url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.zip",
+      "bytes": 23393479,
+      "sha256": "15b25c9e06f3acb8930c318192f3c20aee162f4b8d01bf4b4c60193c924cd847"
+    },
+    {
+      "name": "Qt WebEngine / Qt PDF 6.140.0-rc complete source",
+      "url": "https://download.qt.io/development_releases/qtwebengine/6.140.0-rc/qtwebengine-everywhere-src-6.140.0-rc.tar.xz",
+      "bytes": 580351144,
+      "sha256": "61257967afd9803a1db6403e86ea25c4efff8fad479bda365a9d81bfd709f621",
+      "git_commit": "d505fc23640d2bd6345e6483eb73daf4e19f5829",
+      "git_tag": "v6.140.0-rc",
+      "repository": "https://code.qt.io/qt/qtwebengine.git",
+      "scope": "Qt WebEngine and Qt PDF, including bundled Chromium/PDFium source"
+    }
+  ],
+  "webengine_pdf_release_line": {
+    "qt_webengine_version": "6.140.0",
+    "pyside_wheel_version": "6.12.0.140",
+    "chromium_baseline": "140.0.7339.264",
+    "windows_x64_webengine_wheel": {
+      "filename": "pyside6_webengine-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "sha256": "f9b61b1d457a591ee590a6b80515f25a3e61e2576a2a0a70566380f9d9de4ab0",
+      "release_date": "2026-10-08",
+      "publisher": "Qt Project"
+    },
+    "source_status_file": "QT-WEBENGINE-PDF-6.140-SOURCE-STATUS.json",
+    "corresponding_source_status": "Exact official RC source pinned and downloaded; vendor SDK SBOM and signature-only executable relationship verified; independent QA pending"
+  },
+  "official_versioned_references": {
+    "licensing": "https://doc.qt.io/qt-6.12/licensing.html",
+    "lgpl": "https://doc.qt.io/qt-6.12/lgpl.html",
+    "sbom": "https://doc.qt.io/qt-6.12/sbom.html",
+    "webengine_licensing": "https://doc-snapshots.qt.io/qtwebengine/qtwebengine-licensing.html",
+    "pdf_licensing": "https://doc-snapshots.qt.io/qtpdf/qtpdf-licensing.html",
+    "qt_webengine_release_split": "https://www.qt.io/blog/qt-webengine-will-release-separate"
+  },
+  "pdf_third_party_inventory": [
+    [
+      "Abseil",
+      "Apache-2.0"
+    ],
+    [
+      "Anti-Grain Geometry",
+      "MIT"
+    ],
+    [
+      "FreeType",
+      "FTL"
+    ],
+    [
+      "Little CMS",
+      "MIT"
+    ],
+    [
+      "PDFium",
+      "BSD"
+    ],
+    [
+      "The Chromium Project",
+      "BSD-3-Clause"
+    ],
+    [
+      "fast_float",
+      "MIT"
+    ],
+    [
+      "icu",
+      "MIT"
+    ],
+    [
+      "libjpeg-turbo",
+      "IJG/BSD-3/Zlib"
+    ],
+    [
+      "libpng",
+      "Libpng-2.0/Libpng"
+    ],
+    [
+      "zlib",
+      "Zlib"
+    ]
+  ],
+  "webengine_inventory": {
+    "official_complete_inventory": "https://doc-snapshots.qt.io/qtwebengine/qtwebengine-licensing.html#third-party-licenses",
+    "version": "6.140.0",
+    "most_restrictive_reported_third_party_license": "LGPL-2.1",
+    "legally_notable_examples": [
+      [
+        "Chromium",
+        "BSD"
+      ],
+      [
+        "PDFium",
+        "BSD"
+      ],
+      [
+        "WebKit",
+        "BSD/LGPL-2.0/LGPL-2.1"
+      ],
+      [
+        "ffmpeg",
+        "LGPL-2.1"
+      ],
+      [
+        "Speech Dispatcher",
+        "LGPL-2.1"
+      ],
+      [
+        "BoringSSL",
+        "MIT/BSD-3-Clause/OpenSSL/ISC/SSLeay"
+      ]
+    ],
+    "complete_inventory_status": "Vendor SPDX component inventories and corresponding-source notice texts bundled under qt-open-source/corresponding-source; QA pending",
+    "complete_inventory_required": true
+  },
+  "replacement_route": {
+    "packaging": "Windows one-directory frozen application; Qt/PySide DLLs remain separate files under _internal/PySide6",
+    "instructions": [
+      "Exit Global Pulse completely before replacing libraries.",
+      "Back up the installed application directory.",
+      "Replace an interface-compatible Qt/PySide library in _internal/PySide6 and matching plugins/resources when required by the modified build.",
+      "Global Pulse performs no runtime signature/hash enforcement that blocks a user-supplied interface-compatible Qt library.",
+      "The per-user installation directory is writable by the installing user; no administrator elevation is required to replace those application files.",
+      "A modified Qt build remains subject to its licenses and ABI/plugin compatibility requirements."
+    ]
+  },
+  "forbidden_if_shipped_without_separate_review": {
+    "gpl_only_qt_modules": [
+      "Qt6CanvasPainter.dll",
+      "Qt6Coap.dll",
+      "Qt6Graphs.dll",
+      "Qt6Grpc.dll",
+      "Qt6HttpServer.dll",
+      "Qt6Lottie.dll",
+      "Qt6Mqtt.dll",
+      "Qt6NetworkAuth.dll",
+      "Qt6Quick3D.dll",
+      "Qt6Quick3DPhysics.dll",
+      "Qt6QuickTimeline.dll",
+      "Qt6VirtualKeyboard.dll",
+      "Qt6WaylandCompositor.dll"
+    ],
+    "commercial_only_modules": [
+      "Qt6InsightTracker.dll",
+      "Qt6VncServer.dll"
+    ]
+  },
+  "status": "ENGINEERING SOURCE MAPPING AND SDK DISTRIBUTION IMPLEMENTATION PREPARED; EXACT WINDOWS BUILD AND INDEPENDENT QA REQUIRED"
+}

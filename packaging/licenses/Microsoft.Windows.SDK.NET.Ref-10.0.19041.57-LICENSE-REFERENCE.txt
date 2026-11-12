@@ -1,0 +1,11 @@
+Microsoft Windows SDK projection 10.0.19041.57 — current evidence route
+
+Official terms: https://aka.ms/WinSDKLicenseURL
+Official REDIST list: https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+
+The original external-only reference has been superseded in this candidate by
+bundled original terms, the official permitted-file list, and exact unmodified
+NuGet/published DLL verification. See notifications/licenses/windows-sdk and
+NATIVE_PACKAGE_NOTICES.json for the actual generated record. A missing or changed
+bundle/asset fails the build. Independent QA remains required. This reference by
+itself is not a grant and cannot substitute for those generated checks.

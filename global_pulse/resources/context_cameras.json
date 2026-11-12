@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "review_date": "2026-11-09",
+  "scope": "Limited starter coverage; public broad-landscape snapshots, not global camera discovery or incident verification",
+  "entries": [
+    {
+      "id": "nps-grand-canyon-yavapai",
+      "title": "Grand Canyon — Yavapai Point landscape",
+      "provider": "U.S. National Park Service",
+      "type": "webcam",
+      "region": "Grand Canyon National Park, Arizona",
+      "area_keywords": [
+        "Grand Canyon",
+        "Yavapai Point"
+      ],
+      "url": "https://www.nps.gov/media/webcam/view.htm?id=6AB2E06A-B28C-A55F-6E7C6519E2AA8F51",
+      "snapshot_url": "https://www.nps.gov/featurecontent/ard/webcams/images/grcalarge.jpg",
+      "refresh_seconds": 900,
+      "live_status": "Periodic still image; check embedded capture timestamp",
+      "rights": "NPS-origin broad landscape; attribution retained. No claim to original U.S. Government works. No recording or redistribution archive.",
+      "rights_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "availability": "Source page and image retrieved 2026-11-09; current capture time not independently verified",
+      "country_keywords": [
+        "United States",
+        "United States of America",
+        "USA",
+        "US",
+        "U.S."
+      ],
+      "region_keywords": [
+        "Global",
+        "North America",
+        "United States",
+        "United States of America",
+        "USA",
+        "US",
+        "U.S.",
+        "Arizona",
+        "AZ",
+        "Grand Canyon National Park",
+        "Grand Canyon",
+        "Yavapai Point"
+      ]
+    },
+    {
+      "id": "usgs-kilauea-v1",
+      "title": "Kilauea — summit landscape V1",
+      "provider": "U.S. Geological Survey / HVO",
+      "type": "webcam",
+      "region": "Kilauea summit, Hawaii",
+      "area_keywords": [
+        "Kilauea",
+        "Kīlauea",
+        "Halemaumau",
+        "Halemaʻumaʻu",
+        "Kaluapele"
+      ],
+      "url": "https://www.usgs.gov/media/webcams/v1cam-kilauea-volcano-hawaii-west-halemaumau-crater",
+      "snapshot_url": "https://volcanoes.usgs.gov/observatories/hvo/cams/V1cam/images/M.jpg",
+      "refresh_seconds": 900,
+      "live_status": "Periodic still image; current availability and capture time unverified",
+      "rights": "USGS source page labels Public Domain. Broad volcanic landscape context only; no recording or private-person tracking.",
+      "rights_url": "https://www.usgs.gov/media/webcams/v1cam-kilauea-volcano-hawaii-west-halemaumau-crater",
+      "availability": "Official image link verified 2026-11-09; research fetch returned 403, do not label connected until an actual successful load",
+      "country_keywords": [
+        "United States",
+        "United States of America",
+        "USA",
+        "US",
+        "U.S."
+      ],
+      "region_keywords": [
+        "Global",
+        "North America",
+        "United States",
+        "United States of America",
+        "USA",
+        "US",
+        "U.S.",
+        "Hawaii",
+        "HI",
+        "Hawaii Island",
+        "Island of Hawaii",
+        "Pacific",
+        "Hawaii Volcanoes National Park",
+        "Kilauea summit",
+        "Kilauea volcano",
+        "Kilauea",
+        "Halemaumau",
+        "Halemaʻumaʻu",
+        "Kaluapele"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2829 @@
+{
+    "SPDXID": "SPDXRef-DOCUMENT",
+    "creationInfo": {
+        "created": "2026-09-27T11:51:04Z",
+        "creators": [
+            "Organization: TheQtCompany",
+            "Tool: Qt Build System"
+        ],
+        "comment": "This SPDX document was created from CMake 4.3.2, using the qt\nbuild system from https://code.qt.io/cgit/qt/qtbase.git/tree/cmake/QtPublicSbomHelpers.cmake"
+    },
+    "dataLicense": "CC0-1.0",
+    "externalDocumentRefs": [
+        {
+            "externalDocumentId": "DocumentRef-qtbase-b62004158ac8",
+            "spdxDocument": "https://qt.io/spdxdocs/qtbase-025bdad1+HEAD-host-windows-amd64-target-windows-msvc-amd64-97ddb606-d9f5-503b-b79b-0ebcf28f512d",
+            "checksum": {
+                "algorithm": "SHA1",
+                "checksumValue": "67748ea9db6631ff0b7e8aec411de67d02355b43"
+            }
+        },
+        {
+            "externalDocumentId": "DocumentRef-qtdeclarative-70abca8ee644",
+            "spdxDocument": "https://qt.io/spdxdocs/qtdeclarative-4332fbbb+HEAD-host-windows-amd64-target-windows-msvc-amd64-06a07277-de9a-5592-9828-31f63144aa68",
+            "checksum": {
+                "algorithm": "SHA1",
+                "checksumValue": "17e8a3bfdc518b2ecbba4fb40bb744096b847f0e"
+            }
+        },
+        {
+            "externalDocumentId": "DocumentRef-qtwebengine-chromium-pdf-d82783ab5866",
+            "spdxDocument": "https://qt.io/spdxdocs/qtwebengine-chromium-pdf-d505fc2+HEAD",
+            "checksum": {
+                "algorithm": "SHA1",
+                "checksumValue": "6e07365ed99f524f0dc8647e79cc760174e8938d"
+            }
+        }
+    ],
+    "hasExtractedLicensingInfos": [
+        {
+            "extractedText": "Licensees holding valid commercial Qt licenses may use this software in\naccordance with the the terms contained in a written agreement between\nyou and The Qt Company. Alternatively, the terms and conditions that were\naccepted by the licensee when buying and/or downloading the\nsoftware do apply.\n\nFor the latest licensing terms and conditions, see https://www.qt.io/terms-conditions.\nFor further information use the contact form at https://www.qt.io/contact-us.\n",
+            "licenseId": "LicenseRef-Qt-Commercial"
+        },
+        {
+            "extractedText": "The icons in this repository are herefore released into the Public Domain.\n",
+            "licenseId": "LicenseRef-Tango-Icons-Public-Domain"
+        }
+    ],
+    "name": "qtpdf-6.140.0",
+    "spdxVersion": "SPDX-2.3",
+    "documentNamespace": "https://qt.io/spdxdocs/qtpdf-d505fc2+HEAD-host-windows-amd64-target-windows-msvc-amd64-6ef8fc5a-443b-51aa-833f-8e125837e9f3",
+    "packages": [
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "builtDate": "2026-09-27T11:51:04Z",
+            "comment": "Built by CMake 4.3.2 with RelWithDebInfo;Debug configuration for Windows (AMD64)\nqtpdf was configured with:\n    qt-configure-module <sources>/qtpdf -- -DFFMPEG_DIR=C:\\FFmpeg-n9.0.1\\build\\msvc\\installed -DQT_DEPLOY_FFMPEG=TRUE -DFEATURE_clangcpp=OFF -DINPUT_headersclean=ON -DFEATURE_webengine_system_libxml=OFF -DFEATURE_webengine_system_libtiff=OFF -DFEATURE_webengine_precompiled_headers=OFF -DCMAKE_MAKE_PROGRAM=C:\\Utils\\Ninja\\ninja.exe -DQT_INSTALL_CONFIG_INFO_FILES=ON -DQT_GENERATE_SBOM=ON -DQT_GENERATE_SOURCE_SBOM=ON -DQT_SBOM_VERIFY_SPDX_V2=ON -DQT_SBOM_REQUIRE_GENERATE_SPDX_V2_JSON=ON -DQT_SBOM_REQUIRE_VERIFY_SPDX_V2=ON -DQT_SBOM_VERIFY_CYDX_V1_6=ON -DQT_SBOM_REQUIRE_GENERATE_CYDX_V1_6=ON -DQT_SBOM_REQUIRE_VERIFY_CYDX_V1_6=ON -DQT_SBOM_PYTHON_INTERP=C:\\Python310_64\\python.exe -DQT_SBOM_PYTHON_APPS_PATH=C:\\Python310_64\\Scripts -DQT_LINT_SOURCE_SBOM=ON -DQT_INTERNAL_SBOM_DEFAULT_CHECKS=ON -DQT_INTERNAL_SBOM_AUDIT=ON -DQT_INTERNAL_SBOM_AUDIT_NO_ERROR=ON -DQT_BUILD_TESTS=OFF -DCMAKE_AUTOGEN_VERBOSE=ON -DCMAKE_MESSAGE_LOG_LEVEL=STATUS -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DBUILD_WITH_PCH=OFF\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf@d505fc2+HEAD",
+                    "referenceType": "purl"
+                }
+            ],
+            "filesAnalyzed": false,
+            "homepage": "https://qt.io",
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "qtpdf",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "d505fc2+HEAD"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "comment": "\nCMake target name: QPdfPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtpdf@d505fc2?library_name=QPdfPlugin#src/pdf/plugins/imageformats/pdf",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf-QPdfPlugin@d505fc2?vcs_url=https://code.qt.io/qt/qtpdf.git@d505fc2&library_name=QPdfPlugin#src/pdf/plugins/imageformats/pdf",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QPdfPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "5e9d7274050191d876a32e4a1cb5bd3fa2af6d7c"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.140.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "comment": "\nNote: This package was marked as not listing all of its consumed 3rd party dependencies.\nThus the licensing and copyright information might be incomplete.\nCMake target name: Pdf\nCMake exported target name: Qt6::Pdf\nContained in CMake package: Qt6Pdf\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtpdf@d505fc2?library_name=Pdf#src/pdf",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf-Pdf@d505fc2?vcs_url=https://code.qt.io/qt/qtpdf.git@d505fc2&library_name=Pdf#src/pdf",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "Pdf",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "19fb3cdcec38ceb94ed8ca8fcd5a09bb675f08d5"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.140.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "comment": "\nCMake target name: PdfWidgets\nCMake exported target name: Qt6::PdfWidgets\nContained in CMake package: Qt6PdfWidgets\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtpdf@d505fc2?library_name=PdfWidgets#src/pdfwidgets",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf-PdfWidgets@d505fc2?vcs_url=https://code.qt.io/qt/qtpdf.git@d505fc2&library_name=PdfWidgets#src/pdfwidgets",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "PdfWidgets",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "280721c6745dec2fa7ca188b6e70214e69b35063"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.140.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "comment": "\nCMake target name: PdfQuick\nCMake exported target name: Qt6::PdfQuick\nContained in CMake package: Qt6PdfQuick\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtpdf@d505fc2?library_name=PdfQuick#src/pdfquick",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf-PdfQuick@d505fc2?vcs_url=https://code.qt.io/qt/qtpdf.git@d505fc2&library_name=PdfQuick#src/pdfquick",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "PdfQuick",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "09f99af3d7b0784ec789cae00c54f1c3a7124b4d"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.140.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "comment": "\nCMake target name: PdfQuickplugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtpdf.git@d505fc23640d2bd6345e6483eb73daf4e19f5829",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtpdf@d505fc2?library_name=PdfQuickplugin#src/pdfquick",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtpdf-PdfQuickplugin@d505fc2?vcs_url=https://code.qt.io/qt/qtpdf.git@d505fc2&library_name=PdfQuickplugin#src/pdfquick",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtpdf:6.140.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "PdfQuickplugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "78d9dda0addbd24f49c3f71757c7810f29fd957d"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.140.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-system-build-tool-CMake-d82783ab5866",
+            "comment": "\nCMake target name: qtpdfSbomBuildToolCMake\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "CMake",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "4.3.2"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-system-build-tool-CMake-generator-Ninja-Multi-Config-d82783ab5866",
+            "comment": "\nCMake target name: qtpdfSbomBuildToolCMakeGenerator\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "CMake generator Ninja Multi-Config",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "1.10.2"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-system-build-tool-Compiler-MSVC-d82783ab5866",
+            "comment": "\nCMake target name: qtpdfSbomBuildToolCompiler\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "Compiler MSVC",
+            "primaryPackagePurpose": "OTHER",
+            "summary": "The compiler as identified by CMake, running on 'Windows' (AMD64)",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "19.44.35227.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtpdf-system-build-tool-Linker-MSVC-d82783ab5866",
+            "comment": "\nCMake target name: qtpdfSbomBuildToolLinker\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "Linker MSVC",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "14.44.35227.0"
+        }
+    ],
+    "files": [
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "b1662c1047c633cc298054e4b0064269fbf2c874"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qpdf.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "06cbb73dc6a8e73e8212cd79c43fd3326afdb456"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qpdfd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "29006c5839c3db3d4a24b9d5d4092bc61c71deb9"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6Pdf.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "d8f1f63efc521f574242d67e6439986f489bbe6a"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6Pdfd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "0c2938352773b9b24c95c32f959925c4804c6093"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6Pdf.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "195fa6a38f52a1a6fa077bbc2cbe24087a578980"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6Pdfd.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "da62b5599657425efcef8d3b6bd08b3c5d03333b"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6PdfWidgets.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "3f65884ebbca9e06abd98894c613c07037cf46c3"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6PdfWidgetsd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "49262ef4316825a9d12b7109a753c7187814f4ce"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6PdfWidgets.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "afa8f9583b73f8adb461f62d503d8fdb066c3724"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6PdfWidgetsd.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "ab4d423415786dd3e9edf8bee4150470e18188b5"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6PdfQuick.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "5eda45723a049615b69bda6cc7f5c37b4a10c2b7"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./bin/Qt6PdfQuickd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "8992de427fd7df2087bd451cf8f13b951cef09f3"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6PdfQuick.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "5e40a0dad388f0a394e9d654b64788bf960dd06f"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./lib/Qt6PdfQuickd.lib",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-RelWithDebInfo-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "823c6c384c0e53e887012431d33ec42c3f472b32"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./qml/QtQuick/Pdf/pdfquickplugin.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-Debug-d82783ab5866",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "49766cdab3aba37c3ee9e77d634dd9f6c7c250f3"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./qml/QtQuick/Pdf/pdfquickplugind.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        }
+    ],
+    "relationships": [
+        {
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relationshipType": "DESCRIBES"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-system-build-tool-CMake-d82783ab5866",
+            "comment": "SPDXRef-Package-qtpdf-d82783ab5866 is built using CMake version 4.3.2",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-system-build-tool-CMake-generator-Ninja-Multi-Config-d82783ab5866",
+            "comment": "SPDXRef-Package-qtpdf-d82783ab5866 is built using generator CMAKE_GENERATOR: 'Ninja Multi-Config' and CMAKE_MAKE_PROGRAM: 'ninja.exe' version '1.10.2'",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-system-build-tool-Compiler-MSVC-d82783ab5866",
+            "comment": "SPDXRef-Package-qtpdf-d82783ab5866 is built by compiler: 'MSVC' version: '19.44.35227.0' frontend variant: 'MSVC'",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-system-build-tool-Linker-MSVC-d82783ab5866",
+            "comment": "SPDXRef-Package-qtpdf-d82783ab5866 is built by linker 'MSVC' version '14.44.35227.0' frontend variant: 'MSVC'",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/qpdfiohandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/qpdfiohandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-QPdfPlugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/qpdfiohandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QPdfPlugin-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/plugins/imageformats/pdf/qpdfiohandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Network-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformModuleInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/C:/Users/qt/work/qt/qtwebengine_build/src/pdf/Pdf_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/include/QtPdf/qtpdfexports.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/compat/removed_api.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocumentrenderoptions.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/doc/qtpdf.qdocconf",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/C:/Users/qt/work/qt/qtwebengine_build/src/pdf/Pdf_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/include/QtPdf/qtpdfexports.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/compat/removed_api.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocumentrenderoptions.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/doc/qtpdf.qdocconf",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/C:/Users/qt/work/qt/qtwebengine_build/src/pdf/Pdf_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/include/QtPdf/qtpdfexports.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/compat/removed_api.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocumentrenderoptions.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/doc/qtpdf.qdocconf",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/C:/Users/qt/work/qt/qtwebengine_build/src/pdf/Pdf_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/include/QtPdf/qtpdfexports.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/compat/removed_api.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfbookmarkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfdocumentrenderoptions.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdffile_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflink_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagenavigator.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfpagerenderer.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/qtpdfglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdf/qtpdf-config_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-Pdf-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdf/doc/qtpdf.qdocconf",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Widgets-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformModuleInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/C:/Users/qt/work/qt/qtwebengine_build/src/pdfwidgets/PdfWidgets_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qtpdfwidgetsglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/C:/Users/qt/work/qt/qtwebengine_build/src/pdfwidgets/PdfWidgets_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qtpdfwidgetsglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/C:/Users/qt/work/qt/qtwebengine_build/src/pdfwidgets/PdfWidgets_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qtpdfwidgetsglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfWidgets-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/C:/Users/qt/work/qt/qtwebengine_build/src/pdfwidgets/PdfWidgets_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfpageselector_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qpdfview_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfWidgets-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfwidgets/qtpdfwidgetsglobal.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtdeclarative-70abca8ee644:SPDXRef-Package-qtdeclarative-qt-module-Quick-70abca8ee644",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformModuleInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtdeclarative-70abca8ee644:SPDXRef-Package-qtdeclarative-qt-module-Qml-70abca8ee644",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-Pdf-d82783ab5866",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/C:/Users/qt/work/qt/qtwebengine_build/src/pdfquick/PdfQuick_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qtpdfquickglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/pdfquick_qmltyperegistrations.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_qmake_QtQuick_Pdf.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Material/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_qmlcache_loader.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Material_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Universal/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Universal_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfLinkDelegate.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfLinkDelegate_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfMultiPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfMultiPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfScrollablePageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfScrollablePageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_PdfQuick_raw_qml_0.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/C:/Users/qt/work/qt/qtwebengine_build/src/pdfquick/PdfQuick_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qtpdfquickglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/pdfquick_qmltyperegistrations.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_qmake_QtQuick_Pdf.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Material/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_qmlcache_loader.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Material_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Universal/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Universal_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfLinkDelegate.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfLinkDelegate_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfMultiPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfMultiPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfScrollablePageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfScrollablePageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_PdfQuick_raw_qml_0.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/C:/Users/qt/work/qt/qtwebengine_build/src/pdfquick/PdfQuick_resource-RelWithDebInfo.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qtpdfquickglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/pdfquick_qmltyperegistrations.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_qmake_QtQuick_Pdf.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Material/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_qmlcache_loader.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Material_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Universal/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Universal_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfLinkDelegate.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfLinkDelegate_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfMultiPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfMultiPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfScrollablePageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfScrollablePageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_PdfQuick_raw_qml_0.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/C:/Users/qt/work/qt/qtwebengine_build/src/pdfquick/PdfQuick_resource-Debug.rc",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfbookmarkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfdocument_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdflinkmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpagenavigator_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfpageimage_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfsearchmodel_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qquickpdfselection_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/qtpdfquickglobal_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/pdfquick_qmltyperegistrations.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_qmake_QtQuick_Pdf.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Material/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_qmlcache_loader.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Material_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/+Universal/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_+Universal_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfLinkDelegate.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfLinkDelegate_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfMultiPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfMultiPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfPageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfPageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfScrollablePageView.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfScrollablePageView_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/src_dir/qtpdf/src/pdfquick/PdfStyle.qml",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.rcc/qmlcache/PdfQuick_PdfStyle_qml.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-module-PdfQuick-ImportLibrary-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/.qt/rcc/qrc_PdfQuick_raw_qml_0.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtdeclarative-70abca8ee644:SPDXRef-Package-qtdeclarative-qt-module-Qml-70abca8ee644",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-Package-qtpdf-qt-module-PdfQuick-d82783ab5866",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-RelWithDebInfo-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-RelWithDebInfo-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/PdfQuickplugin_QtQuick_PdfPlugin.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-qt-plugin-PdfQuickplugin-d82783ab5866",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-Debug-d82783ab5866",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-PdfQuickplugin-Debug-d82783ab5866",
+            "comment": "/build_dir/qtpdf/src/pdfquick/PdfQuickplugin_QtQuick_PdfPlugin.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtpdf-d82783ab5866",
+            "relatedSpdxElement": "DocumentRef-qtwebengine-chromium-pdf-d82783ab5866:SPDXRef-QtWebEngine-Chromium-Pdf-Internal-Components",
+            "relationshipType": "DEPENDS_ON"
+        }
+    ]
+}

@@ -1,0 +1,228 @@
+"""Offline HTTPX mocked checks for explicit GDELT manifest + export polling."""
+import hashlib
+import io
+import zipfile
+
+import httpx
+
+from global_pulse.gdelt_batches import GdeltBatchCache
+from global_pulse.gdelt_poll import poll_latest_export
+
+STAMP = "20261111080000"
+
+
+def archive_for(stamp):
+    row = [""] * 61
+    row[0] = stamp
+    row[1] = "20261110"
+    row[26] = "043"
+    row[29] = "3"
+    row[59] = stamp
+    row[60] = "https://example.org/report"
+    contents = ("\t".join(row) + "\n").encode("utf-8")
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr(f"{stamp}.export.CSV", contents)
+    return out.getvalue()
+
+
+def manifest_for(stamp, contents, size=None):
+    filename = f"{stamp}.export.CSV.zip"
+    return (f"{len(contents) if size is None else size} {hashlib.md5(contents).hexdigest()} "
+            f"http://data.gdeltproject.org/gdeltv2/{filename}\n").encode("ascii")
+
+
+def make_client(handler):
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+
+
+def test_manifest_to_local_sqlite_without_any_article_download(tmp_path):
+    raw = archive_for(STAMP)
+    manifest = manifest_for(STAMP, raw)
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        if str(request.url).endswith("lastupdate.txt"):
+            return httpx.Response(200, content=manifest)
+        return httpx.Response(200, content=raw)
+
+    with GdeltBatchCache(tmp_path / "pulse.sqlite3") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert (result["status"], result["downloaded"], result["added"]) == ("complete", True, 1)
+        assert cache.status()["cached_rows"] == 1
+        assert len(calls) == 2
+        assert all(url.startswith("https://data.gdeltproject.org/gdeltv2/") for url in calls)
+        assert not any("example.org" in url for url in calls)
+
+
+def test_repeat_manifest_poll_does_not_redownload_or_reimport(tmp_path):
+    raw = archive_for(STAMP)
+    manifest = manifest_for(STAMP, raw)
+    count = {"manifest": 0, "archive": 0}
+
+    def handler(request):
+        kind = "manifest" if str(request.url).endswith(".txt") else "archive"
+        count[kind] += 1
+        return httpx.Response(200, content=manifest if kind == "manifest" else raw)
+
+    with GdeltBatchCache(tmp_path / "pulse.sqlite3") as cache, make_client(handler) as client:
+        assert poll_latest_export(cache, client=client)["status"] == "complete"
+        second = poll_latest_export(cache, client=client)
+        assert second["status"] == "already_imported"
+        assert not second["downloaded"]
+        assert cache.status()["cached_rows"] == 1
+        assert count == {"manifest": 2, "archive": 1}
+
+
+def test_gap_after_missed_intervals_is_reported_not_falsely_backfilled(tmp_path):
+    newer = "20261111084500"
+    old_raw, new_raw = archive_for(STAMP), archive_for(newer)
+    pointer = {"stamp": STAMP}
+
+    def handler(request):
+        stamp = pointer["stamp"]
+        body = old_raw if stamp == STAMP else new_raw
+        if str(request.url).endswith(".txt"):
+            return httpx.Response(200, content=manifest_for(stamp, body))
+        return httpx.Response(200, content=body)
+
+    with GdeltBatchCache(tmp_path / "pulse.sqlite3") as cache, make_client(handler) as client:
+        assert not poll_latest_export(cache, client=client)["gap_detected"]
+        pointer["stamp"] = newer
+        result = poll_latest_export(cache, client=client)
+        assert result["gap_detected"]
+        assert cache.status()["cached_rows"] == 2
+
+
+def test_untrusted_manifest_cannot_trigger_archive_request(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, text=(
+            f"100 {'f'*32} https://attacker.example/gdeltv2/{STAMP}.export.CSV.zip"))
+
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert requests == ["https://data.gdeltproject.org/gdeltv2/lastupdate.txt"]
+
+
+def test_oversized_advertised_archive_is_never_requested(tmp_path):
+    requests = []
+    raw = archive_for(STAMP)
+
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, content=manifest_for(STAMP, raw, size=24 * 1024 * 1024 + 1))
+
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert len(requests) == 1
+        assert cache.status()["latest_batch"]["status"] == "error"
+
+
+def test_archive_http_429_recorded_not_followed_or_retried(tmp_path):
+    calls = []
+    raw = archive_for(STAMP)
+
+    def handler(request):
+        calls.append(str(request.url))
+        if str(request.url).endswith(".txt"):
+            return httpx.Response(200, content=manifest_for(STAMP, raw))
+        return httpx.Response(429, headers={"Retry-After": "3600"})
+
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert result["error"] == "GDELT endpoint returned HTTP 429"
+        assert cache.status()["latest_batch"]["error"] == result["error"]
+        assert len(calls) == 2
+
+
+def test_redirect_to_nonapproved_domain_not_followed(tmp_path):
+    calls = []
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "https://attacker.example/collect"})
+
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert "HTTP 302" in result["error"]
+        assert len(calls) == 1
+
+
+def test_bad_zip_does_not_set_success_checkpoint(tmp_path):
+    fake = b"not a real ZIP file"
+    manifest = manifest_for(STAMP, fake)
+    def handler(request):
+        return httpx.Response(200, content=manifest if str(request.url).endswith(".txt") else fake)
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert cache.status()["latest_batch"]["status"] == "error"
+        assert cache.status()["cached_rows"] == 0
+
+
+def test_streaming_body_cap_denies_missing_content_length(tmp_path):
+    requests = []
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, content=b"x" * 8193)
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error"
+        assert "size limit" in result["error"]
+        assert len(requests) == 1
+
+
+def test_concurrent_poll_leased_batch_does_not_issue_second_archive_get(tmp_path):
+    raw = archive_for(STAMP)
+    requests = []
+    def handler(request):
+        requests.append(str(request.url))
+        if str(request.url).endswith(".txt"):
+            return httpx.Response(200, content=manifest_for(STAMP, raw))
+        raise AssertionError("An active SQLite download lease must suppress the archive request")
+    from global_pulse.gdelt_batches import parse_manifest
+    batch = parse_manifest(manifest_for(STAMP, raw))["export"]
+    with GdeltBatchCache(tmp_path / "db") as cache, make_client(handler) as client:
+        assert cache.reserve(batch)
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "download_in_progress"
+        assert not result["downloaded"]
+        assert requests == ["https://data.gdeltproject.org/gdeltv2/lastupdate.txt"]
+
+
+def test_unresolved_gaps_survive_replay_restart_and_newer_adjacent_batches(tmp_path):
+    first = STAMP
+    later = "20261111084500"
+    adjacent = "20261111090000"
+    db = tmp_path / "db"
+    with GdeltBatchCache(db) as cache:
+        for stamp in (first, later):
+            raw = archive_for(stamp)
+            with make_client(lambda req, raw=raw, stamp=stamp:
+                httpx.Response(200, content=manifest_for(stamp, raw) if str(req.url).endswith(".txt") else raw)
+            ) as client:
+                result = poll_latest_export(cache, client=client)
+                assert result["status"] == "complete"
+        assert result["gap_detected"]
+    with GdeltBatchCache(db) as cache:
+        raw = archive_for(later)
+        with make_client(lambda req: httpx.Response(
+            200, content=manifest_for(later, raw) if str(req.url).endswith(".txt") else raw
+        )) as client:
+            replay = poll_latest_export(cache, client=client)
+            assert replay["status"] == "already_imported"
+            assert replay["gap_detected"]
+        raw2 = archive_for(adjacent)
+        with make_client(lambda req: httpx.Response(
+            200, content=manifest_for(adjacent, raw2) if str(req.url).endswith(".txt") else raw2
+        )) as client:
+            next_result = poll_latest_export(cache, client=client)
+            assert next_result["status"] == "complete"
+            assert next_result["gap_detected"]

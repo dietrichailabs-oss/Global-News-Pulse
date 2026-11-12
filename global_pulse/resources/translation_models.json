@@ -1,0 +1,356 @@
+{
+  "de": {
+    "name": "German",
+    "key": "de-en-1.3",
+    "url": "https://argos-net.com/v1/translate-de_en-1_3.argosmodel",
+    "size_bytes": 150512831,
+    "sha256": "becc2b0011f8249fcb89be9ecb75ba0d876b1fab93c28ee6ff0420936897d637",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external model download only. Stanza assets are not extracted or loaded."
+  },
+  "fr": {
+    "name": "French",
+    "key": "fr-en-1.9",
+    "url": "https://argos-net.com/v1/translate-fr_en-1_9.argosmodel",
+    "size_bytes": 66585033,
+    "sha256": "3b3052fee6bb1e8e8e632a26a723eb2a2c7710dfe73ba61ffd9b83e85d4f14c1",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external model download only. Stanza assets are not extracted or loaded."
+  },
+  "es": {
+    "name": "Spanish",
+    "key": "es-en-1.9",
+    "url": "https://argos-net.com/v1/translate-es_en-1_9.argosmodel",
+    "size_bytes": 285208831,
+    "sha256": "c54df2b62fceaf54a3ce5d97db6bf56efd7940063329f6778f4212d2acb370d4",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external model download only. Stanza assets are not extracted or loaded."
+  },
+  "uk": {
+    "name": "Ukrainian",
+    "key": "uk-en-1.9",
+    "url": "https://argos-net.com/v1/translate-uk_en-1_9.argosmodel",
+    "size_bytes": 76077099,
+    "sha256": "374fd797fd403875c241d018398c77f239b092c6ba5ed7488320838fa1532850",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "ru": {
+    "name": "Russian",
+    "key": "ru-en-1.9",
+    "url": "https://argos-net.com/v1/translate-ru_en-1_9.argosmodel",
+    "size_bytes": 156239112,
+    "sha256": "e9ba8bf722d10a4a4c39f74289d5938fd47eac08dbe4ed0afd22d89445a5c3ac",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "zh": {
+    "name": "Chinese",
+    "key": "zh-en-1.9",
+    "url": "https://argos-net.com/v1/translate-zh_en-1_9.argosmodel",
+    "size_bytes": 74481402,
+    "sha256": "62e7af5a3a48b530e47b7b3e5c78c2de79073ecd815750d2bf3ab35b4a67da2d",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "zt": {
+    "name": "Chinese (traditional)",
+    "key": "zt-en-1.9",
+    "url": "https://argos-net.com/v1/translate-zt_en-1_9.argosmodel",
+    "size_bytes": 74498034,
+    "sha256": "a9ea826d801f059dd47f1f47b6c1dc9d762519a80ea3afd2a982130a42a25486",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "pt": {
+    "name": "Portuguese",
+    "key": "pt-en-1.9",
+    "url": "https://argos-net.com/v1/translate-pt_en-1_9.argosmodel",
+    "size_bytes": 69447231,
+    "sha256": "ae76df6f650895c16f2b582065014fab496755ca846ecb19fae81d51f332a38e",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "nl": {
+    "name": "Dutch",
+    "key": "nl-en-1.8",
+    "url": "https://argos-net.com/v1/translate-nl_en-1_8.argosmodel",
+    "size_bytes": 69944805,
+    "sha256": "f49ac90c5812e0cb86a2858f4cfa61accec8709612728e6f805f0771c9a91e0e",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "pl": {
+    "name": "Polish",
+    "key": "pl-en-1.9",
+    "url": "https://argos-net.com/v1/translate-pl_en-1_9.argosmodel",
+    "size_bytes": 71696499,
+    "sha256": "07eda9edbd6ae5121df7c1d7bd847030423269b8c5056f1c222495c4a81e1721",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "bn": {
+    "name": "Bengali",
+    "key": "bn-en-1.9",
+    "url": "https://argos-net.com/v1/translate-bn_en-1_9.argosmodel",
+    "size_bytes": 70704005,
+    "sha256": "1fdc080e676a930bae436b82bf856077191b1497c086d3d3d15cf63a7ad476fe",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "id": {
+    "name": "Indonesian",
+    "key": "id-en-1.9",
+    "url": "https://argos-net.com/v1/translate-id_en-1_9.argosmodel",
+    "size_bytes": 68650073,
+    "sha256": "b494f6109dd7ceae32cb44cc721a14039abce938dc773a70087e73301ef4fed4",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "ms": {
+    "name": "Malay",
+    "key": "ms-en-1.9",
+    "url": "https://argos-net.com/v1/translate-ms_en-1_9.argosmodel",
+    "size_bytes": 68979493,
+    "sha256": "4582268f79c733749a58566f5d796cf7749000633fddf406b3c23e808ebcb3b0",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "vi": {
+    "name": "Vietnamese",
+    "key": "vi-en-1.9",
+    "url": "https://argos-net.com/v1/translate-vi_en-1_9.argosmodel",
+    "size_bytes": 65895840,
+    "sha256": "ebd51b7189b13eccb9238a5777de1d343008c4c05284a8b89610242364433953",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "th": {
+    "name": "Thai",
+    "key": "th-en-1.9",
+    "url": "https://argos-net.com/v1/translate-th_en-1_9.argosmodel",
+    "size_bytes": 71737116,
+    "sha256": "b6642c07389b156f568aa08c64140243bc1b1926f82df2559a2eae08316f84ce",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "tl": {
+    "name": "Tagalog",
+    "key": "tl-en-1.9",
+    "url": "https://argos-net.com/v1/translate-tl_en-1_9.argosmodel",
+    "size_bytes": 71472754,
+    "sha256": "fa5638666100e86aaba09095b990ad5ab1209f6636efe00924aa14e06458dc7c",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "cs": {
+    "name": "Czech",
+    "key": "cs-en-1.9.6",
+    "url": "https://argos-net.com/v1/translate-cs_en-1_9_6.argosmodel",
+    "size_bytes": 71354355,
+    "sha256": "f1683b1ac5e826c7e3db2b0ea5d73191cdd695d6523b112363d8a769203dcb62",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "sk": {
+    "name": "Slovak",
+    "key": "sk-en-1.9",
+    "url": "https://argos-net.com/v1/translate-sk_en-1_9.argosmodel",
+    "size_bytes": 71441991,
+    "sha256": "864f50eec15c0bb2978130cec3457d16ae5645a2737d58a3c290dcb63aa0eae5",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "ro": {
+    "name": "Romanian",
+    "key": "ro-en-1.9",
+    "url": "https://argos-net.com/v1/translate-ro_en-1_9.argosmodel",
+    "size_bytes": 70545301,
+    "sha256": "21dba44a9a2455d385264ff103e9eaa5bfc6c0b83eef69e6d1df4c497bcd00af",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "hu": {
+    "name": "Hungarian",
+    "key": "hu-en-1.9",
+    "url": "https://argos-net.com/v1/translate-hu_en-1_9.argosmodel",
+    "size_bytes": 71809926,
+    "sha256": "aa47290c64ba26a59dff60da464a4eb4466841241594b4dd023ab597b9f6faba",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "bg": {
+    "name": "Bulgarian",
+    "key": "bg-en-1.9",
+    "url": "https://argos-net.com/v1/translate-bg_en-1_9.argosmodel",
+    "size_bytes": 72511292,
+    "sha256": "a9fd00e8d67fbe6dd9cf07012a284d51916f2d0480a4bfe8add9ba7fd4375055",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "el": {
+    "name": "Greek",
+    "key": "el-en-1.9",
+    "url": "https://argos-net.com/v1/translate-el_en-1_9.argosmodel",
+    "size_bytes": 72161252,
+    "sha256": "51fa664c561a25d48150ab1d334e2f43e43c082c37bc82222b7c98804614563c",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "da": {
+    "name": "Danish",
+    "key": "da-en-1.9",
+    "url": "https://argos-net.com/v1/translate-da_en-1_9.argosmodel",
+    "size_bytes": 69084740,
+    "sha256": "cf0e4ddc78a6cc4c9093fcd8b5f22285fc5d0a8fe8650940cdc913da6295c585",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "fi": {
+    "name": "Finnish",
+    "key": "fi-en-1.9",
+    "url": "https://argos-net.com/v1/translate-fi_en-1_9.argosmodel",
+    "size_bytes": 69019776,
+    "sha256": "7be1ad3a02c160ac1a2a33697b59a20ae49cbfe92f4cb34fd6185841a7bd00fe",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "nb": {
+    "name": "Norwegian",
+    "key": "nb-en-1.9",
+    "url": "https://argos-net.com/v1/translate-nb_en-1_9.argosmodel",
+    "size_bytes": 67407741,
+    "sha256": "ee2e3b3541abecb51566b095d3409d97c61b920c9e37956d211fb8b9e9e7d027",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance"
+  },
+  "ar": {
+    "name": "Arabic",
+    "key": "ar-en-1.0",
+    "url": "https://argos-net.com/v1/translate-ar_en-1_0.argosmodel",
+    "size_bytes": 81869670,
+    "sha256": "bc98cd4e27ca1cebfae9b7086b2ebc635e4dbed45e7cb5f0891cb7d22feacfad",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "ja": {
+    "name": "Japanese",
+    "key": "ja-en-1.1",
+    "url": "https://argos-net.com/v1/translate-ja_en-1_1.argosmodel",
+    "size_bytes": 117155716,
+    "sha256": "623e3477959a815eb0a5ef53e09079ae8f1f9d3bbcd230473baf28c03fb83335",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "ko": {
+    "name": "Korean",
+    "key": "ko-en-1.1",
+    "url": "https://argos-net.com/v1/translate-ko_en-1_1.argosmodel",
+    "size_bytes": 118852077,
+    "sha256": "6da8f3db6ca40f42b1875570a1c06856f6e17c7ef62845d85de217ba548c1471",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "it": {
+    "name": "Italian",
+    "key": "it-en-1.0",
+    "url": "https://argos-net.com/v1/translate-it_en-1_0.argosmodel",
+    "size_bytes": 87190224,
+    "sha256": "d2dd23b8b702f612b8127f07c7a0391f5f2a8b93344e6ddc9dd93c81824e85cb",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "tr": {
+    "name": "Turkish",
+    "key": "tr-en-1.5",
+    "url": "https://argos-net.com/v1/translate-tr_en-1_5.argosmodel",
+    "size_bytes": 120561223,
+    "sha256": "15217905586561fac843efb5730aabff9a1534d5a9aa3f6ebcc0f9641394ac2d",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "fa": {
+    "name": "Persian",
+    "key": "fa-en-1.5",
+    "url": "https://argos-net.com/v1/translate-fa_en-1_5.argosmodel",
+    "size_bytes": 118419119,
+    "sha256": "ee79b584708fefff1cf61181fcb89b9c207b3bfeb2287c5610c3399dd034074c",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "he": {
+    "name": "Hebrew",
+    "key": "he-en-1.5",
+    "url": "https://argos-net.com/v1/translate-he_en-1_5.argosmodel",
+    "size_bytes": 115704948,
+    "sha256": "ff8ac0ce734a82f8508ff39eaa90c110f66a2df3a93f03cf6ca72c4a60093470",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "hi": {
+    "name": "Hindi",
+    "key": "hi-en-1.1",
+    "url": "https://argos-net.com/v1/translate-hi_en-1_1.argosmodel",
+    "size_bytes": 102381771,
+    "sha256": "f99eadf297073c0f5a320df5d634ebb73e9ab0b819404edf7bd0a0daf6b1ce43",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "ur": {
+    "name": "Urdu",
+    "key": "ur-en-1.9",
+    "url": "https://argos-net.com/v1/translate-ur_en-1_9.argosmodel",
+    "size_bytes": 69679858,
+    "sha256": "0d722bb7c4686a58ad1361202b192294cb939518d6f851741e68b36bb2e56d73",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  },
+  "sv": {
+    "name": "Swedish",
+    "key": "sv-en-1.5",
+    "url": "https://argos-net.com/v1/translate-sv_en-1_5.argosmodel",
+    "size_bytes": 94928329,
+    "sha256": "b4afa5e9ad1834e80bf3f87c74f497bab118d358dbf174320d3e5acdfcdae2f8",
+    "license_basis": "Model maintainer MIT/CC0 statement at https://github.com/argosopentech/argos-translate/issues/533; external consented model download only. Stanza and embedded executable assets are not extracted or loaded.",
+    "index_commit": "ff90de60728f7c1338ff6b75974e4c89b2442d22",
+    "verification": "size/hash/allowlisted extraction and synthetic CPU inference; not native Windows or semantic-quality acceptance",
+    "model_layout": "legacy_ct2_text_vocabulary"
+  }
+}

@@ -1,17 +1,32 @@
 # Global News Pulse
 
-Global News Pulse is the public engineering repository for Dietrich AI Labs' desktop world-news workstation.
+Global News Pulse is Dietrich AI Labs' desktop world-news workstation.
 
-This repository is being initialized from the current corrected owner-retest source line. The first public engineering candidate is **not a final release**: Windows packaging, independent QA, physical media playback, and remaining Issue #22 acceptance gates are still in progress.
+This is the clean **public engineering repository** initialized from the corrected owner-retest source line. It is not yet a final public binary release.
 
-## Current owner-retest focus
+## Current owner-retest line
 
-- crisis / unrest map stripes
-- source-location provenance
-- Internet radio and in-app SDR receiver support
-- TV owner-test candidates
-- reviewed webcam access
-- Situation Star / Brief selection behavior
-- Windows installer and portable packaging
+The current source includes:
 
-See the repository history and CI for exact source identities and bounded test evidence.
+- corrected conflict / unrest / migration country stripes across split-source reporting;
+- conservative publisher-country provenance handling;
+- opt-in local GDELT batch ingestion and coded-country layer;
+- NWS affected-area geometry and zone resolution;
+- Situation Star / Brief persistence and filtered-selection fixes;
+- one large TV surface with clearly labeled owner-test video candidates;
+- documented direct Internet radio stations;
+- an explicit in-app public SDR receiver path using an isolated memory-only browser session;
+- reviewed manual webcam access;
+- Windows installer and portable packaging.
+
+## CI
+
+`Current Contract CI` runs the active cross-platform regression set on Linux and Windows.
+
+`Windows Owner-Test Package` builds the unsigned Windows installer and portable package, performs offline package smoke testing, zips the verified installer for easier downloading, and uploads short-lived workflow artifacts. It does **not** publish a GitHub Release.
+
+## Status
+
+Engineering and independent QA are still active. Physical Windows playback, live-source behavior, notifications, remaining source-admission work, and final release approval remain separate gates.
+
+See `docs/PUBLIC_MIGRATION.md` for the migration boundary.

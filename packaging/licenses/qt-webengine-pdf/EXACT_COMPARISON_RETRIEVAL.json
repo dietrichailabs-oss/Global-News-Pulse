@@ -1,0 +1,85 @@
+{
+  "source_commit": "4b25dca847357bbd94b5642f7bb5e358a9e89eed",
+  "run_id": "42910543116",
+  "scope": "Binary/source-package evidence; no license clearance or product execution",
+  "resources": [
+    {
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.net.ref/10.0.19041.57/microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg",
+      "final_url": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.net.ref/10.0.19041.57/microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg",
+      "bytes": 12719136,
+      "sha256": "90b18f2cf7d7a23f5b0bfe2b86d8dda45881481f677ce36eccaf6e9ab50b6b4b"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/0e/8a/3f5eab9eb9e6486f0334b100322bbd0aff432dd90ad7977a3910979a163f/pyside6_pdf-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "final_url": "https://files.pythonhosted.org/packages/0e/8a/3f5eab9eb9e6486f0334b100322bbd0aff432dd90ad7977a3910979a163f/pyside6_pdf-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "bytes": 2983516,
+      "sha256": "4971ba1a0ca15e7c29cfd808e9600aeb46b2305dad01456eb09fa3197166268e"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/Updates.xml",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/Updates.xml",
+      "bytes": 1232,
+      "sha256": "40590ba082bf508acd91b1815c1a43082199a74b35355dfdbabc5bb3228801d4"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/src_doc_examples/Updates.xml",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/src_doc_examples/Updates.xml",
+      "bytes": 1687,
+      "sha256": "6cae51ec4ebe44811e4552b7bb50ec2e17c9f6e4e402534168eac76fb3c1f8d9"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/src_doc_examples/",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/src_doc_examples/",
+      "bytes": 2416,
+      "sha256": "4b6fd09d0cfd6c870b83e0bad2ba81c731446e501ac2bbcca87a82942265e8bd"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/extensions.qtpdf.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtpdf-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "final_url": "https://qt.mirror.constant.com/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/extensions.qtpdf.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtpdf-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "bytes": 5566648,
+      "sha256": "a7d5b38937857d8618136f9b259afc1fdccfd21f2c2b22d73368203e86bd47ca"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/extensions.qtpdf.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtpdf-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z.sha1",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/extensions.qtpdf.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtpdf-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z.sha1",
+      "bytes": 40,
+      "sha256": "f79a692a2b1bf3de388d065eda1a53fcfc5a8b2899e7d1fa72d13078240c3746"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/21/0d/260c7c286f2d4e8a49c099152a385414a872f022117f937824ca0a3f38e5/pyside6_webengine-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "final_url": "https://files.pythonhosted.org/packages/21/0d/260c7c286f2d4e8a49c099152a385414a872f022117f937824ca0a3f38e5/pyside6_webengine-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "bytes": 131697708,
+      "sha256": "f9b61b1d457a591ee590a6b80515f25a3e61e2576a2a0a70566380f9d9de4ab0"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/Updates.xml",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/Updates.xml",
+      "bytes": 3205,
+      "sha256": "b4c2b80540d49e076d39ee15926d9a581f6129201c952153bfad0dcd7de36d9b"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/src_doc_examples/Updates.xml",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/src_doc_examples/Updates.xml",
+      "bytes": 2556,
+      "sha256": "31c2141cfc0c58938705aea52d40cb89413c29207b4c5c77283539ff9bec6539"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/src_doc_examples/",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/src_doc_examples/",
+      "bytes": 2680,
+      "sha256": "5bcce4ff5636ce4e2eff518e6ccb0bf9d8edf2746b0ded5fcb3e0b24f194038e"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/extensions.qtwebengine.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtwebengine-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "final_url": "https://qt.mirror.constant.com/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/extensions.qtwebengine.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtwebengine-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z",
+      "bytes": 251728285,
+      "sha256": "3b3b1fe362d6d20e97a8201c9bd2a7921f4de481cc0f3b919fcdd6f810557b18"
+    },
+    {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/extensions.qtwebengine.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtwebengine-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z.sha1",
+      "final_url": "https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtwebengine/6120/61400/msvc2022_64/extensions.qtwebengine.6120.61400.win64_msvc2022_64/6.12.0-0-202609281005qtwebengine-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64.7z.sha1",
+      "bytes": 40,
+      "sha256": "196142ef6fba05147c3d28aa87d52dce9fe94bd732b8ee8bc6ae9e269dc6f8c5"
+    }
+  ]
+}

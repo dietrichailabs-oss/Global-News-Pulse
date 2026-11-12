@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "global-pulse"
+version = "0.1.1"
+description = "Local-first global public-source intelligence workstation"
+requires-python = ">=3.12,<3.14"
+authors = [{name = "Dietrich AI Labs"}]
+dependencies = [
+  "PySide6==6.12.0", "httpx[socks]==0.28.1", "defusedxml==0.7.1",
+  "langdetect==1.0.9", "ctranslate2==4.8.5", "sentencepiece==0.2.3",
+  "sacremoses==0.2.0", "subword-nmt==0.3.8",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller==6.22.3", "pytest==9.2.0"]
+
+[project.gui-scripts]
+global-pulse = "global_pulse.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["global_pulse*"]
+
+[tool.setuptools.package-data]
+global_pulse = ["resources/*.json", "resources/*.geojson", "resources/*.svg", "resources/*.png", "resources/*.ico", "resources/*.md", "resources/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+

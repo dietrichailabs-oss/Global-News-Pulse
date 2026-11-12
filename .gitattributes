@@ -1,0 +1,4 @@
+# These documents are identified by byte length and SHA-256, not normalized text.
+# Preserve vendor originals, generated notices, and evidence on every checkout.
+/packaging/licenses/** -text
+/docs/engineering/GP-ENG-FREEWARE-COMPLIANCE-001/upstream/** -text

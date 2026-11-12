@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "component_line": "Qt WebEngine / Qt PDF 6.140",
+  "source_commit": "d505fc23640d2bd6345e6483eb73daf4e19f5829",
+  "source_archive": {
+    "name": "Qt WebEngine / Qt PDF 6.140.0-rc complete source",
+    "url": "https://download.qt.io/development_releases/qtwebengine/6.140.0-rc/qtwebengine-everywhere-src-6.140.0-rc.tar.xz",
+    "bytes": 580351144,
+    "sha256": "61257967afd9803a1db6403e86ea25c4efff8fad479bda365a9d81bfd709f621",
+    "git_commit": "d505fc23640d2bd6345e6483eb73daf4e19f5829",
+    "git_tag": "v6.140.0-rc",
+    "repository": "https://code.qt.io/qt/qtwebengine.git",
+    "scope": "Qt WebEngine and Qt PDF, including bundled Chromium/PDFium source"
+  },
+  "evidence_bundle": "qt-open-source/corresponding-source/SOURCE_MAP.json",
+  "binary_relationship": "10 native binaries identical outside Authenticode table, its directory entry and PE checksum; raw files remain distinct and unmodified",
+  "decision": "CORRESPONDING_SOURCE_IDENTIFIED_ENGINEERING_CHECK_PENDING_INDEPENDENT_QA",
+  "reason": "The exact official SDK source inventory identifies the RC commit. All ten compared wheel binaries match that SDK executable payload outside signing metadata. A final-named tag is not assumed or required for this observed build.",
+  "historical_unresolved_lookup": {
+    "schema_version": 1,
+    "component_line": "Qt WebEngine / Qt PDF 6.140",
+    "observed_binary_distribution": {
+      "pyside_webengine_version": "6.12.0.140",
+      "pyside_pdf_version": "6.12.0.140",
+      "windows_x64_webengine_wheel_sha256": "f9b61b1d457a591ee590a6b80515f25a3e61e2576a2a0a70566380f9d9de4ab0",
+      "wheel_release_date": "2026-10-08",
+      "chromium_baseline": "140.0.7339.264"
+    },
+    "official_release_model": {
+      "statement": "Beginning with Qt 6.12, Qt WebEngine and Qt PDF use the separate 6.140 release line rather than Qt 6.12 binaries.",
+      "reference": "https://www.qt.io/blog/qt-webengine-will-release-separate"
+    },
+    "public_source_observation_as_of": "2026-11-10",
+    "public_source_observation": {
+      "final_source_archive": "NOT INDEPENDENTLY LOCATED",
+      "final_git_tag": "NOT INDEPENDENTLY LOCATED",
+      "development_downloads": [
+        "https://download.qt.io/development_releases/qtwebengine/6.140.0-beta1/",
+        "https://download.qt.io/development_releases/qtwebengine/6.140.0-beta2/",
+        "https://download.qt.io/development_releases/qtwebengine/6.140.0-rc/"
+      ],
+      "public_git_branch": "https://github.com/qt/qtwebengine/tree/6.140",
+      "observed_branch_head": "f51658307f34e5ef0edd83ce3556210030717185",
+      "branch_head_observation": "MUTABLE and dated after the 2026-10-08 wheel; not asserted as the wheel's corresponding source",
+      "observed_tags": [
+        "v6.140.0-beta1",
+        "v6.140.0-beta2",
+        "v6.140.0-rc"
+      ],
+      "final_v6_140_0_tag_observed": false
+    },
+    "license_route": {
+      "qt_specific": "LGPL-3.0/GPL alternatives documented by Qt WebEngine and Qt PDF 6.140 licensing pages",
+      "chromium": "BSD plus third-party terms",
+      "pdfium": "BSD plus bundled third-party terms",
+      "official_webengine_third_party_inventory": "https://doc-snapshots.qt.io/qtwebengine/qtwebengine-licensing.html#third-party-licenses",
+      "official_pdf_third_party_inventory": "https://doc-snapshots.qt.io/qtpdf/qtpdf-licensing.html"
+    },
+    "decision": "HOLD",
+    "reason": "Public license and third-party notice routes are mapped, but the exact final corresponding-source identity for the shipped WebEngine/PDF 6.12.0.140 binary line is not yet independently pinned. Do not claim the Qt 6.12.0 core source archive satisfies this separate 6.140 source obligation."
+  },
+  "public_release": "NOT_APPROVED"
+}

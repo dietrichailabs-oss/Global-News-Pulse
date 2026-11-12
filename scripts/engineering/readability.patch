@@ -1,0 +1,206 @@
+--- a/global_pulse/ui.py
++++ b/global_pulse/ui.py
+@@ -372,10 +372,23 @@
+         self.change_status_text=QTextBrowser();self.change_status_text.setPlainText("Select a source-linked situation.");self.change_status_text.setStyleSheet("font-size:10px;")
+         self.change_status.layout.addWidget(self.change_status_text)
+         self.intel_stack.addWidget(self.change_status)
++        # Every expanded card must have real text space. A splitter alone can
++        # shrink the nested panel headers until its text viewport is zero.
++        # Keep a readable minimum and scroll the whole stack on small windows;
++        # do not grow the main window or distort the reference's 40/40/20 split.
+         for browser in (self.intel_browser,self.evidence_status_text,self.change_status_text):
+-            browser.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+-        self.intel_stack.setSizes([220,70,55])
+-        intel.layout.addWidget(self.intel_stack,1)
++            browser.ensurePolished()
++            browser.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
++            browser.setMinimumHeight(3 * browser.fontMetrics().lineSpacing() + 24)
++        self.intel_stack.setChildrenCollapsible(False)
++        self.intel_stack.setSizes([220,100,100])
++        self.intel_scroll=QScrollArea()
++        self.intel_scroll.setAccessibleName("Scrollable intelligence brief and status cards")
++        self.intel_scroll.setWidgetResizable(True)
++        self.intel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
++        self.intel_scroll.setMinimumSize(0,0)
++        self.intel_scroll.setWidget(self.intel_stack)
++        intel.layout.addWidget(self.intel_scroll,1)
+         actionrow=QHBoxLayout()
+         self.original_button=button("Source ↗",self._open_original);self.translate_button=button("Translate",self._translate_selected)
+         actionrow.addWidget(self.original_button);actionrow.addWidget(self.translate_button);intel.layout.addLayout(actionrow)
+--- a/global_pulse/__main__.py
++++ b/global_pulse/__main__.py
+@@ -236,7 +236,11 @@
+     if args.snapshot:
+         def snapshot():
+             args.snapshot.parent.mkdir(parents=True, exist_ok=True)
+-            window.grab().save(str(args.snapshot))
++            from .visual_diagnostics import capture_diagnostics
++            diagnostics = capture_diagnostics(app, window)
++            diagnostics["image_saved"] = window.grab().save(str(args.snapshot))
++            args.snapshot.with_suffix(".json").write_text(
++                json.dumps(diagnostics, indent=2) + "\n", encoding="utf-8")
+             shutdown()
+         QTimer.singleShot(800, snapshot)
+     elif args.demo:
+--- a/scripts/windows_package_smoke.py
++++ b/scripts/windows_package_smoke.py
+@@ -27,7 +27,8 @@
+ 
+ def run(args, timeout=90):
+     env=os.environ.copy()
+-    env['QT_QPA_PLATFORM']='offscreen'
++    # Exercise the actual Windows platform plugin, not Qt's headless font path.
++    env['QT_QPA_PLATFORM']='windows'
+     p=subprocess.run([str(x) for x in args],env=env,timeout=timeout,capture_output=True)
+     if p.returncode:
+         # Do not copy unknown private contents; this runner uses only controlled data.
+@@ -50,7 +51,18 @@
+     with sqlite3.connect(database) as db:
+         for table in ('reports','events','alerts','observations'):
+             if db.execute('SELECT count(*) FROM '+table).fetchone()[0]!=0:raise AssertionError('Fresh archive is not empty')
+-    return inspect_png(image)
++    diagnostics_path = image.with_suffix('.json')
++    diagnostics = json.loads(diagnostics_path.read_text(encoding='utf-8'))
++    if diagnostics.get('platform_backend') != 'windows':
++        raise AssertionError('Frozen snapshot did not use the native Windows platform backend')
++    if not diagnostics.get('image_saved') or not diagnostics.get('ascii_font_coverage'):
++        raise AssertionError('Snapshot font/glyph diagnostic failed; inspect preserved evidence')
++    for card in diagnostics.get('status_cards', {}).values():
++        if card['viewport_height'] < 3 * card['line_spacing']:
++            raise AssertionError('Visible intelligence card lacks three usable text lines')
++    return {**inspect_png(image), 'diagnostics': diagnostics,
++            'diagnostics_sha256': sha(diagnostics_path),
++            'visual_acceptance': 'PENDING image inspection; glyph coverage alone is not visual acceptance'}
+ 
+ 
+ def check_installed_payload(runtime, installed):
+--- /dev/null
++++ b/global_pulse/visual_diagnostics.py
+@@ -0,0 +1,55 @@
++"""Opt-in snapshot evidence from the actual application's Qt objects.
++
++No font files, source/news text, environment values, user paths, or screenshots
++from other applications are collected. Glyph coverage is a necessary diagnostic,
++not a claim of visual acceptance or a substitute for inspecting the saved image.
++"""
++from __future__ import annotations
++
++from PySide6.QtCore import qVersion
++from PySide6.QtGui import QFontDatabase, QFontInfo, QRawFont
++from PySide6.QtWidgets import QLabel, QPushButton, QTextBrowser
++
++# English interface content must not silently become missing-glyph boxes. Special
++# symbols have platform font fallback and are recorded separately, not certified.
++PROBE_TEXT = "Global Pulse ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 .,!?()-:/"
++
++
++def capture_diagnostics(app, window) -> dict:
++    fonts = {}
++    for widget in (window, *window.findChildren(QLabel),
++                   *window.findChildren(QPushButton), *window.findChildren(QTextBrowser)):
++        if not widget.isVisible():
++            continue
++        font = widget.font()
++        key = font.toString()
++        if key in fonts:
++            continue
++        raw = QRawFont.fromFont(font)
++        info = QFontInfo(font)
++        missing = sorted({ch for ch, glyph in zip(PROBE_TEXT, raw.glyphIndexesForString(PROBE_TEXT))
++                          if not ch.isspace() and glyph == 0}) if raw.isValid() else sorted(set(PROBE_TEXT.strip()))
++        fonts[key] = {"requested_family": font.family(), "resolved_family": info.family(),
++                      "raw_family": raw.familyName(), "valid": raw.isValid(),
++                      "pixel_size": info.pixelSize(), "missing_ascii_glyphs": missing}
++    screen = window.screen()
++    cards = {}
++    for name in ("intel_browser", "evidence_status_text", "change_status_text"):
++        widget = getattr(window, name, None)
++        if widget is not None:
++            cards[name] = {"viewport_height": widget.viewport().height(),
++                           "line_spacing": widget.fontMetrics().lineSpacing(),
++                           "minimum_height": widget.minimumHeight()}
++    return {
++        "schema_version": 1, "qt_version": qVersion(),
++        "platform_backend": app.platformName(),
++        "available_font_family_count": len(QFontDatabase.families()),
++        "window_size": [window.width(), window.height()],
++        "screen_size": [screen.geometry().width(), screen.geometry().height()] if screen else None,
++        "logical_dpi": screen.logicalDotsPerInch() if screen else None,
++        "device_pixel_ratio": window.devicePixelRatioF(),
++        "fonts": list(fonts.values()), "status_cards": cards,
++        "ascii_font_coverage": bool(fonts) and all(f["valid"] and not f["missing_ascii_glyphs"] for f in fonts.values()),
++        "visual_acceptance": "NOT ESTABLISHED: inspect the actual saved application image",
++        "native_notification_acceptance": "NOT RUN",
++    }
+--- /dev/null
++++ b/tests/test_e2_readable_sidebar.py
+@@ -0,0 +1,69 @@
++"""GP-UI-002 actual Qt geometry and snapshot diagnostics; no live media/network."""
++import os
++os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
++from pathlib import Path
++import pytest
++from PySide6.QtCore import Qt
++from PySide6.QtWidgets import QApplication
++from global_pulse.controller import Controller
++from global_pulse.ui import MainWindow
++from global_pulse.visual_diagnostics import capture_diagnostics
++
++
++@pytest.fixture
++def workspace(tmp_path):
++    app = QApplication.instance() or QApplication([])
++    controller = Controller(tmp_path, demo=True)
++    window = MainWindow(controller)
++    window.show()
++    app.processEvents()
++    yield app, window, controller
++    window._force_close = True
++    window.close()
++    controller.close()
++
++
++@pytest.mark.parametrize('size', [(1440, 940), (1280, 800), (960, 640)])
++@pytest.mark.parametrize('selected', [False, True])
++def test_status_cards_have_readable_viewports_without_forcing_window_growth(workspace, size, selected):
++    app, window, controller = workspace
++    if selected:
++        controller.load_fixture(Path(__file__).parent / 'fixtures' / 'crisis.json')
++        window.navigate_event(controller.events()[0]['id'])
++    window.resize(*size)
++    app.processEvents()
++    app.processEvents()
++    assert (window.width(), window.height()) == size
++    assert window.lower_split.sizes()[2] / sum(window.lower_split.sizes()) < .25
++    assert window.intel_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
++    for browser in (window.intel_browser, window.evidence_status_text, window.change_status_text):
++        assert browser.viewport().height() >= 3 * browser.fontMetrics().lineSpacing()
++        window.intel_scroll.ensureWidgetVisible(browser)
++        app.processEvents()
++        point = browser.mapTo(window.intel_scroll.viewport(), browser.rect().center())
++        assert 0 <= point.y() <= window.intel_scroll.viewport().height()
++    # A small display must scroll cards instead of collapsing their text to zero.
++    if size == (960, 640):
++        assert window.intel_scroll.verticalScrollBar().maximum() > 0
++
++
++def test_tiny_splitter_drag_cannot_destroy_status_text_viewports(workspace):
++    app, window, _ = workspace
++    window.resize(960, 640)
++    window.intel_stack.setSizes([1000, 1, 1])
++    app.processEvents()
++    app.processEvents()
++    for browser in (window.evidence_status_text, window.change_status_text):
++        assert browser.viewport().height() >= 3 * browser.fontMetrics().lineSpacing()
++
++
++def test_visual_diagnostics_report_actual_backend_and_resolved_fonts(workspace):
++    app, window, _ = workspace
++    result = capture_diagnostics(app, window)
++    assert result['platform_backend'] == app.platformName()
++    assert result['available_font_family_count'] > 0
++    assert result['fonts'] and result['ascii_font_coverage']
++    assert all(font['valid'] and not font['missing_ascii_glyphs'] for font in result['fonts'])
++    assert set(result['status_cards']) == {'intel_browser', 'evidence_status_text', 'change_status_text'}
++    assert result['visual_acceptance'].startswith('NOT ESTABLISHED')
++    assert result['native_notification_acceptance'] == 'NOT RUN'
