@@ -135,11 +135,25 @@ def _explicit_text_country(event: dict) -> str:
         if not text:
             continue
         padded = " " + text + " "
+        claimed_spans: list[tuple[int, int]] = []
+        # Longest phrases match first. South Sudan is not Sudan, nor the
+        # Democratic Republic of the Congo the Republic of the Congo.
+        # Separate non-overlapping countries still make location ambiguous.
         for phrase, key in _country_text_phrases():
-            if " " + phrase + " " in padded:
-                matches.add(key)
-                if len(matches) > 1:
-                    return ""
+            token = " " + phrase + " "
+            cursor = 0
+            while True:
+                index = padded.find(token, cursor)
+                if index < 0:
+                    break
+                start, end = index + 1, index + 1 + len(phrase)
+                if not any(start < right and left < end
+                           for left, right in claimed_spans):
+                    claimed_spans.append((start, end))
+                    matches.add(key)
+                    if len(matches) > 1:
+                        return ""
+                cursor = index + 1
     return next(iter(matches)) if len(matches) == 1 else ""
 
 

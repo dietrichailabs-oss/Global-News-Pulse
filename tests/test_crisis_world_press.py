@@ -400,3 +400,81 @@ def test_crisis_overlay_can_use_exact_country_like_region_when_country_missing()
     item["region"] = "Ukraine"
     activity = build_country_activity([item], now=NOW)
     assert activity[normalize_country("Ukraine")]["conflict"] == 1
+
+
+# Exact private PR137 synthetic nested-country cases ported into current public
+# contract regression module; no present-day crisis/coordinate claim.
+NESTED_COUNTRY_NOW = datetime(2026, 11, 12, 12, tzinfo=timezone.utc)
+
+
+def _nested_country_event(identity, title, *, origin="", publisher_country="Germany", official=True):
+    record = {
+        "id": "report-" + identity,
+        "source_id": "publisher-" + identity,
+        "publisher": "publisher-" + identity,
+        "title": title,
+        "summary": title,
+        "category": "News",
+        "country": publisher_country,
+        "source_country": publisher_country,
+        "country_basis": "publisher_coverage",
+        "published_at": "2026-11-12T11:00:00Z",
+        "publication_time_known": True,
+        "origin_id": origin,
+        "independence": "original",
+        "kind": "report",
+        "official": official,
+        "evidence_status": "active",
+    }
+    return {
+        "id": identity,
+        "status": "active",
+        "synthetic": False,
+        "country": publisher_country,
+        "country_basis": "publisher_coverage",
+        "title": title,
+        "category": "News",
+        "published_at": record["published_at"],
+        "created_at": record["published_at"],
+        "reports": [record],
+        "independent_origins": [origin] if origin else [],
+    }
+
+
+def test_democratic_republic_of_congo_is_not_two_countries():
+    row = _nested_country_event("drc", "Shelling reported inside Democratic Republic of the Congo")
+    result = build_country_activity([row], now=NESTED_COUNTRY_NOW)
+    assert result[normalize_country("Democratic Republic of the Congo")]["conflict"] == 1
+    assert normalize_country("Republic of the Congo") not in result
+
+
+def test_south_sudan_nested_in_sudan_can_be_independently_corrobated():
+    a = _nested_country_event("one", "Refugees displaced across South Sudan", origin="original-one",
+               publisher_country="France", official=False)
+    b = _nested_country_event("two", "More refugees shelter in South Sudan", origin="original-two",
+               publisher_country="United States", official=False)
+    result = build_country_activity([a, b], now=NESTED_COUNTRY_NOW)
+    assert result[normalize_country("South Sudan")]["migration"] == 2
+    assert result[normalize_country("South Sudan")]["basis"]["migration"] == "cross_event_independent"
+    assert normalize_country("Sudan") not in result
+
+
+def test_truly_distinct_countries_remain_ambiguous():
+    row = _nested_country_event("ambiguous", "Protests reported in Sudan and South Sudan")
+    assert build_country_activity([row], now=NESTED_COUNTRY_NOW) == {}
+
+
+def test_nested_name_plus_distinct_country_remains_ambiguous():
+    row = _nested_country_event("mixed", "Fighting reported in Democratic Republic of the Congo and Uganda")
+    assert build_country_activity([row], now=NESTED_COUNTRY_NOW) == {}
+
+
+def test_publisher_country_alone_cannot_create_a_location():
+    row = _nested_country_event("publisher", "Refugees request additional emergency support",
+                 publisher_country="South Sudan")
+    assert build_country_activity([row], now=NESTED_COUNTRY_NOW) == {}
+
+
+def test_short_country_named_separately_still_counts_as_distinct():
+    row = _nested_country_event("separate", "Refugees gather in South Sudan; more arrive in Sudan")
+    assert build_country_activity([row], now=NESTED_COUNTRY_NOW) == {}
