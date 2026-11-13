@@ -5,6 +5,8 @@ import csv
 import hashlib
 import io
 import json
+import logging
+from contextlib import ExitStack
 import threading
 import tempfile
 import os
@@ -22,6 +24,16 @@ from .translation_process import TranslationProcess
 from .security import atomic_text, csv_cell, safe_url, redact
 
 
+def _rollback_partial_controller_resource(close):
+    """Preserve the original startup exception while closing acquired resources."""
+    try:
+        close()
+    except Exception:
+        logging.getLogger("global_pulse").exception(
+            "Unable to close a resource after failed Controller construction"
+        )
+
+
 def in_quiet_hours(settings, now=None):
     from .settings_boundary import quiet_hours_active
     return quiet_hours_active(settings, now)
@@ -29,6 +41,10 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Scheduler status callbacks run on collector threads. Qt queues this
+    # separate signal to the desktop for a bounded, status-only repaint;
+    # actual reports, translation and user actions still emit data_changed.
+    source_status_changed = Signal()
     status_changed = Signal(str)
     alert_received = Signal(dict)
     translation_ready = Signal(str, str)
@@ -45,40 +61,56 @@ class Controller(QObject):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.demo = demo
-        self.store = Store(self.data_dir / ("synthetic.sqlite3" if demo else "global-pulse.sqlite3"), mode="synthetic" if demo else "live")
-        bundled = load_catalog()
-        self._bundled_source_ids = {source["id"] for source in bundled}
-        self.catalog = bundled + self.get_setting("user_feeds", [])
-        self.media_catalog = load_media_catalog()
-        self.monitoring = False
-        self.notification_status = "Registering native notifications"
-        self.last_collection = "Never"
-        self._closed = False
-        self.storage_problem.connect(self._pause_for_storage)
-        self._ingest_lock = threading.RLock()
-        self._workers = TranslationProcess(self.data_dir, self)
-        self._workers.completed.connect(self._translation_complete)
-        self._workers.progress.connect(self._model_progress)
-        self._model_jobs = {}
-        self._model_dialog = None
-        self._store_closed = False
-        self._translation_keys = {}
-        self._translation_pending = set()
-        self.translator = Translator(self.data_dir)
-        from .headline_translation import HeadlineTranslations
-        self._headlines = HeadlineTranslations(self.translator, self._workers,
-            lambda: self.get_setting("english_headlines", True), self)
-        self._headlines.changed.connect(self.feed_translation_changed.emit)
-        self.scheduler = Scheduler(self.store, self._on_reports, self._on_source_status, self._on_observations, interval=self.get_setting("interval", 600))
-        self._apply_sources()
-        self._retention_timer = QTimer(self)
-        self._retention_timer.setInterval(24 * 60 * 60 * 1000)
-        self._retention_timer.timeout.connect(self._prune_archive)
-        self._retention_timer.start()
-        from .gdelt_service import GdeltService
-        self._gdelt = GdeltService(self.data_dir / ("synthetic.sqlite3" if demo else "global-pulse.sqlite3"),
-            lambda: self.get_setting("gdelt_retention_days", 7), self)
-        self._gdelt.changed.connect(self.gdelt_status_changed.emit)
+        # Every acquired startup resource remains provisional until the full
+        # controller, including the GDELT service, has initialized.
+        with ExitStack() as rollback:
+            self.store = Store(self.data_dir / ("synthetic.sqlite3" if demo else "global-pulse.sqlite3"), mode="synthetic" if demo else "live")
+            rollback.callback(_rollback_partial_controller_resource, self.store.close)
+            bundled = load_catalog()
+            self._bundled_source_ids = {source["id"] for source in bundled}
+            self.catalog = bundled + self.get_setting("user_feeds", [])
+            self.media_catalog = load_media_catalog()
+            self.monitoring = False
+            self.notification_status = "Registering native notifications"
+            self.last_collection = "Never"
+            self._closed = False
+            self.storage_problem.connect(self._pause_for_storage)
+            self._ingest_lock = threading.RLock()
+            self._workers = TranslationProcess(self.data_dir, self)
+            rollback.callback(_rollback_partial_controller_resource, self._workers.close)
+            self._workers.completed.connect(self._translation_complete)
+            self._workers.progress.connect(self._model_progress)
+            self._model_jobs = {}
+            self._model_dialog = None
+            self._store_closed = False
+            self._shutdown_complete = False
+            # A failed Exit Completely retries only components whose teardown
+            # did not succeed. Already closed native workers may be unsafe to
+            # touch again after process and QObject deletion.
+            self._shutdown_steps_complete = set()
+            self._translation_keys = {}
+            self._translation_pending = set()
+            self.translator = Translator(self.data_dir)
+            rollback.callback(_rollback_partial_controller_resource, self.translator.cancelled.set)
+            from .headline_translation import HeadlineTranslations
+            self._headlines = HeadlineTranslations(self.translator, self._workers,
+                lambda: self.get_setting("english_headlines", True), self)
+            rollback.callback(_rollback_partial_controller_resource, self._headlines.close)
+            self._headlines.changed.connect(self.feed_translation_changed.emit)
+            self.scheduler = Scheduler(self.store, self._on_reports, self._on_source_status, self._on_observations, interval=self.get_setting("interval", 600))
+            rollback.callback(_rollback_partial_controller_resource, self.scheduler.stop)
+            self._apply_sources()
+            self._retention_timer = QTimer(self)
+            rollback.callback(_rollback_partial_controller_resource, self._retention_timer.stop)
+            self._retention_timer.setInterval(24 * 60 * 60 * 1000)
+            self._retention_timer.timeout.connect(self._prune_archive)
+            self._retention_timer.start()
+            from .gdelt_service import GdeltService
+            self._gdelt = GdeltService(self.data_dir / ("synthetic.sqlite3" if demo else "global-pulse.sqlite3"),
+                lambda: self.get_setting("gdelt_retention_days", 7), self)
+            rollback.callback(_rollback_partial_controller_resource, self._gdelt.close)
+            self._gdelt.changed.connect(self.gdelt_status_changed.emit)
+            rollback.pop_all()  # Normal Controller.close() now owns these resources.
 
     def _prune_archive(self):
         if not self._closed:
@@ -273,7 +305,10 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # This callback is invoked from Scheduler's collecting thread.
+        # Qt's auto connection queues the status-only signal to MainWindow;
+        # never attempt to start a GUI-owned QTimer from this worker thread.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
@@ -629,19 +664,56 @@ class Controller(QObject):
         self.quit_requested.emit()
 
     def close(self):
-        if self._store_closed:
+        """Stop every owned component even if one teardown step fails.
+
+        A GDELT or translation worker can refuse to terminate promptly. In
+        that case do not report a completed exit or strand SQLite behind the
+        first exception. Keep the controller closed to new work and permit an
+        explicit retry of remaining cleanup.
+        """
+        if self._shutdown_complete:
             return
         self.monitoring = False
         self._closed = True
-        self._retention_timer.stop()
-        self._gdelt.close()
-        self.translator.cancelled.set()
-        self.scheduler.stop()
-        self._headlines.close()
-        self._workers.close()
+        errors = []
+        for name, action in (
+            ("retention timer", self._retention_timer.stop),
+            ("GDELT worker", self._gdelt.close),
+            ("translation cancellation", self.translator.cancelled.set),
+            ("source scheduler", self.scheduler.stop),
+            ("headline translator", self._headlines.close),
+            ("translation worker", self._workers.close),
+        ):
+            if name in self._shutdown_steps_complete:
+                continue
+            try:
+                action()
+            except Exception as error:
+                logging.getLogger("global_pulse").exception(
+                    "Unable to finish %s shutdown", name
+                )
+                errors.append((name, error))
+            else:
+                # Mark success only after the underlying native stop returns.
+                # Do not retry an already completed cleanup just because a
+                # different worker or SQLite refused shutdown this attempt.
+                self._shutdown_steps_complete.add(name)
         self._translation_pending.clear()
         self._translation_keys.clear()
         self._model_jobs.clear()
-        with self._ingest_lock:
-            self.store.close()
-            self._store_closed = True
+        if not self._store_closed:
+            try:
+                with self._ingest_lock:
+                    self.store.close()
+                self._store_closed = True
+            except Exception as error:
+                logging.getLogger("global_pulse").exception(
+                    "Unable to close SQLite during shutdown"
+                )
+                errors.append(("SQLite archive", error))
+        if errors:
+            names = ", ".join(name for name, _ in errors)
+            raise RuntimeError(
+                f"Shutdown incomplete ({names}); retry Exit Completely"
+            ) from errors[0][1]
+        self._shutdown_complete = True

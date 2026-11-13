@@ -313,9 +313,24 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # Many provider status-only signals can arrive back-to-back. Qt
+        # marshals these from Scheduler's worker thread before timer startup.
+        # Report ingestion and user actions bypass this timer entirely.
+        # Paint at most once per short UI interval instead of requerying the
+        # whole SQLite archive, map and source tables on every status callback.
+        # Do not restart an active timer: continuous collection must not
+        # indefinitely postpone a visible update.
+        self._collection_refresh_timer=QTimer(self)
+        self._collection_refresh_timer.setSingleShot(True)
+        self._collection_refresh_timer.setInterval(200)
+        self._collection_refresh_timer.timeout.connect(self.refresh_data)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
+        # Saved evidence, actual reports, translations, and explicit user
+        # actions must refresh immediately. Only provider status chatter uses
+        # the coalesced GUI-thread timer below.
         controller.data_changed.connect(self.refresh_data)
+        controller.source_status_changed.connect(self._schedule_collected_refresh)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -586,8 +601,17 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    def _schedule_collected_refresh(self):
+        """Coalesce provider-status-only bursts; evidence updates stay immediate."""
+        if not self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.start()
+
     def refresh_data(self,*args):
         if self._refreshing:return
+        # Any actual evidence update or user action already queried the latest
+        # provider status too. Cancel the redundant delayed status repaint.
+        if self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
             filters=self.events_filters()
@@ -602,7 +626,18 @@ class MainWindow(SituationActions, QMainWindow):
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
             country_evidence=self.controller.events(**dict(map_filters,map_evidence=True))
-            self.world_map.set_events(self.controller.events(**map_filters),country_events=country_evidence)
+            # Economic observations have their own dated country-level layer.
+            # Hide it during search/region/history replay because observations
+            # do not share those event-filter semantics.
+            show_observations = (not self._history_at and not filters.get("query")
+                                 and not filters.get("region")
+                                 and filters.get("category") in {"", "Economy"})
+            observations=self.controller.store.list_observations() if show_observations else []
+            self.world_map.set_events(
+                self.controller.events(**map_filters),
+                country_events=country_evidence,
+                observations=observations,
+            )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
             self._populate_feed()
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
