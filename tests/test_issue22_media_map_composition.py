@@ -442,3 +442,67 @@ def test_shutdown_sqlite_retry_does_not_reclose_destroyed_translation_process(tm
     assert controller._shutdown_complete
     assert attempts == {"worker": 1, "store": 2}
     app.processEvents()
+
+
+def test_source_status_burst_coalesces_full_map_archive_refresh(tmp_path, monkeypatch):
+    """Collector status chatter cannot redraw the entire map once per source.
+
+    Real offscreen Qt timer and real SQLite-backed desktop; does not assert
+    physical Windows 11 performance or independent QA acceptance.
+    """
+    from PySide6.QtTest import QTest
+
+    app, controller, window = _desktop(tmp_path)
+    calls = []
+    original = window.world_map.set_events
+
+    def count_map_updates(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(window.world_map, "set_events", count_map_updates)
+    try:
+        for _ in range(180):
+            controller.data_changed.emit()
+        assert window._collection_refresh_timer.isActive()
+        assert not calls, "Collector burst must not synchronously requery/map 180 times"
+
+        QTest.qWait(350)
+        assert len(calls) == 1, "One pending burst is one Store/map redraw"
+        assert not window._collection_refresh_timer.isActive()
+
+        for _ in range(20):
+            controller.data_changed.emit()
+        assert window._collection_refresh_timer.isActive()
+        # User-driven filter action must see the latest archive immediately
+        # and cancel the now-redundant delayed collector refresh.
+        window.refresh_data()
+        assert len(calls) == 2
+        assert not window._collection_refresh_timer.isActive()
+        QTest.qWait(260)
+        assert len(calls) == 2
+    finally:
+        _close(app, controller, window)
+
+
+def test_continuous_collector_events_cannot_starve_desktop_refresh(tmp_path, monkeypatch):
+    """The first due timer must fire even if new source statuses keep arriving."""
+    from PySide6.QtTest import QTest
+
+    app, controller, window = _desktop(tmp_path)
+    calls = []
+    original = window.world_map.set_events
+
+    def count_map_updates(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(window.world_map, "set_events", count_map_updates)
+    try:
+        for _ in range(6):
+            controller.data_changed.emit()
+            QTest.qWait(65)
+        assert calls, "Repeated statuses must not indefinitely restart the timer"
+        assert len(calls) <= 3, "Only a bounded number of full refreshes may occur"
+    finally:
+        _close(app, controller, window)
