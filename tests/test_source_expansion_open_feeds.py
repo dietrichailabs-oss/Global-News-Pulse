@@ -73,3 +73,38 @@ def test_atom_govuk_feed_uses_shared_government_origin():
     assert len(rows)==1
     assert rows[0]["summary"]==""
     assert rows[0]["origin_id"]=="uk_government"
+
+
+def test_second_batch_is_metadata_only_and_publisher_grouped():
+    c=_catalog()
+    groups={
+        "eia":{"eia_today","eia_press"},
+        "occ":{"occ_news","occ_bulletins"},
+        "usda_nass":{"nass_news","nass_reports"},
+        "sec":{"sec_press","sec_litigation","sec_suspensions"},
+        "noaa":{"nws","swpc","noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook"},
+        "european_commission":{"ec_trade_news","ec_energy_news","ec_environment_news"},
+        "nz_government":{"nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health","nz_infrastructure","nz_national_security","nz_trade"},
+        "who":{"who","who_afro_emergencies"},
+    }
+    new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies"}
+    for identity in new_ids:
+        row=c[identity]
+        assert row["enabled"] is True
+        assert row["metadata_only"] is True
+        assert row["access_status"]=="reviewed_public"
+        assert row["url"].startswith("https://")
+    for origin,identities in groups.items():
+        assert {c[x]["publisher_origin_id"] for x in identities}=={origin}
+
+def test_second_batch_spans_economy_health_government_disaster_and_infrastructure():
+    c=_catalog()
+    assert c["eia_today"]["category"]=="Infrastructure"
+    assert c["occ_news"]["category"]=="Economy"
+    assert c["nass_news"]["category"]=="Economy"
+    assert c["sec_litigation"]["category"]=="Economy"
+    assert c["nhc_atlantic_outlook"]["category"]=="Disaster"
+    assert c["ec_trade_news"]["category"]=="Economy"
+    assert c["ec_energy_news"]["category"]=="Infrastructure"
+    assert c["nz_health"]["category"]=="Health"
+    assert c["nz_national_security"]["category"]=="Government"
