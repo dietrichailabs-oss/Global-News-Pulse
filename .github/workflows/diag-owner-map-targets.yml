@@ -40,7 +40,11 @@ jobs:
           import json
           from global_pulse.sources import Collector,load_catalog
           from global_pulse.core import Store
-          from global_pulse.crisis_overlay import build_country_activity,classify_event,normalize_country
+          from global_pulse.crisis_overlay import (
+              build_country_activity,classify_event,normalize_country,
+              _topical_kinds,_explicit_text_country,_independent_report_origins,
+              _evidence_timestamp,_recent_report_scope,
+          )
           from global_pulse.map_evidence import incident_country
           from global_pulse.gdelt_batches import GdeltBatchCache
           from global_pulse.gdelt_poll import poll_latest_export
@@ -67,13 +71,18 @@ jobs:
                       for event in reopened:
                           if normalize_country(incident_country(event))!=key:
                               continue
+                          scoped=_recent_report_scope(event,now,14)
                           print('TARGET_EVENT',target,
                                 'title='+str(event.get('title',''))[:240],
                                 'category='+str(event.get('category')),
                                 'verification='+str(event.get('verification')),
                                 'official='+str(any(r.get('official') for r in event.get('reports',[]))),
-                                'origins='+','.join(str(x) for x in event.get('independent_origins',[])),
-                                'kinds='+','.join(sorted(classify_event(event))))
+                                'aggregate_origins='+','.join(str(x) for x in event.get('independent_origins',[])),
+                                'active_origins='+','.join(sorted(_independent_report_origins(scoped or event))),
+                                'text_country='+str(_explicit_text_country(scoped or event)),
+                                'topical='+','.join(sorted(_topical_kinds(scoped or event))),
+                                'credible='+','.join(sorted(classify_event(scoped or event))),
+                                'stamp='+str(_evidence_timestamp(scoped or event)))
                           count+=1
                           if count>=15:break
               with GdeltBatchCache(db) as cache:
