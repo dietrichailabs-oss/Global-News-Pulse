@@ -41,6 +41,10 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Scheduler status callbacks run on collector threads. Qt queues this
+    # separate signal to the desktop for a bounded, status-only repaint;
+    # actual reports, translation and user actions still emit data_changed.
+    source_status_changed = Signal()
     status_changed = Signal(str)
     alert_received = Signal(dict)
     translation_ready = Signal(str, str)
@@ -301,7 +305,10 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # This callback is invoked from Scheduler's collecting thread.
+        # Qt's auto connection queues the status-only signal to MainWindow;
+        # never attempt to start a GUI-owned QTimer from this worker thread.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
