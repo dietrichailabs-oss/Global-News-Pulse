@@ -206,7 +206,8 @@
       "category": "Economy",
       "region": "Europe",
       "country": "Euro area",
-      "enabled": true,
+      "enabled": false,
+      "disabled_reason": "Duplicate exact feed URL; ecb_press is the sole active poller. Retain the historic source ID and publisher origin.",
       "min_interval": 600,
       "allowed_domains": [
         "www.ecb.europa.eu"
@@ -223,6 +224,7 @@
       "language": "en",
       "official": true,
       "independence": "original",
+      "publisher_origin_id": "ecb",
       "article_domains": [
         "www.ecb.europa.eu"
       ]
@@ -286,7 +288,8 @@
       "article_domains": [
         "www.sanews.gov.za",
         "sanews.gov.za"
-      ]
+      ],
+      "publisher_origin_id": "sanews"
     },
     {
       "id": "globalvoices",
@@ -328,7 +331,7 @@
       "category": "Government",
       "region": "Asia",
       "country": "India",
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "allowed_domains": [
         "www.pib.gov.in",
@@ -339,18 +342,19 @@
       "license": "PIB permits accurate reproduction with prominent source acknowledgement; third-party content excluded.",
       "license_url": "https://www.pib.gov.in/content/186_2_Copyright-Policy.aspx?lang=1&reg=5",
       "attribution": "Press Information Bureau India",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-08",
       "retention_days": 365,
       "language": "und",
       "official": true,
       "independence": "original",
-      "limitation": "Feed has Hindi content and omits publication timestamps; entries are undated, not asserted to be breaking news. Translation needs a supported installed model.",
+      "limitation": "Feed has Hindi content and omits publication timestamps; entries are undated, not asserted to be breaking news. Translation needs a supported installed model. Independent full-pool QA run 43448330100 returned publisher HTTP 403 on 2026-11-13; source is quarantined and must not be re-enabled until a later publisher-direct admission succeeds without bypass.",
       "article_domains": [
         "www.pib.gov.in",
         "pib.gov.in"
-      ]
+      ],
+      "disabled_reason": "Independent full-pool QA run 43448330100 returned HTTP 403 on 2026-11-13; quarantined without retry or access-identity bypass."
     },
     {
       "id": "wb_inflation",
@@ -649,7 +653,7 @@
       "article_domains": [
         "www.who.int"
       ],
-      "publisher_origin_id": "who"
+      "publisher_origin_id": "who_don"
     },
     {
       "id": "sec",
@@ -861,7 +865,7 @@
       "category": "News",
       "region": "Global",
       "country": "",
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "allowed_domains": [
         "api.gdeltproject.org"
@@ -871,7 +875,7 @@
       "license": "GDELT discovery/index metadata only. Original publisher copyrights and terms remain with each linked outlet; Global Pulse stores headline/link/date/source-country metadata and does not copy article bodies.",
       "license_url": "https://www.gdeltproject.org/",
       "attribution": "GDELT Project plus original linked publisher",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-09",
       "retention_days": 30,
@@ -882,7 +886,8 @@
       "country_batch_size": 8,
       "max_records": 150,
       "timespan": "6h",
-      "limitation": "Rotating source-country discovery is broad but not exhaustive. GDELT coverage varies by country and media ecosystem; a linked article is not independently verified merely because it appears in the index."
+      "limitation": "Rotating source-country discovery is broad but not exhaustive. GDELT coverage varies by country and media ecosystem; a linked article is not independently verified merely because it appears in the index. Independent full-pool QA on 2026-11-13 observed repeated no-HTTP timeouts; source is quarantined and must pass a later normal publisher-direct re-admission before re-enable.",
+      "disabled_reason": "Independent full-pool QA run 43448330100 timed out with no HTTP response; one intended recheck plus an accidental duplicate recheck both timed out in runs 43448945600 and 43448926428. Quarantined without access-identity changes or further retries."
     },
     {
       "id": "africanews_rss",
@@ -1113,7 +1118,7 @@
       "article_domains": [
         "afro.who.int"
       ],
-      "publisher_origin_id": "who"
+      "publisher_origin_id": "who_don"
     },
     {
       "id": "bls_latest",
@@ -5540,7 +5545,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "za_sanews",
+      "publisher_origin_id": "sanews",
       "allowed_domains": [
         "www.sanews.gov.za"
       ],
@@ -5558,7 +5563,7 @@
       "feed_documentation": "https://www.sanews.gov.za/content/sa-news",
       "attribution": "SAnews.gov.za, South African Government Communication and Information System (GCIS); original link and publisher date; no endorsement",
       "homepage": "https://www.sanews.gov.za/",
-      "limitation": "Official government news and features are primary government statements, not independent corroboration; sibling SAnews feeds share za_sanews and publisher country must not become claim/event geography.",
+      "limitation": "Official government news and features are primary government statements, not independent corroboration; sibling SAnews feeds share sanews and publisher country must not become claim/event geography.",
       "id": "za_sanews_news",
       "name": "SAnews — South Africa News",
       "url": "https://www.sanews.gov.za/south-africa-news-stories.xml",
@@ -5578,7 +5583,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "za_sanews",
+      "publisher_origin_id": "sanews",
       "allowed_domains": [
         "www.sanews.gov.za"
       ],
@@ -5596,7 +5601,7 @@
       "feed_documentation": "https://www.sanews.gov.za/content/sa-news",
       "attribution": "SAnews.gov.za, South African Government Communication and Information System (GCIS); original link and publisher date; no endorsement",
       "homepage": "https://www.sanews.gov.za/",
-      "limitation": "Official government news and features are primary government statements, not independent corroboration; sibling SAnews feeds share za_sanews and publisher country must not become claim/event geography.",
+      "limitation": "Official government news and features are primary government statements, not independent corroboration; sibling SAnews feeds share sanews and publisher country must not become claim/event geography.",
       "id": "za_sanews_features",
       "name": "SAnews — Government Features",
       "url": "https://www.sanews.gov.za/features.xml",
@@ -5694,7 +5699,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "www.ecb.europa.eu"
       ],
@@ -5711,7 +5716,7 @@
       "feed_documentation": "https://www.ecb.europa.eu/home/html/rss.en.html",
       "attribution": "European Central Bank (ECB); original direct publisher link, date and accurate headline; no endorsement",
       "access": "Publisher-documented, public HTTPS RSS, no key/account, direct bounded Collector pre-admission passed 2026-11-13.",
-      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use eu_ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
+      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
       "id": "ecb_press",
       "name": "European Central Bank — Press and Public Statements",
       "url": "https://www.ecb.europa.eu/rss/press.html",
@@ -5732,7 +5737,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "www.ecb.europa.eu"
       ],
@@ -5749,7 +5754,7 @@
       "feed_documentation": "https://www.ecb.europa.eu/home/html/rss.en.html",
       "attribution": "European Central Bank (ECB); original direct publisher link, date and accurate headline; no endorsement",
       "access": "Publisher-documented, public HTTPS RSS, no key/account, direct bounded Collector pre-admission passed 2026-11-13.",
-      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use eu_ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
+      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
       "id": "ecb_statpress",
       "name": "European Central Bank — Statistical Press Releases",
       "url": "https://www.ecb.europa.eu/rss/statpress.html",
@@ -5770,7 +5775,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "mid.ecb.europa.eu"
       ],
@@ -5786,7 +5791,7 @@
       "feed_documentation": "https://www.ecb.europa.eu/press/html/mid.en.html",
       "attribution": "European Central Bank (ECB), Market Information Dissemination; original headline, source timestamp and direct publisher link; no endorsement",
       "access": "Publisher-documented public-domain MID HTTPS RSS 2.0, no key/account, direct bounded Collector pre-admission HTTP 200 and 20/20 current reports 2026-11-13.",
-      "limitation": "ECB MID technical dissemination notifications and TARGET service updates are primary operational statements/data, not independent confirmation of incidents. All ECB MID, press and statistics sibling feeds share eu_ecb. Publisher geography must not be plotted as event coordinates; original XML documents are linked, never downloaded as article bodies.",
+      "limitation": "ECB MID technical dissemination notifications and TARGET service updates are primary operational statements/data, not independent confirmation of incidents. All ECB MID, press and statistics sibling feeds share ecb. Publisher geography must not be plotted as event coordinates; original XML documents are linked, never downloaded as article bodies.",
       "id": "ecb_mid",
       "name": "European Central Bank — Market Information Dissemination",
       "url": "https://mid.ecb.europa.eu/rss/mid.xml",

@@ -342,7 +342,7 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
         for n in node:
             if _local(n.tag) in {"source", "creator", "author"}:
                 report["byline"] = plain(" ".join(n.itertext()), 160)
-            if _local(n.tag) == "videoid" and re.fullmatch(r"[A-Za-z0-9_-]{11}", n.text or ""):
+            if not report["metadata_only"] and _local(n.tag) == "videoid" and re.fullmatch(r"[A-Za-z0-9_-]{11}", n.text or ""):
                 report["media"].append({"type": "youtube", "video_id": n.text,
                                          "url": "https://www.youtube.com/watch?v=" + n.text,
                                          "title": report["title"], "provider": "YouTube", "live_status": "unknown"})

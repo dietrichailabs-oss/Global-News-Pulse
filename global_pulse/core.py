@@ -253,7 +253,9 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     elif result["geo_precision"] not in {"exact", "approximate", "regional", "country", "unknown"}:
         result["geo_precision"] = "unknown"
     result["media"] = []
-    for media in (raw.get("media") or [])[:30]:
+    # A reviewed metadata-only source must not persist media even if a
+    # hostile feed or alternate adapter supplies an embedded-media field.
+    for media in ([] if result["metadata_only"] else (raw.get("media") or [])[:30]):
         if not isinstance(media, dict):
             continue
         try:
