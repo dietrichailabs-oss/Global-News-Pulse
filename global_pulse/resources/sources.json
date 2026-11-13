@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.12.source-expansion10",
+  "catalog_version": "2026.11.12.source-expansion11",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -4915,6 +4915,83 @@
       "attribution": "Federal Deposit Insurance Corporation (FDIC); original link retained",
       "feed_documentation": "https://www.fdic.gov/rss.xml",
       "limitation": "Candidate first-party feed. If the publisher returns 403/406 or otherwise denies the bounded collector, disable it rather than changing identity, scraping HTML, or using a third-party relay."
+    },
+    {
+      "id": "destatis_press",
+      "name": "Germany — Federal Statistical Office (Destatis) Press Releases",
+      "url": "https://www.destatis.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/Aktuell.xml?nn=241288",
+      "homepage": "https://www.destatis.de/DE/Service/RSS/RSS_Einfuehrung/_inhalt.html",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "Europe",
+      "country": "Germany",
+      "enabled": true,
+      "min_interval": 1800,
+      "allowed_domains": [
+        "www.destatis.de"
+      ],
+      "article_domains": [
+        "www.destatis.de",
+        "destatis.de"
+      ],
+      "access": "Publisher-documented official RSS; no account or key; live Collector admission 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering source rights and live parser/provenance check passed; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "language": "de",
+      "official": true,
+      "official_scope": "measurement",
+      "independence": "original",
+      "publisher_origin_id": "destatis",
+      "license": "Destatis website material may be reproduced/distributed with source acknowledgement unless individually noted otherwise; statistics are additionally reusable under Data Licence Germany 2.0. Only feed headlines, dates and original links retained; third-party content excluded.",
+      "license_url": "https://www.destatis.de/EN/Service/OpenData/opendata-einleitung.html",
+      "attribution": "Statistisches Bundesamt (Destatis), Germany; original link retained; no endorsement implied",
+      "feed_documentation": "https://www.destatis.de/DE/Service/RSS/RSS_Einfuehrung/_inhalt.html",
+      "limitation": "German official statistical releases; a release is not evidence of economic distress. Sister Destatis feeds must use publisher_origin_id=destatis."
+    },
+    {
+      "id": "fr_service_public_business",
+      "name": "France — Service Public Business Updates",
+      "url": "https://www.service-public.gouv.fr/abonnements/rss/actu-actu-pro.rss",
+      "homepage": "https://entreprendre.service-public.gouv.fr/P10008",
+      "adapter": "rss",
+      "category": "Government",
+      "region": "Europe",
+      "country": "France",
+      "enabled": true,
+      "min_interval": 1800,
+      "allowed_domains": [
+        "www.service-public.gouv.fr"
+      ],
+      "article_domains": [
+        "www.service-public.gouv.fr",
+        "service-public.gouv.fr",
+        "entreprendre.service-public.gouv.fr"
+      ],
+      "access": "French DILA explicitly documents RSS integration on websites with visible source URL; no account or API key; live Collector admission 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering RSS syndication and source-link admission passed; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "language": "fr",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "fr_dila",
+      "license": "Service Public (DILA) officially permits RSS feed syndication with visible attribution and source link; its open-data terms require source and update date on republication. Only RSS headline/date/original link metadata is retained; third-party content and marks excluded.",
+      "license_url": "https://www.service-public.gouv.fr/P10150",
+      "attribution": "Service Public — Direction de l'information légale et administrative (DILA), France; original link retained",
+      "feed_documentation": "https://entreprendre.service-public.gouv.fr/P10008",
+      "limitation": "Public administrative and business updates, not independent evidence of an event. All DILA/Service Public sibling feeds must share publisher_origin_id=fr_dila."
     }
   ]
 }
