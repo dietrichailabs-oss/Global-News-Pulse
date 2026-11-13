@@ -147,8 +147,13 @@ class ZoneResolver:
                     try:normalize_geometry(report['area_geometry']);continue
                     except ValueError:pass
                 refs=report.get('affected_zones',[])
-                if not isinstance(refs,list):continue
-                refs=list(dict.fromkeys(r for r in refs[:MAX_ZONE_REFS] if valid_nws_zone(r)))
+                if (not isinstance(refs,list) or len(refs)>MAX_ZONE_REFS
+                        or any(not valid_nws_zone(ref) for ref in refs)):
+                    if refs and not report.get('area_geometry'):
+                        report['area_status']='invalid_zone_references'
+                        stats['unresolved_alerts']+=1
+                    continue
+                refs=list(dict.fromkeys(refs))
                 if not refs:continue
                 polygons=[];used=[]
                 for url in refs:
