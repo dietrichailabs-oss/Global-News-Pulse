@@ -123,6 +123,37 @@ def show_initialization_splash(app):
     return splash
 
 
+
+def construct_startup_desktop(app, directory, instance, *, demo=False):
+    """Build the first dashboard without leaking the lock or Store on failure.
+
+    A failed window constructor must not strand the single-instance lock or a
+    live SQLite/worker controller. This does not claim startup responsiveness.
+    """
+    splash = None
+    controller = None
+    try:
+        splash = show_initialization_splash(app)
+        from .controller import Controller
+        from .ui import MainWindow
+        controller = Controller(directory, demo=demo)
+        window = MainWindow(controller)
+        window.setWindowIcon(pulse_icon())
+        return splash, controller, window
+    except BaseException:
+        if splash is not None:
+            splash.close()
+        if controller is not None:
+            try:
+                controller.close()
+            except Exception:
+                logging.getLogger("global_pulse").exception(
+                    "Could not fully close controller after startup construction failure"
+                )
+        instance.close()
+        raise
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["--gdelt-worker"]:
@@ -185,17 +216,18 @@ def main(argv=None):
     except RuntimeError as error:
         QMessageBox.warning(None, "Global Pulse", str(error))
         return 1
-    # Nothing in the partially populated dashboard is clickable during startup.
-    splash = show_initialization_splash(app)
+    # No partially populated dashboard is clickable during startup. If Store
+    # or Window construction fails, release both the controller and instance.
     try:
-        from .controller import Controller, in_quiet_hours
+        from .controller import in_quiet_hours
         from .native_notifications import NativeNotifications
-        from .ui import MainWindow
-        controller = Controller(directory, demo=args.demo)
-        window = MainWindow(controller)
-        window.setWindowIcon(pulse_icon())
-    except Exception:
-        splash.close()
+        splash, controller, window = construct_startup_desktop(
+            app, directory, instance, demo=args.demo
+        )
+    except BaseException:
+        instance.close()
+        handler.close()
+        log.removeHandler(handler)
         raise
     def native_allowed():
         return controller.monitoring and controller.get_setting("notifications_enabled", True) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
