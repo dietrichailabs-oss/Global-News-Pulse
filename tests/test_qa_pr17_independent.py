@@ -49,7 +49,7 @@ def test_metadata_only_injected_media_is_rejected_at_storage_boundary():
     source=c["fed_monetary"]
     raw={
       "id":"qa-media","source_id":source["id"],"origin_id":source["publisher_origin_id"],
-      "title":"Policy publication","url":"https://www.federalreserve.gov/newsevents/pressreleases/test.htm",
+      "publisher":"Federal Reserve Board","title":"Policy publication","url":"https://www.federalreserve.gov/newsevents/pressreleases/test.htm",
       "published_at":"2026-11-12T12:00:00Z","retrieved_at":STAMP,
       "metadata_only":True,"summary":"",
       "media":[{"type":"youtube","video_id":"abcdefghijk",
