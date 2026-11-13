@@ -1,0 +1,192 @@
+name: QA PR7 independent snapshot
+on:
+  push:
+    branches: [qa/pr7-independent-20261113]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-pr7-independent-20261113
+  cancel-in-progress: false
+
+jobs:
+  independent-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Prove unchanged PR7 product snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "8e0d026164c240b8eabefb028d60da67d2bb234a"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/qa-pr7-independent-20261113.yml"
+          git diff --exit-code
+          echo "QA_SNAPSHOT_VERIFIED parent=8e0d026164c240b8eabefb028d60da67d2bb234a source_tree_unchanged=true"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install exact locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Independent QA structural and adversarial assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import ast
+          import json
+          import re
+          from collections import defaultdict
+          from pathlib import Path
+          from datetime import datetime, timezone
+          from global_pulse.sources import parse_feed, load_catalog
+          from global_pulse.map_evidence import incident_country
+
+          rows=load_catalog()
+          by_id={x["id"]:x for x in rows}
+          enabled=[x for x in rows if x.get("enabled")]
+          findings=[]
+          results={}
+          def check(name, condition, detail):
+              results[name]="PASS" if condition else "FAIL"
+              if not condition:
+                  findings.append({"check":name,"detail":detail})
+          check("catalog_unique_ids", len(by_id)==len(rows),
+                {"total":len(rows),"distinct":len(by_id)})
+          check("exact_catalog_counts", len(rows)==170 and len(enabled)==130,
+                {"configured":len(rows),"enabled":len(enabled)})
+          check("reviewed_access_and_https", all(
+                s.get("access_status")=="reviewed_public"
+                and s.get("url","").startswith("https://")
+                and s.get("allowed_domains")
+                for s in enabled), "At least one enabled feed lacks reviewed public HTTPS/domain allowlist")
+          check("all_seven_nz_quarantined", all(
+                not s["enabled"] and s["status"]=="disabled"
+                for s in rows if s["id"] in {
+                  "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
+                  "nz_infrastructure","nz_national_security","nz_trade"}),
+                  "NZ Beehive quarantine not complete")
+          check("expansion_metadata_only", all(
+                x.get("metadata_only") is True
+                for x in enabled if x["id"] not in {
+                  "usgs","eonet","nws","swpc","gdacs","fcdo","ecb","japan_mof",
+                  "sanews","globalvoices","india_pib","wb_inflation","wb_unemployment","wb_gdp"
+                }), "One or more expansion feeds not metadata-only")
+          check("major_publisher_families", all(
+                len({by_id[i].get("publisher_origin_id") for i in ids})==1
+                for ids in [
+                  ["statcan_agriculture","statcan_business","statcan_health","statcan_prices"],
+                  ["fed_enforcement","fed_monetary","federal_reserve_press"],
+                  ["jma_weather_updates","jma_eqvol_updates"],
+                  ["br_camara_all","br_camara_health","br_camara_economy"],
+                  ["br_bcb_press","br_bcb_news","br_bcb_focus"],
+                  ["nws","swpc","noaa_news"],
+                  ["ecb_press","ecb_statpress","ecb_mid"]]),
+                "Major sibling family grouping broken")
+          # Independent QA must compare every old source with additions, not just new siblings.
+          dup=[]
+          keyed=defaultdict(list)
+          for source in enabled:
+              if source.get("independence")=="original":
+                  keyed[source["url"]].append(source)
+          for url,siblings in keyed.items():
+              if len(siblings)>1 and len({x.get("publisher_origin_id") or x["id"] for x in siblings})>1:
+                  dup.append({"url":url,"ids":[x["id"] for x in siblings],
+                              "origins":[x.get("publisher_origin_id") or x["id"] for x in siblings]})
+          check("duplicate_exact_feed_single_origin", not dup, dup)
+          # Legacy and new ECB are one publisher even when not exact same topical URL.
+          check("ecb_legacy_and_new_same_origin",
+                (by_id["ecb"].get("publisher_origin_id") or by_id["ecb"]["id"])
+                 ==by_id["ecb_press"]["publisher_origin_id"],
+                {"legacy":by_id["ecb"].get("publisher_origin_id") or "ecb",
+                 "new":by_id["ecb_press"]["publisher_origin_id"]})
+          # Do not silently promote Atom updated date to original publication.
+          source=dict(by_id["fed_monetary"])
+          xml=b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Sample</title><link href="https://www.federalreserve.gov/example"/><updated>2026-11-12T20:00:00Z</updated></entry></feed>'
+          parsed=parse_feed(xml,source,"2026-11-13T12:30:00Z")
+          check("atom_updated_not_global",len(parsed)==1 and not parsed[0]["published_at"] and parsed[0]["publication_time_unknown"],parsed)
+          xml_nested=b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title><span>Nested</span></title><link href="https://www.federalreserve.gov/example"/><updated>2026-11-12T20:00:00Z</updated></entry></feed>'
+          check("nested_title_not_global",parse_feed(xml_nested,source,"2026-11-13T12:30:00Z")==[],
+                "Non-opted-in source parsed nested title")
+          # Adversarial feed: metadata-only source must never persist feed video IDs.
+          xml_media=b'<rss><channel><item><title>Policy</title><link>https://www.federalreserve.gov/example</link><pubDate>Thu, 12 Nov 2026 20:00:00 GMT</pubDate><videoid>abcdefghijk</videoid></item></channel></rss>'
+          parsed_media=parse_feed(xml_media,source,"2026-11-13T12:30:00Z")
+          check("metadata_only_rejects_embedded_media",
+                len(parsed_media)==1 and parsed_media[0].get("metadata_only") and not parsed_media[0].get("media"),
+                {"media":parsed_media[0].get("media") if parsed_media else "no record"})
+          check("publisher_country_not_incident_country",incident_country({
+                "reports":[{"title":"Economy policy news","country":"Japan",
+                            "source_country":"Japan","country_basis":"publisher_coverage"}]})=="",
+                "Publisher coverage incorrectly created incident geography")
+          # Audit coverage must be described accurately; script currently sweeps historical expansion slice, not 130 enabled.
+          audit=ast.parse(Path("scripts/source_expansion_live_audit.py").read_text())
+          audit_ids=[]
+          for node in audit.body:
+              if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="SOURCE_IDS" for t in node.targets):
+                  audit_ids=ast.literal_eval(node.value)
+          audited_active={x for x in audit_ids if by_id[x].get("enabled")}
+          results["broad_live_audit_coverage"]={
+              "listed":len(audit_ids),"enabled_audited":len(audited_active),
+              "enabled_total":len(enabled),"enabled_not_swept":len(enabled)-len(audited_active)
+          }
+          # Not a test failure by itself: focused workflows cover batches; no complete 130-source sweep.
+          evidence={"head_source_snapshot":"8e0d026164c240b8eabefb028d60da67d2bb234a","counts":{
+             "configured":len(rows),"enabled":len(enabled),
+             "publisher_origins":len({x.get("publisher_origin_id") or x["id"] for x in enabled})},
+             "results":results,"findings":findings}
+          print("INDEPENDENT_QA_EVIDENCE",json.dumps(evidence,sort_keys=True),flush=True)
+          Path("qa-pr7-independent-evidence.json").write_text(json.dumps(evidence,indent=2))
+          if findings:
+              raise SystemExit(1)
+          PY
+      - name: Offline expansion and PR6 regression suite
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse
+          python -m pytest -q --tb=short \
+            tests/test_source_expansion_open_feeds.py \
+            tests/test_source_expansion_*.py \
+            tests/test_source_freshness_reset.py \
+            tests/test_sources.py \
+            tests/test_source_capacity_headlines.py \
+            tests/test_issue22_provider_host_denial.py \
+            tests/test_issue22_provider_host_denial_recovery.py \
+            tests/test_issue22_publisher_origin_group.py \
+            tests/test_issue22_publisher_country_alias.py \
+            tests/test_issue22_country_only_retest.py \
+            tests/test_issue22_map_pipeline.py \
+            tests/test_issue22_owner_crisis_stripes.py \
+            tests/test_issue22_owner_media_lineup.py \
+            tests/test_gdelt_poll.py \
+            tests/test_gdelt_service_ui.py \
+            tests/test_tv_pending_timeout.py
+      - name: Archive independent QA evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qa-pr7-independent-evidence
+          path: qa-pr7-independent-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
