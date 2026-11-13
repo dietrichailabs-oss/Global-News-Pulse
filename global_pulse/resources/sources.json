@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.12.source-expansion8",
+  "catalog_version": "2026.11.12.source-expansion9",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -3834,7 +3834,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -3873,7 +3875,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -3912,7 +3916,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Government",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -3951,7 +3957,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Infrastructure",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -3990,7 +3998,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4029,7 +4039,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Infrastructure",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4068,7 +4080,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Infrastructure",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4107,7 +4121,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Government",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4146,7 +4162,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Health",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4185,7 +4203,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4224,7 +4244,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4263,7 +4285,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4302,7 +4326,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4341,7 +4367,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4380,7 +4408,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Government",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4419,7 +4449,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4458,7 +4490,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Infrastructure",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4497,7 +4531,9 @@
       "homepage": "https://www.statcan.gc.ca/en/sc/rss",
       "adapter": "atom",
       "category": "Economy",
-      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative."
+      "limitation": "Same Statistics Canada publisher identity as all StatCan subject feeds; subject feeds never self-corroborate. Original publication dates remain authoritative.",
+      "nested_feed_text": true,
+      "updated_is_publication_time": true
     },
     {
       "enabled": true,
@@ -4729,11 +4765,11 @@
       "limitation": "Travel/safety statements are official Japanese government advisories, not independent verification of an event."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 1800,
       "access": "Official public RSS/Atom/RDF feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-12",
       "review_scope": "Engineering metadata/feed admission; live validation required before merge",
@@ -4764,7 +4800,121 @@
       "license_url": "https://www.meti.go.jp/main/rules.html",
       "attribution": "Japan Ministry of Economy, Trade and Industry (METI); original link retained",
       "feed_documentation": "https://www.meti.go.jp/english/rss/index.html",
-      "limitation": "Candidate endpoint must pass live XML admission; no HTML scraping fallback will be added."
+      "limitation": "Candidate endpoint must pass live XML admission; no HTML scraping fallback will be added. Live admission on 2026-11-12 returned HTTP 403 to the identified Global Pulse collector; disabled rather than bypassing publisher access policy."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-12",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "id": "cdc_travel_notices",
+      "name": "CDC Travelers' Health — Travel Health Notices",
+      "url": "https://wwwnc.cdc.gov/travel/rss/notices.xml",
+      "homepage": "https://wwwnc.cdc.gov/travel/notices",
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Global",
+      "country": "",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "cdc",
+      "allowed_domains": [
+        "wwwnc.cdc.gov"
+      ],
+      "article_domains": [
+        "wwwnc.cdc.gov"
+      ],
+      "access": "CDC-documented public RSS feed; no account or API key",
+      "license": "Most CDC agency website information is U.S. Government public-domain material and may be freely used/reproduced; identified third-party/copyrighted material and marks are excluded. Global Pulse stores feed metadata only.",
+      "license_url": "https://www.cdc.gov/other/agencymaterials.html",
+      "attribution": "U.S. Centers for Disease Control and Prevention (CDC); original link retained; no endorsement implied",
+      "feed_documentation": "https://wwwnc.cdc.gov/travel/page/rss",
+      "limitation": "Official travel-health notices can describe disease outbreaks, disasters and health-system risks. Same CDC publisher identity as future CDC feeds; sibling feeds never self-corroborate."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-12",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "id": "bea_news_releases",
+      "name": "U.S. Bureau of Economic Analysis — News Releases",
+      "url": "https://apps.bea.gov/rss/rss.xml",
+      "homepage": "https://www.bea.gov/news",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "North America / Global",
+      "country": "United States",
+      "language": "en",
+      "official": true,
+      "official_scope": "measurement",
+      "independence": "original",
+      "publisher_origin_id": "bea",
+      "allowed_domains": [
+        "apps.bea.gov"
+      ],
+      "article_domains": [
+        "www.bea.gov",
+        "bea.gov",
+        "apps.bea.gov"
+      ],
+      "access": "BEA official news-release RSS feed; no account or API key",
+      "license": "Unless stated otherwise, BEA website information is public domain and may be used or reproduced without specific permission; BEA citation is requested.",
+      "license_url": "https://www.bea.gov/help/faq/147",
+      "attribution": "U.S. Bureau of Economic Analysis (BEA); original link retained",
+      "feed_documentation": "https://apps.bea.gov/rss/rss.xml",
+      "limitation": "Official economic-release evidence. No economic crisis or causal conclusion is inferred from a release alone."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-12",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "id": "fdic_site_updates",
+      "name": "Federal Deposit Insurance Corporation — Site Updates",
+      "url": "https://www.fdic.gov/rss.xml",
+      "homepage": "https://www.fdic.gov/",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "North America",
+      "country": "United States",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "fdic",
+      "allowed_domains": [
+        "www.fdic.gov"
+      ],
+      "article_domains": [
+        "www.fdic.gov",
+        "fdic.gov"
+      ],
+      "access": "Public first-party RSS endpoint; no account or API key; live admission required because neutral clients can receive access denials",
+      "license": "FDIC-created U.S. Government information is public domain and may be freely distributed/copied with appropriate FDIC acknowledgment; identified third-party content excluded.",
+      "license_url": "https://archive.fdic.gov/Content%20and%20Copyright",
+      "attribution": "Federal Deposit Insurance Corporation (FDIC); original link retained",
+      "feed_documentation": "https://www.fdic.gov/rss.xml",
+      "limitation": "Candidate first-party feed. If the publisher returns 403/406 or otherwise denies the bounded collector, disable it rather than changing identity, scraping HTML, or using a third-party relay."
     }
   ]
 }
