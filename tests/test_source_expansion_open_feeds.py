@@ -11,10 +11,12 @@ def test_expansion_sources_are_enabled_metadata_only_and_grouped():
     voa={"voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine","voa_economy","voa_health"}
     fda={"fda_outbreaks","fda_press","fda_medwatch"}
     uk={"fcdo","ukhsa","hm_treasury","cabinet_office"}
-    for identity in voa|fda|uk|{"rba_media","eurostat_news"}:
+    new_sources=voa|fda|{"ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news"}
+    for identity in new_sources:
         assert c[identity]["enabled"] is True
         assert c[identity]["metadata_only"] is True
         assert c[identity]["access_status"]=="reviewed_public"
+    assert c["fcdo"]["enabled"] is True
     assert {c[x]["publisher_origin_id"] for x in voa}=={"voa"}
     assert {c[x]["publisher_origin_id"] for x in fda}=={"fda"}
     assert {c[x]["publisher_origin_id"] for x in uk}=={"uk_government"}
