@@ -79,7 +79,7 @@ jobs:
                     pass_post_admission=success, status=state.get("status"),
                     http_status=state.get("http_status"), reports=len(reports),
                     recent_30d=len(recent), latest=state.get("latest_publication") or "",
-                    violations=len(invalid), error=state.get("error") or "")), sort_keys=True, flush=True)
+                    violations=len(invalid), error=state.get("error") or ""), sort_keys=True), flush=True)
               if not success: failures.append(identity)
           if failures: raise SystemExit("POST_ADMISSION_FAILED: " + ", ".join(failures))
           print("FIVE_LICENSED_FEEDS_POST_ADMISSION_PASS")
