@@ -295,12 +295,25 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
     result = []
     for node in items:
         title = _child(node, "title")
+        # A small set of reviewed feeds (currently Statistics Canada) wrap
+        # human-readable title text in harmless inline markup. Do not broaden
+        # generic XML interpretation: opt in per source and still sanitize the
+        # bounded itertext result through plain().
+        if not title and source.get("nested_feed_text"):
+            title_node = next((n for n in node if _local(n.tag) == "title"), None)
+            if title_node is not None:
+                title = plain(" ".join(title_node.itertext()), 300)
         link = _child(node, "link")
         if not link:
             link = next((n.get("href", "") for n in node if _local(n.tag) == "link" and n.get("rel", "alternate") == "alternate"), "")
         rid = _child(node, "guid", "id") or link
         published = _child(node, "pubdate", "published", "date")
         updated = _child(node, "updated")
+        # Atom's "updated" is not normally equivalent to publication time.
+        # Use it as publication evidence only for specifically reviewed feeds
+        # whose publisher documents/uses it as the release timestamp.
+        if not published and source.get("updated_is_publication_time"):
+            published = updated
         report = _base(source, rid, title, link, published, retrieved)
         if not report["title"] or not report["url"]:
             continue

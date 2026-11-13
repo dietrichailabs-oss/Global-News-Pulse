@@ -1,0 +1,28 @@
+# Global Pulse — ECB MID / Global Diversity source admission, 13 November 2026
+
+**Scope:** Engineering-only additions to draft PR #7, stacked behind remediation PR #6. No merge, installer or release. No API keys, relays, article-body scraping, media ingestion or background website crawling. Existing license/provenance guardrails stay unchanged. The last prior approved catalog had 159 configurations / 126 enabled; this batch adds one (160 / 127).
+
+## Newly enabled — ECB Market Information Dissemination
+- **Source:** `ecb_mid`; category Infrastructure, publisher original `eu_ecb`.
+- **Publisher documentation and rights:** [ECB MID](https://www.ecb.europa.eu/press/html/mid.en.html). ECB states its MID system is openly accessible, offers RSS 2.0, and *all information published via MID services is considered public domain*. This rights status does not extend to unrelated ECB logos or documents. Poll at most once per hour. Direct first-party feed: [https://mid.ecb.europa.eu/rss/mid.xml](https://mid.ecb.europa.eu/rss/mid.xml).
+- **Original link constraint:** approved feeds and article/document links are limited to `mid.ecb.europa.eu`. Only original titles, timestamps, direct URLs and ECB attribution remain; no source descriptions, linked XML documents, article bodies, images, audio or video. The publisher's geographic footprint must not be translated into event coordinates.
+- **Independence:** `ecb_mid`, `ecb_press` and `ecb_statpress` all share `publisher_origin_id=eu_ecb`, so these are **one** ECB publisher family; no self-corroboration.
+- **Pre-enablement actual direct Collector probe:** [Actions run 43397738787](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43397738787) recorded **HTTP 200**, `status=available`, **20 reports**, **20 published within 30 days**, latest **2026-11-13T08:15:06Z**, **0 metadata/provenance violations**.
+- **Second independent pre-enablement direct probe:** [Actions run 43398097766](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43398097766) again logged ECB MID HTTP 200, 20 reports/20 recent, zero violations.
+- **Post-enablement exact-source verification:** [Actions run 43398278714](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43398278714), commit `40d1618f6657d3391b8b8f0dcfebdfb13b0f88ec`, passed **20/20 offline parser/provenance/rights tests**, then again **HTTP 200**, **20/20 recent**, **0 violations**. All six previous source-expansion post-admission workflows also passed on this catalog update.
+
+## Rejected, not enabled
+| Candidate | Live evidence | Admission decision |
+| --- | --- | --- |
+| `br_bcb_press`, `br_bcb_news`, `br_bcb_acts`, `br_bcb_focus` — Banco Central do Brasil | [Live probe 43398097766](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43398097766): all HTTP 200 with 10 parsed each but **zero dated reports, 10/10 date/provenance violations** per feed, latest publication unknown | **HOLD**: feed item dates not accepted by the existing Collector; no fallback from retrieval time and no arbitrary `updated` substitution. BCB's [RSS directory](https://www.bcb.gov.br/en/about/rssen) is official and [site reuse terms](https://www.bcb.gov.br/en/about/privacystatement) permit attribution-preserved reuse and original links, but rights alone cannot establish article freshness. |
+| `afdb_news` — African Development Bank | [Live probe 43397738787](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43397738787) and [43398097766](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43398097766): HTTP **403**, zero reports | **REJECT** denied and rights restricted: [AfDB terms](https://www.afdb.org/en/terms-and-conditions) require permission for commercial redistribution. No scraper or relay workaround. |
+| `za_sars_news` — SARS South Africa | Both probes: HTTP 200 and 10 current dated entries, zero technical violations | **REJECT RIGHTS** despite technical health. [SARS terms](https://www.sars.gov.za/terms-and-conditions/) restrict nonprivate/commercial reuse, restrict deep links, and disallow broad site crawling without consent. Original-link preservation conflicts with its homepage-only linking rule. |
+| Mexico INEGI | Direct [INEGI RSS directory](https://www.inegi.org.mx/servicios/rss/) was readable, but discovery exposed only the directory link, no source-specific directly provable endpoint | **HOLD**, no invented/unverified endpoint, no API token route. |
+| Reserve Bank of India | RSS directory exists, but [RBI disclaimer](https://www.rbi.org.in/commonman/english/Scripts/Disclaimer.aspx) requires advance permission to hyperlink to internal pages | **HOLD** original direct article-link policy conflicts with publisher terms; no feed enabled. |
+
+## Security, freshness and release gates
+- Explicit enabled source allows only HTTPS links under first-party `mid.ecb.europa.eu`; no publisher-relative country-as-event geography.
+- `metadata_only=true`, `min_interval=3600`, `stale_after_days=30`, `retention_days=180`, `authentication=None`; no RSS description/body/media retention, and no linked XML downloads.
+- Tests: `tests/test_source_expansion_mid.py`, `tests/test_source_expansion_ecb.py` and `tests/test_issue22_publisher_origin_group.py`; pinned read-only `.github/workflows/source-expansion-mid-post-admission.yml`.
+- No manual admission based only on HTTP 200. Any future additional BCB/sibling source needs its own audited actual published date, parser/provenance and rights display regression before being enabled.
+- **Independent QA pending** (including UI attribution, rights interpretation, outage/freshness behavior). Draft PR #7 stays unmerged; no public release.

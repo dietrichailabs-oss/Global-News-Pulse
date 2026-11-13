@@ -1,0 +1,85 @@
+name: Source Expansion - Sweden SCB and Eurostat Dataset Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-se-eu-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publisher-direct-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe direct publisher feeds without enabling catalog entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, time
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          candidates = [
+              dict(id="se_scb_statistics_probe",name="Statistics Sweden (SCB) statistical releases",
+                   url="https://www.scb.se/Feed/statistiknyheter/",adapter="rss",
+                   category="Economy",language="sv",region="Europe",country="Sweden",
+                   publisher_origin_id="se_scb",allowed_domains=["www.scb.se"],
+                   article_domains=["www.scb.se","scb.se"],
+                   attribution="Statistics Sweden (SCB); original source link and publisher date; no endorsement"),
+              dict(id="eu_eurostat_dataset_updates_probe",name="Eurostat dataset release notices",
+                   url="https://ec.europa.eu/eurostat/api/dissemination/catalogue/rss/en/statistics-update.rss",
+                   adapter="rss",category="Economy",language="en",region="Europe",country="",
+                   publisher_origin_id="eurostat",allowed_domains=["ec.europa.eu"],
+                   article_domains=["ec.europa.eu"],
+                   attribution="Eurostat (European Commission); original source link and publisher date; no endorsement"),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for i,source in enumerate(candidates):
+              if i: time.sleep(4)
+              source.update(enabled=True,access_status="reviewed_public",metadata_only=True,
+                  official=True,independence="original",min_interval=3600,retention_days=180,
+                  stale_after_days=30,official_scope="measurement")
+              try:
+                  result=Collector(source).collect()
+                  state=result["state"]; reports=result.get("reports",[])
+                  fresh=[r for r in reports if r.get("published_at")
+                    and 0<=now-timestamp(r["published_at"])<=30*86400]
+                  invalid=[r for r in reports if not r.get("title") or not r.get("published_at")
+                    or not r.get("attribution") or r.get("summary") or r.get("media")
+                    or r.get("origin_id")!=source["publisher_origin_id"]
+                    or r.get("country_basis")!="publisher_coverage"
+                    or r.get("original_url")!=r.get("url")
+                    or urlsplit(r.get("url","")).scheme!="https"
+                    or urlsplit(r.get("url","")).hostname not in source["article_domains"]]
+                  ok=bool(state.get("status")=="available" and state.get("http_status")==200
+                          and reports and fresh and not invalid)
+                  record=dict(id=source["id"],publisher_origin_id=source["publisher_origin_id"],
+                    url=source["url"],passed=ok,status=state.get("status"),
+                    http_status=state.get("http_status"),reports=len(reports),recent_30d=len(fresh),
+                    latest=state.get("latest_publication") or "",violations=len(invalid),
+                    error=state.get("error") or "",note="Research only. No catalog admission at this stage.")
+              except Exception as exc:
+                  record=dict(id=source["id"],passed=False,error=type(exc).__name__+": "+str(exc)[:160])
+              print("SE_EU_PRE_ADMISSION",json.dumps(record,sort_keys=True),flush=True)
+          print("SE_EU_PROBE_COMPLETE no sources enabled; rights and parser checks required before admission",flush=True)
+          PY

@@ -1,0 +1,81 @@
+name: Source Expansion - ECB Brazil Direct Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-ecb-br-pre-admission.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publisher-direct-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe first-party publisher endpoints without adding any to catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, time
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector, timestamp
+          
+          candidates = [
+              ("ecb_press","European Central Bank - Press Releases","https://www.ecb.europa.eu/rss/press.html","eu_ecb","Economy","Europe / Global","","en",["www.ecb.europa.eu"]),
+              ("ecb_statpress","European Central Bank - Statistical Press Releases","https://www.ecb.europa.eu/rss/statpress.html","eu_ecb","Economy","Europe / Global","","en",["www.ecb.europa.eu"]),
+              ("br_gov_economy","Brazil Federal Government - Economy","https://www.gov.br/pt-br/noticias/financas-impostos-e-gestao-publica/RSS","br_gov_portal","Economy","South America","Brazil","pt",["www.gov.br"]),
+              ("br_gov_health","Brazil Federal Government - Health","https://www.gov.br/pt-br/noticias/saude-e-vigilancia-sanitaria/RSS","br_gov_portal","Health","South America","Brazil","pt",["www.gov.br"]),
+              ("br_gov_infrastructure","Brazil Federal Government - Transport and Infrastructure","https://www.gov.br/pt-br/noticias/transito-e-transportes/RSS","br_gov_portal","Infrastructure","South America","Brazil","pt",["www.gov.br"]),
+              ("br_gov_energy","Brazil Federal Government - Energy","https://www.gov.br/pt-br/noticias/energia-minerais-e-combustiveis/RSS","br_gov_portal","Infrastructure","South America","Brazil","pt",["www.gov.br"]),
+              ("br_gov_justice","Brazil Federal Government - Justice and Public Security","https://www.gov.br/pt-br/noticias/justica-e-seguranca/RSS","br_gov_portal","Government","South America","Brazil","pt",["www.gov.br"]),
+          ]
+          now = datetime.now(timezone.utc).timestamp()
+          accepted = 0
+          for i,(sid,name,url,origin,category,region,country,lang,hosts) in enumerate(candidates):
+              if i: time.sleep(4)
+              candidate = dict(id=sid,name=name,url=url,adapter="rss",enabled=True,
+                  min_interval=3600,access_status="reviewed_public",metadata_only=True,
+                  allowed_domains=hosts,article_domains=hosts+[h[4:] for h in hosts if h.startswith("www.")],
+                  publisher_origin_id=origin,independence="original",
+                  category=category,region=region,country=country,language=lang,
+                  attribution=name,official=True,retention_days=180,stale_after_days=30)
+              response=Collector(candidate).collect()
+              reports=response["reports"]; state=response["state"]
+              recent=[r for r in reports if r.get("published_at")
+                  and 0 <= now-timestamp(r["published_at"]) <= 30*86400]
+              violations=[r for r in reports if not r.get("title") or not r.get("published_at")
+                  or r.get("summary") or r.get("media")
+                  or r.get("origin_id")!=origin or r.get("country_basis")!="publisher_coverage"
+                  or not r.get("attribution") or urlsplit(r.get("url","")).scheme!="https"
+                  or urlsplit(r.get("url","")).hostname not in candidate["article_domains"]]
+              passed=bool(state.get("status")=="available" and state.get("http_status")==200
+                  and reports and recent and not violations)
+              accepted+=int(passed)
+              print("SOURCE_EXPANSION_PRE_ADMISSION",json.dumps(
+                  dict(id=sid,eligible=passed,http_status=state.get("http_status"),status=state.get("status"),
+                  reports=len(reports),recent_30d=len(recent),latest=state.get("latest_publication"),
+                  violations=len(violations),error=state.get("error",""),
+                  sample_links=[r.get("url") for r in reports[:2]],
+                  origin=origin),sort_keys=True),flush=True)
+          print("PRE_ADMISSION_ELIGIBLE",accepted,"of",len(candidates),flush=True)
+          PY
