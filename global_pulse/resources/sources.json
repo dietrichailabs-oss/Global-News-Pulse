@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion15",
+  "catalog_version": "2026.11.13.source-expansion16",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5600,6 +5600,84 @@
       "name": "SAnews — Government Features",
       "url": "https://www.sanews.gov.za/features.xml",
       "category": "News"
+    },
+    {
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "Europe",
+      "country": "Sweden",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.scb.se"
+      ],
+      "article_domains": [
+        "www.scb.se",
+        "scb.se"
+      ],
+      "access": "First-party publisher-documented SCB RSS; keyless HTTPS direct Collector live pre-admission PASS 2026-11-13, no relay or article-body fetch.",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering direct publisher rights and strict metadata-only Collector pre-admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "sv",
+      "official": true,
+      "official_scope": "measurement",
+      "independence": "original",
+      "publisher_origin_id": "se_scb",
+      "license": "Statistics Sweden's website terms apply CC BY 4.0 to site texts beyond the separately CC0-licensed statistical database. Reuse only original RSS headline, original HTTPS publisher link, date and SCB attribution; no summaries, article bodies, third-party images, media or logos; no false endorsement.",
+      "license_url": "https://www.scb.se/om-scb/om-scb.se-och-anvandningsvillkor/",
+      "feed_documentation": "https://www.scb.se/om-scb/nyheter-och-press/bevaka-nyheter/",
+      "attribution": "Statistics Sweden (SCB), CC BY 4.0 for website text; original Swedish headline, source link and date; no endorsement",
+      "homepage": "https://www.scb.se/",
+      "limitation": "Country means publisher coverage, not event location. This is a Swedish-language statistics-release feed, not real-time crisis validation; all SCB news siblings must share se_scb provenance. CC0 on statistical API data is distinct from CC BY 4.0 for website text.",
+      "id": "se_scb_statistics",
+      "name": "Statistics Sweden — Statistical News",
+      "url": "https://www.scb.se/Feed/statistiknyheter/"
+    },
+    {
+      "adapter": "rss",
+      "category": "News",
+      "region": "Europe",
+      "country": "United Kingdom",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.metoffice.gov.uk",
+        "weather.metoffice.gov.uk"
+      ],
+      "article_domains": [
+        "www.metoffice.gov.uk",
+        "metoffice.gov.uk",
+        "weather.metoffice.gov.uk"
+      ],
+      "access": "First-party publisher-listed Met Office news RSS; keyless HTTPS direct Collector live pre-admission PASS 2026-11-13.",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering RSS reuse terms and direct live metadata-only Collector pre-admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "uk_metoffice",
+      "license": "Met Office Website Terms allow official RSS feeds for any purpose; preserve exact original functional direct link to article, source attribution, source wording/date and avoid interstitial display or logo use. Publisher may discontinue or demand cessation. No feed summary, article body, photos or media retained.",
+      "license_url": "https://www.metoffice.gov.uk/policies/tandc",
+      "feed_documentation": "https://weather.metoffice.gov.uk/guides/rss",
+      "attribution": "UK Met Office; original publisher headline and direct source URL, publication date; no implied endorsement",
+      "homepage": "https://www.metoffice.gov.uk/",
+      "limitation": "News releases are UK Met Office publisher statements, not current warning alerts or independently verified disasters; publisher country not event location. All future Met Office RSS siblings share uk_metoffice origin. Met Office severe warning RSS had zero parsed reports on 2026-11-13 and remains unadmitted.",
+      "id": "uk_metoffice_news",
+      "name": "UK Met Office — News Releases",
+      "url": "https://www.metoffice.gov.uk/feed/syndication/news-rss.xml"
     }
   ]
 }
