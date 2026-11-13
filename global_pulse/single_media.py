@@ -20,6 +20,7 @@ class Television(_MediaTile):
         self._generation=0
         self._requested=False
         self._last_time=None
+        self._ever_played=False
         self._progress_at=0.0
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
@@ -181,7 +182,7 @@ class Television(_MediaTile):
             self.note.setText("The sandboxed embedded player could not start. No external website was opened.")
 
     def _begin_observation(self):
-        self._generation+=1;self._requested=True;self._poll_pending=False;self._last_time=None
+        self._generation+=1;self._requested=True;self._poll_pending=False;self._last_time=None;self._ever_played=False
         self._progress_at=time.monotonic();self.tv_status.setText("CONNECTING")
         self._poll_timer.start()
         self.view.page().setAudioMuted(self.mute.isChecked())
@@ -211,11 +212,14 @@ class Television(_MediaTile):
             self.stop();self.tv_status.setText("ENDED");return
         if value.get("paused"):
             self.tv_status.setText("PAUSED · use Play in the official player")
-            self._progress_at=time.monotonic()
+            # A page that has never played must not keep its connection alive
+            # forever by reporting paused=True once per second. A deliberate
+            # pause AFTER real playback is allowed until Stop/tab change.
+            if self._ever_played:self._progress_at=time.monotonic()
         elif value.get("ready",0)<2:
             self.tv_status.setText("BUFFERING")
         elif self._last_time is not None and current>self._last_time:
-            self.tv_status.setText("PLAYING");self._progress_at=time.monotonic()
+            self.tv_status.setText("PLAYING");self._progress_at=time.monotonic();self._ever_played=True
         self._last_time=current
 
     def _volume(self,value):
