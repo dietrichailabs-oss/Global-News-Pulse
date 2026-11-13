@@ -124,9 +124,10 @@ def test_oversized_advertised_archive_is_never_requested(tmp_path):
         assert cache.status()["latest_batch"]["status"] == "error"
 
 
-def test_archive_http_429_recorded_not_followed_or_retried(tmp_path):
+def test_archive_http_429_retries_only_same_url_then_records_error(tmp_path,monkeypatch):
     calls = []
     raw = archive_for(STAMP)
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep",lambda _seconds:None)
 
     def handler(request):
         calls.append(str(request.url))
@@ -139,7 +140,31 @@ def test_archive_http_429_recorded_not_followed_or_retried(tmp_path):
         assert result["status"] == "error"
         assert result["error"] == "GDELT endpoint returned HTTP 429"
         assert cache.status()["latest_batch"]["error"] == result["error"]
-        assert len(calls) == 2
+        assert len(calls) == 4
+        assert len(set(calls[1:])) == 1
+
+
+def test_transient_archive_404_retries_same_published_url_then_imports(tmp_path,monkeypatch):
+    raw=archive_for(STAMP)
+    calls=[]
+    archive_attempt={"count":0}
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep",lambda _seconds:None)
+
+    def handler(request):
+        calls.append(str(request.url))
+        if str(request.url).endswith(".txt"):
+            return httpx.Response(200,content=manifest_for(STAMP,raw))
+        archive_attempt["count"]+=1
+        if archive_attempt["count"]<3:
+            return httpx.Response(404)
+        return httpx.Response(200,content=raw)
+
+    with GdeltBatchCache(tmp_path/"db") as cache, make_client(handler) as client:
+        result=poll_latest_export(cache,client=client)
+        assert result["status"]=="complete"
+        assert result["added"]==1
+        assert archive_attempt["count"]==3
+        assert len(set(calls[1:]))==1
 
 
 def test_redirect_to_nonapproved_domain_not_followed(tmp_path):
