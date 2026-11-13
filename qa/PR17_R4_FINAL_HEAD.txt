@@ -1,0 +1,2 @@
+Independent QA R4 exact product head: c2d6f6a5e84579bf5c0427589c26b564674055e2
+Runtime/catalog are unchanged from the completed 127-feed R3 source-health sweep; this lane verifies the final test-contract head offline.
