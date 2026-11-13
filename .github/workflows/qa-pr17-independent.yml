@@ -1,0 +1,110 @@
+name: Independent QA - PR17 Corrections
+
+on:
+  push:
+    branches: [qa/pr17-independent-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-pr17-independent
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm exact PR17 product ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 140c567b079785d6f05b13cb46bc01c3941c9a36 HEAD
+          echo "PR17_REVIEWED_HEAD=140c567b079785d6f05b13cb46bc01c3941c9a36"
+          echo "QA_ONLY_DIFF:"
+          git diff --name-only 140c567b079785d6f05b13cb46bc01c3941c9a36..HEAD
+      - name: Run current owner-retest contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short             tests/test_issue22_owner_crisis_stripes.py             tests/test_issue22_recent_source_activity.py             tests/test_issue22_nonmilitary_war.py             tests/test_crisis_world_press.py             tests/test_issue22_active_semantics.py             tests/test_issue22_country_only_retest.py             tests/test_issue22_map_pipeline.py             tests/test_issue22_publisher_country_alias.py             tests/test_issue22_owner_media_lineup.py             tests/test_single_media.py             tests/test_tv_pending_timeout.py             tests/test_issue22_media_map_composition.py             tests/test_issue22_filtered_star_binding.py             tests/test_issue22_situation_stars.py             tests/test_issue22_source_composition.py             tests/test_gdelt_country_layer_qt.py             tests/test_gdelt_country_projection.py             tests/test_gdelt_poll.py             tests/test_gdelt_service_ui.py             tests/test_owner_remediation_20261113.py             tests/test_nws_zone_resolution.py             tests/test_qt_source_notice_parts.py
+      - name: Reproduce prior independent QA blockers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_qa_pr17_independent.py
+      - name: Independent bounded live sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,load_catalog
+          ids=[
+            "statcan_prices","jma_eqvol_updates","cdc_travel_notices","destatis_press",
+            "eea_press_releases","ecb_press","br_bcb_press","br_camara_all",
+            "fed_monetary","uk_mod","norway_ssb_latest","ema_news_releases","who"
+          ]
+          c={x["id"]:x for x in load_catalog()}
+          failures=[]
+          for identity in ids:
+              source=c[identity]
+              result=Collector(source).collect()
+              state=result["state"]; reports=result.get("reports",[])
+              violations=[]
+              allowed={x.lower() for x in source.get("article_domains",[])}
+              expected=source.get("publisher_origin_id") or source["id"]
+              for report in reports[:200]:
+                  host=(urlsplit(report.get("url") or "").hostname or "").lower()
+                  if report.get("metadata_only") and report.get("summary"):
+                      violations.append("summary")
+                  if report.get("metadata_only") and report.get("media"):
+                      violations.append("media")
+                  if report.get("origin_id")!=expected:
+                      violations.append("origin")
+                  if allowed and host not in allowed:
+                      violations.append("article_host")
+              row={"source_id":identity,"status":state.get("status"),"http_status":state.get("http_status"),
+                   "reports":len(reports),"latest_publication":state.get("latest_publication",""),
+                   "violations":sorted(set(violations))}
+              print("QA17_LIVE",json.dumps(row,sort_keys=True),flush=True)
+              if state.get("status") not in {"available","not_modified","stale"}:
+                  failures.append(identity+":status")
+              if state.get("http_status") not in {200,304}:
+                  failures.append(identity+":http")
+              if not reports:
+                  failures.append(identity+":empty")
+              if violations:
+                  failures.append(identity+":provenance")
+              time.sleep(1)
+          if failures:
+              raise SystemExit("QA17 live failures: "+",".join(failures))
+          PY
