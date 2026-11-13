@@ -61,10 +61,20 @@ class SituationActions:
         item = self.feed_list.itemAt(position)
         if item is None:
             return
-        record = item.data(Qt.ItemDataRole.UserRole) or {}
+        record = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            self.status_label.setText("This feed row has no valid archived event to star.")
+            return
         identity = str(record.get("id") or "")
-        state = self.controller.store.situation_state(identity)
+        if not identity:
+            return
+        try:
+            state = self.controller.store.situation_state(identity)
+        except (sqlite3.Error, RuntimeError):
+            self.status_label.setText("Cannot open Star actions: the local archive is unavailable.")
+            return
         if state is None:
+            self.status_label.setText("This feed event is no longer archived. Refresh the feed and try again.")
             return
         # Snapshot the clicked row's canonical identity and desired state,
         # never the mutable current selection or a row index.

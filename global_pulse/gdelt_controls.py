@@ -123,7 +123,11 @@ class GdeltControls(QGroupBox):
             'Paused' if not state.get('active') else state.get('state','idle').replace('_',' ').title())
         error = f" · HTTP {state['http_status']}" if state.get('http_status') else ''
         gap = '\nWarning: missing published intervals remain unresolved.' if state.get('gap') else ''
+        pending = ('\nWarning: newest advertised GDELT export is unavailable; '
+                   'only an older checksum-verified published export was used. '
+                   'Latest-batch freshness is NOT confirmed.'
+                   if state.get('state') == 'replication_pending' else '')
         self.status_label.setText(f"{mode}{error}\nLast attempt: {stamp(state.get('last_attempt'))} · Last successful check: {stamp(state.get('last_success'))}"
             f"\nNext allowed check: {stamp(state.get('next_at'))} · Cached rows: {state.get('cached_rows',0)}"
-            f"\nLatest imported batch: {state.get('last_batch') or 'None'}{gap}\n{state.get('local_error','')}\n{self._action_error}")
+            f"\nLatest imported batch: {state.get('last_batch') or 'None'}{gap}{pending}\n{state.get('local_error','')}\n{self._action_error}")
         self.retry.setEnabled(bool(state.get('suspended')) and not self.controller.demo)
