@@ -1,0 +1,61 @@
+name: Independent QA - PR7 Current Contract
+
+on:
+  push:
+    branches: [qa/source-expansion-pr7-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-pr7-current-contract
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm product ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 8e0d026164c240b8eabefb028d60da67d2bb234a HEAD
+          echo "PR7_REVIEWED_HEAD=8e0d026164c240b8eabefb028d60da67d2bb234a"
+      - name: Current owner-retest regression set
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short             tests/test_issue22_owner_crisis_stripes.py             tests/test_issue22_recent_source_activity.py             tests/test_issue22_nonmilitary_war.py             tests/test_crisis_world_press.py             tests/test_issue22_active_semantics.py             tests/test_issue22_country_only_retest.py             tests/test_issue22_map_pipeline.py             tests/test_issue22_publisher_country_alias.py             tests/test_issue22_owner_media_lineup.py             tests/test_single_media.py             tests/test_tv_pending_timeout.py             tests/test_issue22_media_map_composition.py             tests/test_issue22_filtered_star_binding.py             tests/test_issue22_situation_stars.py             tests/test_issue22_source_composition.py             tests/test_gdelt_country_layer_qt.py             tests/test_gdelt_country_projection.py             tests/test_gdelt_poll.py             tests/test_gdelt_service_ui.py             tests/test_owner_remediation_20261113.py             tests/test_nws_zone_resolution.py             tests/test_qt_source_notice_parts.py
+      - name: Independent PR7 source-expansion QA checks
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_qa_source_expansion_independent.py
