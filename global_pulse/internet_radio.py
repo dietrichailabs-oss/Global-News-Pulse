@@ -9,11 +9,16 @@ audio buffers are counted for liveness, never retained.
 from __future__ import annotations
 import os
 import time
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider, QMessageBox, QLineEdit
 from .security import safe_url
+from .sdr_directory import (
+    DIRECTORY_URLS, MAX_DIRECTORY_BYTES, parse_directory, public_receiver_url,
+)
 
 STATIONS = (
     # News / talk only. Music-only WQXR, New Sounds and Operavore entries were
@@ -173,6 +178,17 @@ class RadioPanel(QWidget):
         self.receiver_interceptor = None
         self.receiver_host = ""
         self.receiver_connected = False
+        self.sdr_state = "OFF"
+        self.sdr_directory_cache = {}
+        self.sdr_directory_reply = None
+        self.sdr_directory_data = bytearray()
+        self.sdr_network = QNetworkAccessManager(self)
+        self.sdr_load_watch = QTimer(self)
+        self.sdr_load_watch.setSingleShot(True)
+        self.sdr_load_watch.timeout.connect(self._sdr_load_timed_out)
+        self.sdr_volume_apply = QTimer(self)
+        self.sdr_volume_apply.setSingleShot(True)
+        self.sdr_volume_apply.timeout.connect(self._apply_sdr_volume)
         self.scan_timer = QTimer(self)
         self.scan_timer.timeout.connect(self._scan_next)
         self.scan_frequency = None
@@ -259,6 +275,29 @@ class RadioPanel(QWidget):
         ham_row.addWidget(self.ham_selector,1);ham_row.addWidget(self.ham_open)
         layout.addLayout(ham_row)
 
+        discovery_row=QHBoxLayout()
+        self.receiver_picker=QComboBox()
+        self.receiver_picker.setAccessibleName("Discovered public SDR receiver")
+        self.receiver_picker.setMinimumWidth(0)
+        self.receiver_picker.addItem("Select a receiver — Refresh list",None)
+        self.receiver_picker.currentIndexChanged.connect(self._select_discovered_receiver)
+        self.receiver_refresh=QPushButton("Refresh list")
+        self.receiver_refresh.clicked.connect(self.refresh_receiver_directory)
+        self.receiver_external=QPushButton("Open receiver in browser")
+        self.receiver_external.clicked.connect(self.open_selected_receiver)
+        self.receiver_external.setEnabled(False)
+        discovery_row.addWidget(self.receiver_picker,1)
+        discovery_row.addWidget(self.receiver_refresh)
+        discovery_row.addWidget(self.receiver_external)
+        layout.addLayout(discovery_row)
+        self.receiver_list_note=QLabel(
+            "No list loaded. Refresh retrieves public directory links on request; receiver status is unverified."
+        )
+        self.receiver_list_note.setWordWrap(True)
+        self.receiver_list_note.setObjectName("Muted")
+        layout.addWidget(self.receiver_list_note)
+        self.ham_selector.currentIndexChanged.connect(self._change_receiver_directory)
+
         receiver_row=QHBoxLayout()
         self.receiver_url=QLineEdit()
         self.receiver_url.setPlaceholderText("Specific public HTTPS WebSDR/KiwiSDR receiver URL")
@@ -266,6 +305,8 @@ class RadioPanel(QWidget):
         self.receiver_connect=QPushButton("Connect in Pulse")
         self.receiver_connect.setAccessibleName("Connect selected public SDR receiver inside Global Pulse")
         self.receiver_connect.clicked.connect(self.connect_receiver)
+        self.receiver_connect.setEnabled(False)
+        self.receiver_url.textChanged.connect(self._receiver_url_changed)
         self.receiver_off=QPushButton("Receiver Off")
         self.receiver_off.setAccessibleName("Disconnect in-app public SDR receiver")
         self.receiver_off.clicked.connect(self.disconnect_receiver)
@@ -273,6 +314,34 @@ class RadioPanel(QWidget):
         receiver_row.addWidget(self.receiver_connect)
         receiver_row.addWidget(self.receiver_off)
         layout.addLayout(receiver_row)
+        self.sdr_status=QLabel("● OFF — No receiver connected")
+        self.sdr_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.sdr_status.setAccessibleName("HAM SDR connection status")
+        self.sdr_status.setStyleSheet("color:#b9c0cc;font-weight:700;")
+        layout.addWidget(self.sdr_status)
+        audio_row=QHBoxLayout()
+        self.sdr_mute=QPushButton("Mute SDR")
+        self.sdr_mute.setCheckable(True)
+        self.sdr_mute.setEnabled(False)
+        self.sdr_mute.setAccessibleName("Mute HAM SDR receiver only")
+        self.sdr_mute.toggled.connect(self._sdr_mute_changed)
+        self.sdr_volume=QSlider(Qt.Orientation.Horizontal)
+        self.sdr_volume.setRange(0,100)
+        self.sdr_volume.setValue(40)
+        self.sdr_volume.setEnabled(False)
+        self.sdr_volume.setAccessibleName("HAM SDR volume for KiwiSDR receivers")
+        self.sdr_volume.valueChanged.connect(self._sdr_volume_changed)
+        self.sdr_volume.sliderReleased.connect(self._apply_sdr_volume)
+        self.sdr_volume_value=QLabel("40%")
+        self.sdr_volume_help=QLabel("Kiwi volume reloads receiver; WebSDR uses its own volume slider")
+        self.sdr_volume_help.setWordWrap(True)
+        self.sdr_volume_help.setObjectName("Muted")
+        audio_row.addWidget(self.sdr_mute)
+        audio_row.addWidget(QLabel("SDR volume"))
+        audio_row.addWidget(self.sdr_volume,1)
+        audio_row.addWidget(self.sdr_volume_value)
+        layout.addLayout(audio_row)
+        layout.addWidget(self.sdr_volume_help)
 
         tuner_row=QHBoxLayout()
         self.receiver_type=QComboBox()
