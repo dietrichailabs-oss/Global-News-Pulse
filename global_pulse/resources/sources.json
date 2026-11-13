@@ -288,7 +288,8 @@
       "article_domains": [
         "www.sanews.gov.za",
         "sanews.gov.za"
-      ]
+      ],
+      "publisher_origin_id": "sanews"
     },
     {
       "id": "globalvoices",
@@ -5542,7 +5543,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "za_sanews",
+      "publisher_origin_id": "sanews",
       "allowed_domains": [
         "www.sanews.gov.za"
       ],
@@ -5580,7 +5581,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "za_sanews",
+      "publisher_origin_id": "sanews",
       "allowed_domains": [
         "www.sanews.gov.za"
       ],
