@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import sqlite3
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPen, QBrush
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QVBoxLayout,QCheckBox,QLabel,QPushButton,QDialog,QComboBox,QListWidget,QListWidgetItem
 from .gdelt_map_data import read_archive,empty
 from .crisis_overlay import normalize_country
@@ -68,16 +68,41 @@ class GdeltMapPanel(QWidget):
     def paint(self,painter,transform,countries):
         if not self.mapped_count:return
         painter.save()
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor('#58c2cd'),1.8,Qt.PenStyle.DotLine))
         for country in countries:
-            if normalize_country(country['name']) in self.snapshot['countries']:
-                painter.drawPath(transform.map(country['path']))
+            key=normalize_country(country['name'])
+            group=self.snapshot['countries'].get(key)
+            if not group:continue
+            path=transform.map(country['path'])
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor('#58c2cd'),1.8,Qt.PenStyle.DotLine))
+            painter.drawPath(path)
+
+            # Secondary coded fallback: only when the stricter source-derived
+            # crisis layer has no accepted activity for that kind. Lower-alpha
+            # hatching makes the distinction visible instead of pretending
+            # GDELT coding is independent verification.
+            accepted=self.world_map.country_activity_for(country['name'])
+            if int(group.get('material_conflict',0)) and not int(accepted.get('conflict',0) or 0):
+                shade=QColor('#d84a52');shade.setAlpha(80)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(shade,Qt.BrushStyle.BDiagPattern))
+                painter.drawPath(path)
+            if int(group.get('protest',0)) and not int(accepted.get('unrest',0) or 0):
+                shade=QColor('#e3bd4d');shade.setAlpha(80)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(shade,Qt.BrushStyle.FDiagPattern))
+                painter.drawPath(path)
         painter.restore()
 
     def country_text(self,name):
         group=self.snapshot['countries'].get(normalize_country(name)) if self.enabled.isChecked() else None
-        return f"GDELT: {group['count']} retained coded observation(s); not verified crises. Use GDELT records for source links." if group else ''
+        if not group:return ''
+        detail=[]
+        if group.get('material_conflict'):detail.append(f"{group['material_conflict']} material-conflict code(s)")
+        if group.get('protest'):detail.append(f"{group['protest']} protest code(s)")
+        suffix=(" · "+", ".join(detail)) if detail else ""
+        return (f"GDELT: {group['count']} retained coded observation(s){suffix}; "
+                "automated coding, not independently verified crises. Use GDELT records for source links.")
 
     def show_records(self):
         if not self.snapshot['records']:return
