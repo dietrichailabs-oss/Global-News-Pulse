@@ -313,9 +313,18 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # Many independent source status signals can arrive back-to-back.
+        # Paint at most once per short UI interval instead of requerying the
+        # whole SQLite archive, map and source tables on every callback.
+        # Do not restart an active timer: continuous collection must not
+        # indefinitely postpone a visible update.
+        self._collection_refresh_timer=QTimer(self)
+        self._collection_refresh_timer.setSingleShot(True)
+        self._collection_refresh_timer.setInterval(200)
+        self._collection_refresh_timer.timeout.connect(self.refresh_data)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        controller.data_changed.connect(self.refresh_data)
+        controller.data_changed.connect(self._schedule_collected_refresh)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -586,8 +595,17 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    def _schedule_collected_refresh(self):
+        """Coalesce collector bursts without delaying direct user-filter actions."""
+        if not self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.start()
+
     def refresh_data(self,*args):
         if self._refreshing:return
+        # A user-initiated refresh (filter, navigation or first load) already
+        # sees all source updates. Do not repeat it at the old timer deadline.
+        if self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
             filters=self.events_filters()
