@@ -73,7 +73,7 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
         panel.receiver_url.setText("https://receiver.example.org/")
         assert panel.connect_receiver()
         assert panel.receiver_connected
-        assert fake.loaded==["https://receiver.example.org/?f=7100usb"]
+        assert fake.loaded==["https://receiver.example.org/?f=7100usb&vol=40"]
         assert fake.shown
 
         panel.disconnect_receiver()
@@ -92,7 +92,7 @@ def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatc
         panel.mode.setCurrentIndex(panel.mode.findData("usb"))
         kiwi,host=panel._tuned_receiver_url()
         assert host=="receiver.example.org"
-        assert kiwi=="https://receiver.example.org/rx?f=14200.5usb"
+        assert kiwi=="https://receiver.example.org/rx?f=14200.5usb&vol=40"
 
         panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
         panel.mode.setCurrentIndex(panel.mode.findData("lsb"))
