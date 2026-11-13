@@ -54,7 +54,7 @@ def test_manifest_parses_three_datasets_and_only_upgrades_exact_host():
         for kind in ("export.CSV", "mentions.CSV", "gkg.csv")
     ))
     assert set(result) == {"export", "mentions", "gkg"}
-    assert all(v.url.startswith("https://data.gdeltproject.org/gdeltv2/") for v in result.values())
+    assert all(v.url.startswith("http://data.gdeltproject.org/gdeltv2/") for v in result.values())
     assert result["export"].timestamp == STAMP
 
 
