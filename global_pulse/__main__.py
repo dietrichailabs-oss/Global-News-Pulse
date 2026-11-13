@@ -86,6 +86,16 @@ def onboarding(controller, parent):
 
 
 
+class _NonDismissableStartupSplash(QSplashScreen):
+    """Keep the startup notice visible even if the user clicks repeatedly."""
+
+    def mousePressEvent(self, event):
+        # QSplashScreen normally disappears when clicked, exposing a blank
+        # desktop while the archive is still loading. Only finish() or a
+        # constructor failure should dismiss this startup state.
+        event.accept()
+
+
 def show_initialization_splash(app):
     """Paint a truthful startup state before synchronous local archive/UI loading.
 
@@ -99,7 +109,7 @@ def show_initialization_splash(app):
     painter.setPen(QPen(QColor("#9169d9"), 2))
     painter.drawRoundedRect(5, 5, 530, 166, 14, 14)
     painter.end()
-    splash = QSplashScreen(backdrop, Qt.WindowType.WindowStaysOnTopHint)
+    splash = _NonDismissableStartupSplash(backdrop, Qt.WindowType.WindowStaysOnTopHint)
     splash.setAccessibleName("Global Pulse initializing")
     splash.showMessage(
         "INITIALIZING GLOBAL PULSE\n"

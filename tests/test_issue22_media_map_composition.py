@@ -76,6 +76,13 @@ def test_startup_initializer_is_visible_until_real_desktop_is_ready(tmp_path):
     assert splash.accessibleName() == "Global Pulse initializing"
     assert "INITIALIZING GLOBAL PULSE" in splash.message()
     assert "local archive" in splash.message()
+    # Qt's default QSplashScreen closes on a click; that would falsely show an
+    # apparently stuck/blank app while its Store and map are still initializing.
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt
+    QTest.mouseClick(splash, Qt.MouseButton.LeftButton)
+    app.processEvents()
+    assert splash.isVisible()
 
     controller = None
     window = None
