@@ -1,0 +1,79 @@
+name: Source Expansion - UK Met Office Publisher RSS Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-metoffice-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publisher-direct-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe unadmitted direct publisher RSS only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          urls=[
+            ("uk_metoffice_news_probe","https://www.metoffice.gov.uk/feed/syndication/news-rss.xml","News"),
+            ("uk_metoffice_warnings_probe","https://weather.metoffice.gov.uk/public/data/PWSCache/WarningsRSS/Region/UK","Disaster"),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for i,(sid,url,category) in enumerate(urls):
+              if i: time.sleep(4)
+              source=dict(id=sid,name="Met Office "+sid,url=url,adapter="rss",
+                enabled=True,access_status="reviewed_public",metadata_only=True,
+                official=True,official_scope="statement",independence="original",
+                min_interval=3600,retention_days=180,stale_after_days=30,
+                category=category,region="Europe",country="United Kingdom",
+                language="en",publisher_origin_id="uk_metoffice",
+                allowed_domains=["www.metoffice.gov.uk","weather.metoffice.gov.uk"],
+                article_domains=["www.metoffice.gov.uk","metoffice.gov.uk","weather.metoffice.gov.uk"],
+                attribution="UK Met Office; original publisher URL and date; no endorsement")
+              try:
+                  result=Collector(source).collect()
+                  state=result["state"]; reports=result.get("reports",[])
+                  fresh=[r for r in reports if r.get("published_at")
+                    and 0<=now-timestamp(r["published_at"])<=30*86400]
+                  invalid=[r for r in reports if not r.get("title") or not r.get("published_at")
+                    or not r.get("attribution") or r.get("summary") or r.get("media")
+                    or r.get("origin_id")!="uk_metoffice" or r.get("country_basis")!="publisher_coverage"
+                    or r.get("original_url")!=r.get("url")
+                    or urlsplit(r.get("url","")).scheme!="https"
+                    or urlsplit(r.get("url","")).hostname not in source["article_domains"]]
+                  passed=bool(state.get("status")=="available" and state.get("http_status")==200
+                    and reports and fresh and not invalid)
+                  record=dict(id=sid,url=url,passed=passed,status=state.get("status"),
+                    http_status=state.get("http_status"),reports=len(reports),recent_30d=len(fresh),
+                    latest=state.get("latest_publication") or "",violations=len(invalid),
+                    error=state.get("error") or "",note="Pre-admission only: no catalog modification")
+              except Exception as exc:
+                  record=dict(id=sid,url=url,passed=False,error=type(exc).__name__+": "+str(exc)[:160])
+              print("METOFFICE_PRE_ADMISSION",json.dumps(record,sort_keys=True),flush=True)
+          print("METOFFICE_PROBE_COMPLETE candidate findings require separate rights review and checked catalog tests",flush=True)
+          PY
