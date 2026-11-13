@@ -144,3 +144,22 @@ def test_default_canada_crown_feed_is_not_assumed_commercially_cleared():
     c=_catalog()
     assert c["health_canada_news"]["enabled"] is False
     assert c["health_canada_news"]["status"]=="disabled"
+
+
+def test_japan_public_data_batch_is_metadata_only_and_grouped():
+    c=_catalog()
+    ids={
+        "japan_statistics_news","jma_weather_updates","jma_eqvol_updates",
+        "japan_mod_updates","japan_mod_press","japan_mofa_safety","meti_english_latest",
+    }
+    for identity in ids:
+        row=c[identity]
+        assert row["enabled"] is True
+        assert row["metadata_only"] is True
+        assert row["access_status"]=="reviewed_public"
+        assert row["url"].startswith("https://")
+    assert {c[x]["publisher_origin_id"] for x in {"jma_weather_updates","jma_eqvol_updates"}}=={"jma"}
+    assert {c[x]["publisher_origin_id"] for x in {"japan_mod_updates","japan_mod_press"}}=={"japan_mod"}
+    assert c["japan_statistics_news"]["publisher_origin_id"]=="japan_statistics"
+    assert c["japan_mofa_safety"]["publisher_origin_id"]=="japan_mofa"
+    assert c["meti_english_latest"]["publisher_origin_id"]=="meti"
