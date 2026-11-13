@@ -426,6 +426,219 @@ class RadioPanel(QWidget):
     def select_relative(self,step):
         self.selector.setCurrentIndex((self.selector.currentIndex()+(-1 if step<0 else 1))%self.selector.count())
 
+    def _sdr_state_change(self, state, message=""):
+        """Visual state reflects the receiver page load, never the Connect click."""
+        self.sdr_state = state
+        labels = {"OFF": "● OFF — SDR receiver disconnected",
+                  "CONNECTING": "◌ CONNECTING — loading receiver",
+                  "ON": "● ON — SDR receiver page loaded",
+                  "ERROR": "● ERROR — SDR receiver unavailable"}
+        colors = {"OFF": "#aeb7c5", "CONNECTING": "#f0bd72",
+                  "ON": "#6fedaa", "ERROR": "#ff929f"}
+        self.sdr_status.setText(labels.get(state, state))
+        self.sdr_status.setStyleSheet(
+            "color:" + colors.get(state, "#aeb7c5") + ";font-weight:700;"
+        )
+        self.sdr_mute.setEnabled(state == "ON")
+        self.sdr_volume.setEnabled(
+            state == "ON" and self.receiver_type.currentData() == "kiwi"
+        )
+        if message:
+            self.ham_note.setText(message)
+
+    def _receiver_url_changed(self, text):
+        try:
+            item = public_receiver_url(str(text).strip())
+        except ValueError:
+            self.receiver_connect.setEnabled(False)
+            self.receiver_external.setEnabled(False)
+            return
+        self.receiver_connect.setEnabled(item["embedded_candidate"])
+        self.receiver_external.setEnabled(True)
+        if not item["embedded_candidate"]:
+            self.receiver_list_note.setText(
+                "Browser-only receiver (HTTP/custom port). Use Open receiver in browser."
+            )
+
+    def _change_receiver_directory(self, *_):
+        item = self.ham_selector.currentData() or {}
+        provider = item.get("id", "")
+        cached = self.sdr_directory_cache.get(provider, [])
+        self.receiver_picker.blockSignals(True)
+        self.receiver_picker.clear()
+        self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
+        for row in cached:
+            self.receiver_picker.addItem(row["name"] + " — " + row["host"], dict(row))
+        self.receiver_picker.blockSignals(False)
+        if cached:
+            self.receiver_list_note.setText(
+                f"{len(cached)} cached public directory links. Status not verified; click Refresh to update."
+            )
+        else:
+            self.receiver_list_note.setText(
+                "No list loaded. Refresh accesses the selected public directory on request."
+            )
+
+    def _select_discovered_receiver(self, *_):
+        item = self.receiver_picker.currentData()
+        if not isinstance(item, dict):
+            return
+        self.receiver_url.setText(item["url"])
+        index = self.receiver_type.findData(
+            "websdr" if item["provider"] == "websdr" else "kiwi"
+        )
+        if index >= 0:
+            self.receiver_type.setCurrentIndex(index)
+        self.receiver_list_note.setText(
+            f"{item['name']} — {item['reason']}. The directory does not verify availability."
+        )
+        self._receiver_url_changed(item["url"])
+
+    def refresh_receiver_directory(self):
+        """One bounded, on-demand request to an official directory, never receivers."""
+        if self._closed or self.sdr_directory_reply is not None:
+            return False
+        item = self.ham_selector.currentData() or {}
+        provider = item.get("id")
+        url = DIRECTORY_URLS.get(provider)
+        if not url:
+            return False
+        request = QNetworkRequest(QUrl(url))
+        request.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.ManualRedirectPolicy
+        )
+        request.setTransferTimeout(12000)
+        self.sdr_directory_data = bytearray()
+        self.receiver_refresh.setEnabled(False)
+        self.ham_selector.setEnabled(False)
+        self.receiver_list_note.setText(
+            "Loading public receiver directory — this sends a request to the directory operator…"
+        )
+        reply = self.sdr_network.get(request)
+        self.sdr_directory_reply = reply
+        reply.readyRead.connect(lambda r=reply: self._sdr_directory_chunk(r))
+        reply.finished.connect(
+            lambda p=provider, r=reply: self._sdr_directory_finished(p, r)
+        )
+        return True
+
+    def _sdr_directory_chunk(self, reply):
+        if reply is not self.sdr_directory_reply:
+            return
+        incoming = bytes(reply.readAll())
+        if len(self.sdr_directory_data) + len(incoming) > MAX_DIRECTORY_BYTES:
+            self.sdr_directory_data = bytearray()
+            reply.abort()
+            return
+        self.sdr_directory_data.extend(incoming)
+
+    def _sdr_directory_finished(self, provider, reply):
+        if reply is not self.sdr_directory_reply:
+            reply.deleteLater()
+            return
+        self._sdr_directory_chunk(reply)
+        self.sdr_directory_reply = None
+        self.receiver_refresh.setEnabled(not self._closed)
+        self.ham_selector.setEnabled(not self._closed)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        error = reply.error()
+        reply.deleteLater()
+        if self._closed:
+            return
+        if error != QNetworkReply.NetworkError.NoError or status != 200:
+            self.receiver_list_note.setText(
+                "Directory unavailable/redirected or too large. Use Open directory to choose manually."
+            )
+            return
+        try:
+            rows = parse_directory(provider, bytes(self.sdr_directory_data))
+        except (ValueError, TypeError):
+            rows = []
+        if not rows:
+            self.receiver_list_note.setText(
+                "No validated public receiver links found; directory format or access may have changed."
+            )
+            return
+        self.sdr_directory_cache[provider] = rows
+        self._change_receiver_directory()
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        self.receiver_list_note.setText(
+            f"{len(rows)} receiver links listed at {stamp}; connectivity is unverified."
+        )
+
+    def open_selected_receiver(self):
+        raw = self.receiver_url.text().strip()
+        try:
+            info = public_receiver_url(raw)
+        except ValueError:
+            self.receiver_list_note.setText("Select or paste a valid public receiver URL first.")
+            return False
+        approved = QMessageBox.question(
+            self, "Open public receiver in browser?",
+            "Open the selected public receiver in your default browser? "
+            "The receiver receives your IP address and browser requests. "
+            "Follow that operator's access rules. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
+        if not approved:
+            return False
+        result = QDesktopServices.openUrl(QUrl(info["url"]))
+        self.receiver_list_note.setText(
+            "Opened receiver in external browser." if result else "Receiver browser could not be opened."
+        )
+        return bool(result)
+
+    def _sdr_load_finished(self, ok):
+        if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
+            return
+        sender = self.sender()
+        if sender is not None and sender is not self.receiver_view:
+            return
+        self.sdr_load_watch.stop()
+        if not ok:
+            self._destroy_receiver()
+            self._sdr_state_change("ERROR", "Receiver page failed to load. Try Open receiver in browser.")
+            return
+        self._sdr_state_change(
+            "ON", "SDR receiver page loaded. Start audio on the provider page if required."
+        )
+        if self.receiver_view:
+            self.receiver_view.page().setAudioMuted(self.sdr_mute.isChecked())
+
+    def _sdr_load_timed_out(self):
+        if self.sdr_state == "CONNECTING":
+            self._destroy_receiver()
+            self._sdr_state_change(
+                "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
+            )
+
+    def _sdr_mute_changed(self, muted):
+        self.sdr_mute.setText("Unmute SDR" if muted else "Mute SDR")
+        if self.receiver_view is not None:
+            self.receiver_view.page().setAudioMuted(bool(muted))
+
+    def _sdr_volume_changed(self, value):
+        self.sdr_volume_value.setText(f"{value}%")
+        if self.sdr_state == "ON" and self.receiver_type.currentData() == "kiwi":
+            self.sdr_volume_apply.start(600)
+
+    def _apply_sdr_volume(self):
+        """KiwiSDR documents vol= URL control; reload once after slider settles."""
+        self.sdr_volume_apply.stop()
+        if self.sdr_state != "ON" or self.receiver_type.currentData() != "kiwi":
+            return
+        try:
+            url, host = self._tuned_receiver_url()
+            if host == self.receiver_host:
+                self._load_receiver_url(url, host)
+                self.ham_note.setText(
+                    "Applying KiwiSDR volume by reloading receiver; audio may need Play again."
+                )
+        except (ImportError, RuntimeError, ValueError, OSError) as exc:
+            self.ham_note.setText("Volume could not be applied: " + str(exc)[:100])
+
     def open_ham_directory(self):
         item=self.ham_selector.currentData() or {}
         url=str(item.get("url",""))
@@ -485,6 +698,7 @@ class RadioPanel(QWidget):
             params.pop("f",None)
         else:
             params["f"]=f"{frequency:g}{mode}"
+            params["vol"]=str(self.sdr_volume.value())
             params.pop("tune",None)
         return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(params),parsed.fragment)),host
 
@@ -501,9 +715,11 @@ class RadioPanel(QWidget):
             if not approved:
                 return False
         self._ensure_receiver_view(host)
+        self._sdr_state_change("CONNECTING", "Connecting to public SDR receiver…")
+        self.sdr_load_watch.start(20000)
+        self.receiver_connected=True
         self.receiver_view.load(QUrl(url))
         self.receiver_view.show()
-        self.receiver_connected=True
         return True
 
     def tune_receiver(self,frequency=None):
@@ -594,7 +810,7 @@ class RadioPanel(QWidget):
             return True
         except (ImportError,RuntimeError,ValueError,OSError) as error:
             self._destroy_receiver()
-            self.ham_note.setText(str(error)[:180] or "The in-app SDR receiver could not start.")
+            self._sdr_state_change("ERROR", str(error)[:180] or "The in-app SDR receiver could not start.")
             return False
 
     def _ensure_receiver_view(self,host):
@@ -650,6 +866,7 @@ class RadioPanel(QWidget):
         page.permissionRequested.connect(lambda permission:permission.deny())
         page.certificateError.connect(lambda error:error.rejectCertificate())
         self.receiver_view.setPage(page)
+        self.receiver_view.loadFinished.connect(self._sdr_load_finished)
         settings=page.settings()
         for flag in (
             QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,
@@ -663,7 +880,10 @@ class RadioPanel(QWidget):
 
     def _destroy_receiver(self):
         self.stop_scan()
+        self.sdr_load_watch.stop()
+        self.sdr_volume_apply.stop()
         self.receiver_connected=False
+        self._sdr_state_change("OFF")
         if self.receiver_view:
             self.receiver_view.stop()
             self.receiver_view.setUrl(QUrl("about:blank"))
@@ -741,4 +961,7 @@ class RadioPanel(QWidget):
         self.status.setText("OFF");self.detail.setText("Disconnected · event selection cannot turn the radio back on")
 
     def shutdown(self):
-        self._closed=True;self.off()
+        self._closed=True
+        if self.sdr_directory_reply is not None:
+            self.sdr_directory_reply.abort()
+        self.off()
