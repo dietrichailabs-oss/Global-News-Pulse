@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion1",
+  "catalog_version": "2026.11.13.source-expansion2",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -1569,11 +1569,11 @@
       "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1603,14 +1603,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration."
+      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1640,14 +1640,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration."
+      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1677,14 +1677,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Publisher-country coverage is not incident geography. Same VOA publisher identity as sibling feeds."
+      "limitation": "Publisher-country coverage is not incident geography. Same VOA publisher identity as sibling feeds. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1714,14 +1714,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration."
+      "limitation": "Same VOA publisher identity as other VOA regional feeds; never count sibling feeds as independent corroboration. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1751,14 +1751,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Publisher-country coverage is not incident geography. Same VOA publisher identity as sibling feeds."
+      "limitation": "Publisher-country coverage is not incident geography. Same VOA publisher identity as sibling feeds. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1788,14 +1788,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Same VOA publisher identity as other VOA feeds; never count sibling feeds as independent corroboration."
+      "limitation": "Same VOA publisher identity as other VOA feeds; never count sibling feeds as independent corroboration. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1825,14 +1825,14 @@
       "license_url": "https://www.voanews.com/p/5338.html",
       "attribution": "Voice of America (VOA); original link retained; third-party material excluded",
       "feed_documentation": "https://www.voanews.com/rssfeeds",
-      "limitation": "Same VOA publisher identity as other VOA feeds; never count sibling feeds as independent corroboration."
+      "limitation": "Same VOA publisher identity as other VOA feeds; never count sibling feeds as independent corroboration. Live admission on 2026-11-13 returned HTTP 200 but newest feed publication was March 2025; retained only as a documented candidate and excluded from current evidence until the publisher feed is current."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1862,14 +1862,14 @@
       "license_url": "https://www.fda.gov/about-fda/about-website/website-policies",
       "attribution": "U.S. Food and Drug Administration (FDA); original link retained",
       "feed_documentation": "https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds",
-      "limitation": "Same FDA publisher identity as FDA press and MedWatch feeds; sibling feeds never self-corroborate."
+      "limitation": "Same FDA publisher identity as FDA press and MedWatch feeds; sibling feeds never self-corroborate. Live admission on 2026-11-13 returned HTTP 200 but the current generic RSS parser produced zero usable entries; retained disabled pending bounded format/parser review."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1899,14 +1899,14 @@
       "license_url": "https://www.fda.gov/about-fda/about-website/website-policies",
       "attribution": "U.S. Food and Drug Administration (FDA); original link retained",
       "feed_documentation": "https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds",
-      "limitation": "Same FDA publisher identity as FDA outbreak and MedWatch feeds; sibling feeds never self-corroborate."
+      "limitation": "Same FDA publisher identity as FDA outbreak and MedWatch feeds; sibling feeds never self-corroborate. Live admission on 2026-11-13 returned HTTP 200 but the current generic RSS parser produced zero usable entries; retained disabled pending bounded format/parser review."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -1936,7 +1936,7 @@
       "license_url": "https://www.fda.gov/about-fda/about-website/website-policies",
       "attribution": "U.S. Food and Drug Administration (FDA); original link retained",
       "feed_documentation": "https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds",
-      "limitation": "Same FDA publisher identity as FDA outbreak and press feeds; sibling feeds never self-corroborate."
+      "limitation": "Same FDA publisher identity as FDA outbreak and press feeds; sibling feeds never self-corroborate. Live admission on 2026-11-13 returned HTTP 200 but the current generic RSS parser produced zero usable entries; retained disabled pending bounded format/parser review."
     },
     {
       "enabled": true,
@@ -2119,6 +2119,269 @@
       "attribution": "Eurostat; original link retained; changes/abridgement disclosed",
       "feed_documentation": "https://ec.europa.eu/eurostat/web/rss",
       "limitation": "Statistical releases are dated source evidence; Global Pulse must not infer a crisis solely from a release."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "phac_public_health",
+      "name": "Public Health Agency of Canada — Public Health Updates",
+      "url": "https://www.canada.ca/content/dam/phac-aspc/rss/new-eng.xml",
+      "homepage": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
+      "adapter": "atom",
+      "category": "Health",
+      "region": "North America",
+      "country": "Canada",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "canada_gov",
+      "allowed_domains": [
+        "www.canada.ca"
+      ],
+      "article_domains": [
+        "www.canada.ca",
+        "canada.ca"
+      ],
+      "license": "Canada.ca explicitly publishes this RSS/Atom feed. Global Pulse stores only headline/link metadata; Canada.ca reproduction terms and any third-party rights remain applicable.",
+      "license_url": "https://www.canada.ca/en/transparency/terms.html",
+      "attribution": "Public Health Agency of Canada; original link retained",
+      "feed_documentation": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
+      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. No full article or media republication."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "phac_travel_health",
+      "name": "Public Health Agency of Canada — Travel Health Advisories",
+      "url": "https://www.canada.ca/content/dam/phac-aspc/rss/tm-mv-eng.xml",
+      "homepage": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
+      "adapter": "atom",
+      "category": "Health",
+      "region": "Global",
+      "country": "",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "canada_gov",
+      "allowed_domains": [
+        "www.canada.ca"
+      ],
+      "article_domains": [
+        "www.canada.ca",
+        "canada.ca",
+        "travel.gc.ca"
+      ],
+      "license": "Canada.ca explicitly publishes this travel-health RSS/Atom feed. Global Pulse stores only headline/link metadata; Canada.ca reproduction terms and third-party rights remain applicable.",
+      "license_url": "https://www.canada.ca/en/transparency/terms.html",
+      "attribution": "Public Health Agency of Canada; original link retained",
+      "feed_documentation": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
+      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. Publisher coverage is not incident geography."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "health_canada_news",
+      "name": "Health Canada — News",
+      "url": "https://api.io.canada.ca/io-server/gc/news/en/v2?atomtitle=Health%20Canada&dept=departmentofhealth&format=atom&orderBy=desc&pick=50&publishedDate%3E=2020-09-04&sort=publishedDate",
+      "homepage": "https://www.canada.ca/en/health-canada/news/media-room/subscribe.html",
+      "adapter": "atom",
+      "category": "Health",
+      "region": "North America",
+      "country": "Canada",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "canada_gov",
+      "allowed_domains": [
+        "api.io.canada.ca"
+      ],
+      "article_domains": [
+        "www.canada.ca",
+        "canada.ca"
+      ],
+      "license": "Health Canada documents this public Atom news feed. Global Pulse stores only headline/link metadata; Canada.ca reproduction terms and third-party rights remain applicable.",
+      "license_url": "https://www.canada.ca/en/transparency/terms.html",
+      "attribution": "Health Canada; original link retained",
+      "feed_documentation": "https://www.canada.ca/en/health-canada/news/media-room/subscribe.html",
+      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "bank_canada_press",
+      "name": "Bank of Canada — Press Releases",
+      "url": "https://www.bankofcanada.ca/content_type/press-releases/feed/",
+      "homepage": "https://www.bankofcanada.ca/press/press-releases/",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "North America",
+      "country": "Canada",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "bank_canada",
+      "allowed_domains": [
+        "www.bankofcanada.ca"
+      ],
+      "article_domains": [
+        "www.bankofcanada.ca"
+      ],
+      "license": "Bank of Canada documents RSS feeds and permits website content reuse with attribution and accuracy requirements, subject to listed exceptions and third-party rights.",
+      "license_url": "https://www.bankofcanada.ca/terms/",
+      "attribution": "Bank of Canada; original link retained; changes disclosed",
+      "feed_documentation": "https://www.bankofcanada.ca/rss-feeds/",
+      "limitation": "Official central-bank statement evidence; not independent proof of downstream economic effects."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "ecdc_cdtr",
+      "name": "ECDC — Communicable Disease Threats Reports",
+      "url": "https://www.ecdc.europa.eu/en/taxonomy/term/1505/feed",
+      "homepage": "https://www.ecdc.europa.eu/en/rss-feeds",
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Europe",
+      "country": "",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "ecdc",
+      "allowed_domains": [
+        "www.ecdc.europa.eu"
+      ],
+      "article_domains": [
+        "www.ecdc.europa.eu"
+      ],
+      "license": "ECDC-owned public web material is generally CC BY 4.0 unless otherwise stated; third-party material excluded.",
+      "license_url": "https://www.ecdc.europa.eu/en/ecdc-intellectual-property-notices",
+      "attribution": "European Centre for Disease Prevention and Control (ECDC); CC BY 4.0 where applicable; original link retained",
+      "feed_documentation": "https://www.ecdc.europa.eu/en/rss-feeds",
+      "limitation": "Same ECDC publisher identity as other ECDC feeds; sibling feeds never self-corroborate."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "ecdc_news",
+      "name": "ECDC — News and Press Releases",
+      "url": "https://www.ecdc.europa.eu/en/taxonomy/term/1307/feed",
+      "homepage": "https://www.ecdc.europa.eu/en/rss-feeds",
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Europe",
+      "country": "",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "ecdc",
+      "allowed_domains": [
+        "www.ecdc.europa.eu"
+      ],
+      "article_domains": [
+        "www.ecdc.europa.eu"
+      ],
+      "license": "ECDC-owned public web material is generally CC BY 4.0 unless otherwise stated; third-party material excluded.",
+      "license_url": "https://www.ecdc.europa.eu/en/ecdc-intellectual-property-notices",
+      "attribution": "European Centre for Disease Prevention and Control (ECDC); CC BY 4.0 where applicable; original link retained",
+      "feed_documentation": "https://www.ecdc.europa.eu/en/rss-feeds",
+      "limitation": "Same ECDC publisher identity as other ECDC feeds; sibling feeds never self-corroborate."
+    },
+    {
+      "enabled": true,
+      "min_interval": 900,
+      "access": "Publisher-documented public RSS/Atom; no account or API key",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 21,
+      "metadata_only": true,
+      "id": "eu_council_press",
+      "name": "Council of the EU / European Council — Press Releases",
+      "url": "https://www.consilium.europa.eu/en/rss/pressreleases.ashx",
+      "homepage": "https://www.consilium.europa.eu/en/about-site/rss/",
+      "adapter": "rss",
+      "category": "Government",
+      "region": "Europe",
+      "country": "",
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "eu_council",
+      "allowed_domains": [
+        "www.consilium.europa.eu"
+      ],
+      "article_domains": [
+        "www.consilium.europa.eu"
+      ],
+      "license": "Council website content may generally be reproduced with source acknowledgement, preserved meaning and disclosure of changes; third-party restrictions remain applicable.",
+      "license_url": "https://www.consilium.europa.eu/en/about-site/copyright/",
+      "attribution": "Council of the European Union / European Council; original link retained",
+      "feed_documentation": "https://www.consilium.europa.eu/en/about-site/rss/",
+      "limitation": "Official institutional statement evidence; no audiovisual or third-party content mirrored."
     }
   ]
 }
