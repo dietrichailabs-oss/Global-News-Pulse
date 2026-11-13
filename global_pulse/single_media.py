@@ -279,7 +279,7 @@ class Television(_MediaTile):
             self.tv_status.setText("BUFFERING")
         elif self._last_time is not None and current>self._last_time:
             self._had_playback=True
-            self.tv_status.setText("PLAYING · video time advancing")
+            self.tv_status.setText("PLAYING");self.note.setText("In-app video time advancing")
             self._progress_at=time.monotonic()
         self._last_time=current
 
