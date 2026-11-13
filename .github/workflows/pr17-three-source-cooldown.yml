@@ -1,0 +1,172 @@
+name: PR17 three-source post-cooldown QA (one shot)
+on:
+  push:
+    branches:
+      - qa/pr17-three-source-cooldown-20261113
+    paths:
+      - .github/workflows/pr17-three-source-cooldown.yml
+
+permissions:
+  contents: read
+
+jobs:
+  exactly-three:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify frozen PR17 ancestor and QA-only delta before network I/O
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "c2d6f6a5e84579bf5c0427589c26b564674055e2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/pr17-three-source-cooldown.yml"
+          echo "PR17_PRODUCT_HEAD=c2d6f6a5e84579bf5c0427589c26b564674055e2; QA-only workflow; no source changes"
+      - name: Install exact pinned runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: One normal identified Collector call per cooled-down source (never retry)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, time
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          import httpx
+          from global_pulse.sources import Collector, load_catalog, USER_AGENT
+
+          EXPECTED_HEAD="c2d6f6a5e84579bf5c0427589c26b564674055e2"
+          # QA log from 43449620337: EC HTTP429 at 15:09:28Z; CBS no-HTTP timeouts at
+          # 15:10:28Z (health) and 15:10:46Z (energy). All floors are conservative:
+          # one full hour after each even though EC nominal interval is 900 sec.
+          targets=[
+            ("ec_energy_news","2026-11-13T16:09:29+00:00"),
+            ("nl_cbs_health","2026-11-13T16:10:29+00:00"),
+            ("nl_cbs_energy","2026-11-13T16:10:47+00:00"),
+          ]
+          catalog={s["id"]:s for s in load_catalog()}
+          expected_ids={sid for sid,_ in targets}
+          assert len(expected_ids)==3 and all(catalog[sid]["enabled"] for sid in expected_ids)
+          assert USER_AGENT=="GlobalPulse/0.1 (Dietrich AI Labs; https://www.dietrichailabs.com)"
+          now=datetime.now(timezone.utc)
+          print("PR17_COOLDOWN_CONTEXT",json.dumps({"utc":now.isoformat(),
+            "product_head":EXPECTED_HEAD,"targets":[s for s,_ in targets],
+            "source_unchanged":True,"single_attempt":True,"transport_proxy":False,
+            "custom_identity":False,"fallback":False,"retry":False}),flush=True)
+          results=[]
+          for index,(sid,floor) in enumerate(targets):
+            source=catalog[sid]
+            assert source.get("adapter")=="rss"
+            assert source.get("metadata_only") is True
+            assert source.get("authentication")=="None"
+            assert source.get("publisher_origin_id") in ("european_commission","nl_cbs")
+            prior_due=datetime.fromisoformat(floor)
+            if index:
+              time.sleep(3) # Per-host pacing only; never a retry.
+            request_time=datetime.now(timezone.utc)
+            if request_time < prior_due:
+              record=dict(source_id=sid,attempts=0,status="not_due",
+                http_status=None,reports=0,recommendation="HOLD",
+                reason="Configured/provider cooldown not elapsed",due_utc=floor,
+                checked_at_utc=request_time.isoformat())
+              results.append(record)
+              print("PR17_COOLDOWN_RESULT",json.dumps(record,sort_keys=True),flush=True)
+              continue
+            begin=time.monotonic()
+            # Identified *product* Collector, unchanged source entry, fixed no-proxy
+            # transport. No conditional cache, alternate domain, proxy, identity,
+            # scraping, special headers or second request.
+            try:
+              result=Collector(source,client_factory=lambda **opts:httpx.Client(
+                trust_env=False,**opts)).collect()
+              state=result["state"]
+              reports=result["reports"]
+              violations=[]
+              known_dates=[]
+              dates_missing=0
+              future_dates=0
+              for j,r in enumerate(reports):
+                bad=[]
+                if r.get("source_id")!=sid:bad.append("source_id")
+                if r.get("publisher")!=source["name"]:bad.append("publisher")
+                if r.get("independence")!="original":bad.append("independence")
+                if r.get("origin_id")!=source["publisher_origin_id"]:bad.append("origin")
+                if r.get("attribution")!=source["attribution"]:bad.append("attribution")
+                if r.get("source_license")!=source["license"]:bad.append("license")
+                if r.get("metadata_only") is not True:bad.append("metadata_only")
+                if r.get("summary"):bad.append("summary_retained")
+                if r.get("media"):bad.append("media_retained")
+                if not r.get("title") or not r.get("url"):bad.append("title_or_url")
+                parsed=urlsplit(r.get("url",""))
+                if parsed.scheme!="https" or parsed.hostname not in source["article_domains"]:
+                  bad.append("external_or_non_https_url")
+                if r.get("country")!=source.get("country",""):bad.append("invented_incident_country")
+                if r.get("country_basis")!="publisher_coverage":bad.append("country_basis")
+                if r.get("latitude") is not None or r.get("longitude") is not None:
+                  bad.append("unverified_point")
+                if r.get("synthetic") is not False:bad.append("synthetic")
+                if not r.get("retrieved_at"):bad.append("retrieval_time_missing")
+                pd=r.get("published_at")
+                if pd:
+                  try:
+                    parsed_dt=datetime.fromisoformat(pd.replace("Z","+00:00"))
+                    known_dates.append(pd)
+                    if parsed_dt > request_time.replace(microsecond=0):
+                      future_dates+=1
+                  except Exception:
+                    bad.append("invalid_published_at")
+                else:
+                  dates_missing+=1
+                if bool(r.get("publication_time_unknown")) != (not bool(pd)):
+                  bad.append("publication_time_unknown_mismatch")
+                if bad:violations.append({"index":j,"fields":bad})
+              if known_dates and state.get("latest_publication")!=max(known_dates):
+                violations.append({"state":"latest_publication_mismatch"})
+              if state.get("http_status")==200 and state.get("count")!=len(reports):
+                violations.append({"state":"count_mismatch"})
+              ok=(state.get("http_status")==200 and state.get("status")=="available"
+                  and len(reports)>0 and not violations and bool(known_dates))
+              record=dict(source_id=sid,attempts=1,checked_at_utc=request_time.isoformat(),
+                elapsed_seconds=round(time.monotonic()-begin,3),
+                http_status=state.get("http_status"),status=state.get("status"),
+                reports=len(reports),observations=len(result.get("observations",[])),
+                first_publication=min(known_dates) if known_dates else None,
+                latest_publication=max(known_dates) if known_dates else None,
+                state_latest_publication=state.get("latest_publication") or None,
+                publication_dates_known=len(known_dates),publication_dates_missing=dates_missing,
+                publication_dates_future=future_dates,
+                publisher_origin_id=source["publisher_origin_id"],
+                metadata_only=source["metadata_only"],attribution_present=bool(source.get("attribution")),
+                provenance_metadata_violations=len(violations),
+                violations=violations[:10],error=state.get("error",""),
+                next_poll_utc=state.get("next_poll"),
+                retry_after_seconds=state.get("retry_after_seconds"),
+                recommendation="PASS" if ok else "HOLD")
+            except Exception as exc:
+              record=dict(source_id=sid,attempts=1,checked_at_utc=request_time.isoformat(),
+                elapsed_seconds=round(time.monotonic()-begin,3),
+                status="collector_exception",http_status=None,reports=0,
+                recommendation="HOLD",error_type=type(exc).__name__,
+                provenance_metadata_violations="not_assessed")
+            results.append(record)
+            print("PR17_COOLDOWN_RESULT",json.dumps(record,sort_keys=True),flush=True)
+          status="PASS" if len(results)==3 and all(r["recommendation"]=="PASS" for r in results) else "HOLD"
+          print("PR17_COOLDOWN_SUMMARY",json.dumps({"product_head":EXPECTED_HEAD,
+            "source_results":results,"overall_source_health":status,
+            "release":"HOLD","merge":False,"source_code_modified":False,
+            "other_sources_checked":False},sort_keys=True),flush=True)
+          # A HOLD is a valid test result, not a reason to rerun this job.
+          PY
