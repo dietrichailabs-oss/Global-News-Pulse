@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion17",
+  "catalog_version": "2026.11.13.source-expansion18",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5753,6 +5753,43 @@
       "name": "European Central Bank — Statistical Press Releases",
       "url": "https://www.ecb.europa.eu/rss/statpress.html",
       "category": "Economy",
+      "official_scope": "measurement"
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 3600,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering publisher-documented MID public-domain rights, strict direct live pre-enable Collector metadata/provenance; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "publisher_origin_id": "eu_ecb",
+      "allowed_domains": [
+        "mid.ecb.europa.eu"
+      ],
+      "article_domains": [
+        "mid.ecb.europa.eu"
+      ],
+      "country": "",
+      "region": "Europe / Global",
+      "language": "en",
+      "homepage": "https://www.ecb.europa.eu/",
+      "license": "ECB explicitly states all information published via its Market Information Dissemination (MID) services is in the public domain. Retain only original RSS titles, publication timestamps, direct publisher XML/notice URLs and ECB attribution; no RSS descriptions, linked technical XML bodies, images, media, or ECB logos are fetched or retained. No implied ECB endorsement.",
+      "license_url": "https://www.ecb.europa.eu/press/html/mid.en.html",
+      "feed_documentation": "https://www.ecb.europa.eu/press/html/mid.en.html",
+      "attribution": "European Central Bank (ECB), Market Information Dissemination; original headline, source timestamp and direct publisher link; no endorsement",
+      "access": "Publisher-documented public-domain MID HTTPS RSS 2.0, no key/account, direct bounded Collector pre-admission HTTP 200 and 20/20 current reports 2026-11-13.",
+      "limitation": "ECB MID technical dissemination notifications and TARGET service updates are primary operational statements/data, not independent confirmation of incidents. All ECB MID, press and statistics sibling feeds share eu_ecb. Publisher geography must not be plotted as event coordinates; original XML documents are linked, never downloaded as article bodies.",
+      "id": "ecb_mid",
+      "name": "European Central Bank — Market Information Dissemination",
+      "url": "https://mid.ecb.europa.eu/rss/mid.xml",
+      "category": "Infrastructure",
       "official_scope": "measurement"
     }
   ]
