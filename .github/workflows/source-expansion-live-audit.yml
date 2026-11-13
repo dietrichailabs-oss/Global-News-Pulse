@@ -3,6 +3,13 @@ name: Source Expansion Live Audit
 on:
   push:
     branches: [eng/source-expansion-open-feeds-20261113]
+    # Only code/catalog changes trigger an origin-wide live audit.
+    # Documentation, probe-only workflows and isolated tests must not cause
+    # many unpaced publisher requests or bypass access-denial host holds.
+    paths:
+      - global_pulse/resources/sources.json
+      - global_pulse/sources.py
+      - scripts/source_expansion_live_audit.py
   workflow_dispatch:
 
 permissions:
