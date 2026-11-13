@@ -261,3 +261,30 @@ def test_empty_brief_clears_the_bound_target(desktop):
     assert not window.save_button.isEnabled()
     assert window.save_button.property('event_id')==''
     assert window.save_button.text()=='☆ Star'
+
+def test_feed_star_menu_fails_closed_if_archive_unavailable(desktop, app, monkeypatch):
+    window, controller, ids = desktop
+    target = next(window.feed_list.item(i) for i in range(window.feed_list.count())
+                  if window.feed_list.item(i).data(Qt.ItemDataRole.UserRole)['id'] == ids[0])
+    window.feed_list.scrollToItem(target); app.processEvents()
+    position = window.feed_list.visualItemRect(target).center()
+
+    def unavailable(_):
+        raise sqlite3.OperationalError("synthetic database busy")
+    monkeypatch.setattr(controller.store, 'situation_state', unavailable)
+    window._show_feed_situation_menu(position)
+
+    assert "archive is unavailable" in window.status_label.text()
+    assert app.activePopupWidget() is None
+    assert not controller.store.saved_situation_ids()
+
+
+def test_feed_star_menu_rejects_malformed_row_without_creating_bookmark(desktop, app):
+    window, controller, ids = desktop
+    target = next(window.feed_list.item(i) for i in range(window.feed_list.count())
+                  if window.feed_list.item(i).data(Qt.ItemDataRole.UserRole)['id'] == ids[0])
+    target.setData(Qt.ItemDataRole.UserRole, "not a canonical event")
+    window.feed_list.scrollToItem(target); app.processEvents()
+    window._show_feed_situation_menu(window.feed_list.visualItemRect(target).center())
+    assert "no valid archived event" in window.status_label.text()
+    assert not controller.store.saved_situation_ids()
