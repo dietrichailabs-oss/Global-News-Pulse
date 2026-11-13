@@ -311,15 +311,46 @@ def main(argv=None):
     from PySide6.QtWidgets import QWidget
     controller.quit_requested.connect(shutdown)
 
+    tray_save_pending = False
+
+    def persist_tray_layout():
+        nonlocal tray_save_pending
+        tray_save_pending = False
+        if shutting_down or getattr(controller, "_closed", False):
+            return  # Full Exit already persists the layout before teardown.
+        try:
+            window.save_layout()
+        except (OSError, RuntimeError, ValueError) as error:
+            logging.warning("Could not persist tray layout: %s", error)
+
     def close_window():
+        nonlocal tray_save_pending
         if shutting_down:
             return
         if controller.get_setting("close_to_tray", True) and tray.isVisible():
-            if not controller.get_setting("tray_explained", False):
-                QMessageBox.information(window, "Global Pulse keeps monitoring", "Closing this window hides Global Pulse in the system tray. Monitoring and alerts continue. Double-click the purple radar to return, or choose Exit Completely from its menu to stop.")
-                controller.set_setting("tray_explained", True)
-            window.save_layout()
+            first_close = not controller.get_setting("tray_explained", False)
+            # Hide promptly before any synchronous SQLite layout persistence.
+            # Previous path wrote six settings twice BEFORE hiding.
             window.hide()
+            if not tray_save_pending:
+                tray_save_pending = True
+                QTimer.singleShot(0, persist_tray_layout)
+            if first_close:
+                def tray_first_close_notice():
+                    if shutting_down or getattr(controller, "_closed", False):
+                        return
+                    try:
+                        controller.set_setting("tray_explained", True)
+                    except (OSError, RuntimeError, ValueError):
+                        logging.warning("Could not persist first tray explanation")
+                    if QSystemTrayIcon.supportsMessages():
+                        tray.showMessage(
+                            "Global Pulse keeps monitoring",
+                            "Global Pulse is in the system tray. Double-click to open; "
+                            "use Exit Completely in the tray menu to stop.",
+                            QSystemTrayIcon.MessageIcon.Information, 5000
+                        )
+                QTimer.singleShot(0, tray_first_close_notice)
         else:
             shutdown()
 
