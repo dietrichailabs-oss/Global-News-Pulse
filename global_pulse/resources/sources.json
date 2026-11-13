@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.12.source-expansion9",
+  "catalog_version": "2026.11.12.source-expansion10",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -4840,10 +4840,10 @@
       "limitation": "Official travel-health notices can describe disease outbreaks, disasters and health-system risks. Same CDC publisher identity as future CDC feeds; sibling feeds never self-corroborate."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-12",
       "review_scope": "Engineering metadata/feed admission; live validation required before merge",
@@ -4876,7 +4876,7 @@
       "license_url": "https://www.bea.gov/help/faq/147",
       "attribution": "U.S. Bureau of Economic Analysis (BEA); original link retained",
       "feed_documentation": "https://apps.bea.gov/rss/rss.xml",
-      "limitation": "Official economic-release evidence. No economic crisis or causal conclusion is inferred from a release alone."
+      "limitation": "Official economic-release evidence. No economic crisis or causal conclusion is inferred from a release alone. Live admission on 2026-11-12 returned HTTP 406 to the identified Global Pulse collector; disabled rather than changing client identity or bypassing publisher request policy."
     },
     {
       "enabled": true,
