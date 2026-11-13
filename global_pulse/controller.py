@@ -79,6 +79,7 @@ class Controller(QObject):
             self._model_jobs = {}
             self._model_dialog = None
             self._store_closed = False
+            self._shutdown_complete = False
             self._translation_keys = {}
             self._translation_pending = set()
             self.translator = Translator(self.data_dir)
@@ -652,19 +653,49 @@ class Controller(QObject):
         self.quit_requested.emit()
 
     def close(self):
-        if self._store_closed:
+        """Stop every owned component even if one teardown step fails.
+
+        A GDELT or translation worker can refuse to terminate promptly. In
+        that case do not report a completed exit or strand SQLite behind the
+        first exception. Keep the controller closed to new work and permit an
+        explicit retry of remaining cleanup.
+        """
+        if self._shutdown_complete:
             return
         self.monitoring = False
         self._closed = True
-        self._retention_timer.stop()
-        self._gdelt.close()
-        self.translator.cancelled.set()
-        self.scheduler.stop()
-        self._headlines.close()
-        self._workers.close()
+        errors = []
+        for name, action in (
+            ("retention timer", self._retention_timer.stop),
+            ("GDELT worker", self._gdelt.close),
+            ("translation cancellation", self.translator.cancelled.set),
+            ("source scheduler", self.scheduler.stop),
+            ("headline translator", self._headlines.close),
+            ("translation worker", self._workers.close),
+        ):
+            try:
+                action()
+            except Exception as error:
+                logging.getLogger("global_pulse").exception(
+                    "Unable to finish %s shutdown", name
+                )
+                errors.append((name, error))
         self._translation_pending.clear()
         self._translation_keys.clear()
         self._model_jobs.clear()
-        with self._ingest_lock:
-            self.store.close()
-            self._store_closed = True
+        if not self._store_closed:
+            try:
+                with self._ingest_lock:
+                    self.store.close()
+                self._store_closed = True
+            except Exception as error:
+                logging.getLogger("global_pulse").exception(
+                    "Unable to close SQLite during shutdown"
+                )
+                errors.append(("SQLite archive", error))
+        if errors:
+            names = ", ".join(name for name, _ in errors)
+            raise RuntimeError(
+                f"Shutdown incomplete ({names}); retry Exit Completely"
+            ) from errors[0][1]
+        self._shutdown_complete = True

@@ -286,3 +286,84 @@ def test_controller_failed_rollback_preserves_original_exception(tmp_path, monke
         # The injected close exception is for failure-path observation only.
         original_close(reopened)
     app.processEvents()
+
+
+def test_shutdown_keeps_sqlite_cleanup_and_retries_live_worker(tmp_path, monkeypatch):
+    """A worker refusal must not strand SQLite or falsely finish shutdown."""
+    from global_pulse.core import Store
+
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    original_close = controller._workers.close
+    attempts = []
+
+    def worker_refuses_once():
+        attempts.append("worker")
+        if len(attempts) == 1:
+            raise RuntimeError("injected translation process still running")
+        return original_close()
+
+    monkeypatch.setattr(controller._workers, "close", worker_refuses_once)
+    with pytest.raises(RuntimeError, match="translation worker"):
+        controller.close()
+    assert controller._closed
+    assert controller._store_closed
+    assert not controller._shutdown_complete
+    with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:
+        assert reopened.stats()["events"] == 0
+    controller.close()
+    assert attempts == ["worker", "worker"]
+    assert controller._shutdown_complete
+    controller.close()
+    assert len(attempts) == 2
+    app.processEvents()
+
+
+def test_shutdown_gdelt_refusal_does_not_skip_other_teardown(tmp_path, monkeypatch):
+    """Retry a refused GDELT process without skipping remaining cleanup."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    original_close = controller._gdelt.close
+    calls = []
+
+    def refuse_once():
+        calls.append("GDELT")
+        if len(calls) == 1:
+            raise RuntimeError("injected GDELT process still running")
+        return original_close()
+
+    monkeypatch.setattr(controller._gdelt, "close", refuse_once)
+    with pytest.raises(RuntimeError, match="GDELT worker"):
+        controller.close()
+    assert controller._store_closed
+    assert not controller._shutdown_complete
+    assert controller._workers._closed
+    controller.close()
+    assert controller._shutdown_complete
+    assert calls == ["GDELT", "GDELT"]
+    app.processEvents()
+
+
+def test_shutdown_can_retry_sqlite_close_without_false_success(tmp_path, monkeypatch):
+    """A transient SQLite close failure must not be considered a full exit."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    original_close = controller.store.close
+    calls = []
+
+    def fail_once():
+        calls.append("SQLite")
+        if len(calls) == 1:
+            raise RuntimeError("injected checkpoint refusal")
+        return original_close()
+
+    monkeypatch.setattr(controller.store, "close", fail_once)
+    with pytest.raises(RuntimeError, match="SQLite archive"):
+        controller.close()
+    assert not controller._store_closed
+    assert not controller._shutdown_complete
+    controller.close()
+    assert controller._store_closed
+    assert controller._shutdown_complete
+    assert calls == ["SQLite", "SQLite"]
+    app.processEvents()
