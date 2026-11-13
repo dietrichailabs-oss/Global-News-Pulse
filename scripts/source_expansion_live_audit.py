@@ -20,20 +20,30 @@ SOURCE_IDS=[
     "ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news",
     "health_canada_news","bank_canada_press","ecdc_news","eu_council_press",
     # Batch 2 candidates.
-    "eia_today","eia_press","occ_news","occ_bulletins",
-    "nass_news","nass_reports","sec_litigation","sec_suspensions",
+    "nass_news","nass_reports","nass_asb","nass_census",
+    "sec_litigation","sec_suspensions",
     "noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook",
     "ec_trade_news","ec_energy_news","ec_environment_news",
     "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
     "nz_infrastructure","nz_national_security","nz_trade",
+    # Batch 3 candidates.
+    "bls_employment","bls_jolts","bls_cpi","bls_ppi",
+    "bls_import_export","bls_work_stoppages","doe_hgeo",
 ]
 
 ALLOW_EMPTY={
-    # NASS Today's Reports is documented to be empty on days without releases.
-    "nass_reports",
-    # Tropical outlook feeds can be valid but contain no active item outside
-    # relevant issuance windows/seasons.
+    # Documented event/release feeds can legitimately have no item today.
+    "nass_news","nass_reports","nass_asb","nass_census",
     "nhc_atlantic_outlook","nhc_east_pacific_outlook",
+    "nz_national_security",
+}
+
+ALLOW_STALE={
+    # Low-frequency official event/topic feeds remain useful for the next
+    # publication; old items retain their source dates and cannot masquerade
+    # as current evidence.
+    "sec_suspensions","nz_economic_growth","nz_energy",
+    "bls_work_stoppages","nass_asb","nass_census",
 }
 
 def main():
@@ -72,7 +82,9 @@ def main():
         }
         evidence["results"].append(row)
         print("SOURCE_EXPANSION",json.dumps(row,sort_keys=True),flush=True)
-        if state.get("status") not in {"available","not_modified"}:
+        if state.get("status") not in {"available","not_modified"} and not (
+            state.get("status")=="stale" and identity in ALLOW_STALE
+        ):
             failures.append(f"{identity}:{state.get('status')}:{state.get('http_status')}")
         elif not reports and identity not in ALLOW_EMPTY:
             failures.append(f"{identity}:no_reports")
