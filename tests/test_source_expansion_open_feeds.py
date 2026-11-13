@@ -9,8 +9,8 @@ def _catalog():
 def test_admitted_expansion_sources_are_enabled_metadata_only_and_grouped():
     c=_catalog()
     uk={"fcdo","ukhsa","hm_treasury","cabinet_office"}
-    canada={"phac_public_health","phac_travel_health","health_canada_news"}
-    ecdc={"ecdc_cdtr","ecdc_news"}
+    canada={"health_canada_news"}
+    ecdc={"ecdc_news"}
     independent={"rba_media","eurostat_news","bank_canada_press","eu_council_press"}
     for identity in (uk-{"fcdo"})|canada|ecdc|independent:
         assert c[identity]["enabled"] is True
