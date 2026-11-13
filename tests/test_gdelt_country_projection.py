@@ -40,6 +40,19 @@ def test_explicit_fips_codes_not_iso_or_provider_coordinates(archive,code,name):
     assert not {'latitude','longitude','severity','verification','reports'} & record.keys()
 
 
+def test_coded_material_conflict_and_protest_counts_remain_explicitly_unverified(archive):
+    seed(archive,[event_row('2001',country='UP'),event_row('2002',country='IR')])
+    with sqlite3.connect(archive) as c:
+        c.execute("UPDATE gdelt_event_rows SET event_code='190',quad_class='4' WHERE global_event_id='2001'")
+        c.execute("UPDATE gdelt_event_rows SET event_code='141',quad_class='3' WHERE global_event_id='2002'")
+    result=read_archive(archive,NAMES,now=NOW)
+    assert result['countries']['ukraine']['material_conflict']==1
+    assert result['countries']['ukraine']['protest']==0
+    assert result['countries']['iran']['material_conflict']==0
+    assert result['countries']['iran']['protest']==1
+    assert all('severity' not in record and 'verification' not in record for record in result['records'])
+
+
 def test_exact_reopen_projection_does_not_mutate_source_evidence(archive):
     seed(archive,[event_row('1001',country='UP'),event_row('1002',country='IR')])
     with sqlite3.connect(archive) as connection:before='\n'.join(connection.iterdump())
