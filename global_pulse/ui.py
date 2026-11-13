@@ -602,7 +602,18 @@ class MainWindow(SituationActions, QMainWindow):
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
             country_evidence=self.controller.events(**dict(map_filters,map_evidence=True))
-            self.world_map.set_events(self.controller.events(**map_filters),country_events=country_evidence)
+            # Economic observations have their own dated country-level layer.
+            # Hide it during search/region/history replay because observations
+            # do not share those event-filter semantics.
+            show_observations = (not self._history_at and not filters.get("query")
+                                 and not filters.get("region")
+                                 and filters.get("category") in {"", "Economy"})
+            observations=self.controller.store.list_observations() if show_observations else []
+            self.world_map.set_events(
+                self.controller.events(**map_filters),
+                country_events=country_evidence,
+                observations=observations,
+            )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
             self._populate_feed()
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
