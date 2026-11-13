@@ -568,6 +568,8 @@ def test_master_tail_rejects_mismatching_declared_length_even_with_complete_rang
                 "Content-Range": f"bytes {start}-{start + len(tail) - 1}/9999999",
                 "Content-Length": str(len(tail) + (1 if broken["value"] else 0)),
             })
+        if url.endswith(f"{earlier}.export.CSV.zip") and not broken["value"]:
+            return httpx.Response(200, content=previous_archive)
         raise AssertionError(f"Unapproved fallback request: {url}")
 
     with GdeltBatchCache(tmp_path / "master-length.sqlite3") as cache, make_client(handler) as client:
