@@ -29,6 +29,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
         "voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine",
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
         "phac_public_health","phac_travel_health","ecdc_cdtr",
+        "eia_today","eia_press","occ_news","occ_bulletins",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
@@ -78,16 +79,16 @@ def test_atom_govuk_feed_uses_shared_government_origin():
 def test_second_batch_is_metadata_only_and_publisher_grouped():
     c=_catalog()
     groups={
-        "eia":{"eia_today","eia_press"},
-        "occ":{"occ_news","occ_bulletins"},
-        "usda_nass":{"nass_news","nass_reports"},
+        "usda_nass":{"nass_news","nass_reports","nass_asb","nass_census"},
         "sec":{"sec_press","sec_litigation","sec_suspensions"},
         "noaa":{"nws","swpc","noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook"},
         "european_commission":{"ec_trade_news","ec_energy_news","ec_environment_news"},
         "nz_government":{"nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health","nz_infrastructure","nz_national_security","nz_trade"},
         "who":{"who","who_afro_emergencies"},
+        "bls":{"bls_latest","bls_employment","bls_jolts","bls_cpi","bls_ppi","bls_import_export","bls_work_stoppages"},
+        "doe":{"doe_hgeo"},
     }
-    new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies"}
+    new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies","bls_latest"}
     for identity in new_ids:
         row=c[identity]
         assert row["enabled"] is True
@@ -99,8 +100,8 @@ def test_second_batch_is_metadata_only_and_publisher_grouped():
 
 def test_second_batch_spans_economy_health_government_disaster_and_infrastructure():
     c=_catalog()
-    assert c["eia_today"]["category"]=="Infrastructure"
-    assert c["occ_news"]["category"]=="Economy"
+    assert c["doe_hgeo"]["category"]=="Infrastructure"
+    assert c["bls_cpi"]["category"]=="Economy"
     assert c["nass_news"]["category"]=="Economy"
     assert c["sec_litigation"]["category"]=="Economy"
     assert c["nhc_atlantic_outlook"]["category"]=="Disaster"
