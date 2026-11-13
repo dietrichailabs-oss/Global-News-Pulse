@@ -250,10 +250,25 @@ class GdeltBatchCache:
         return False
 
     def is_complete(self, batch: GdeltBatch) -> bool:
+        """A completed filename is immutable only for the SAME manifest identity.
+
+        An upstream checksum/size revision with the same filename must not be
+        presented as an already-imported CURRENT export. Keep the validated
+        historical rows and checkpoint intact for explicit review instead of
+        silently replacing evidence or returning a false success.
+        """
         row = self.connection.execute(
-            "SELECT status FROM gdelt_batches WHERE filename=?", (batch.filename,)
+            "SELECT kind,batch_timestamp,source_url,advertised_bytes,advertised_md5,status "
+            "FROM gdelt_batches WHERE filename=?", (batch.filename,)
         ).fetchone()
-        return bool(row and row[0] == "complete")
+        if not row or row[5] != "complete":
+            return False
+        if row[:5] != (batch.kind, batch.timestamp, batch.url,
+                       batch.advertised_bytes, batch.advertised_md5):
+            raise GdeltBatchError(
+                "GDELT completed archive metadata changed; original checkpoint retained for review"
+            )
+        return True
 
     @staticmethod
     def _validate_batch(batch: GdeltBatch) -> None:

@@ -364,3 +364,71 @@ def test_latest_export_replication_lag_is_not_reported_current_after_restart(tmp
         assert persisted["cached_rows"] == 2
         assert not any("example.org" in url for url in calls)
 
+
+def test_same_filename_changed_digest_never_claims_current_or_replaces_evidence(tmp_path):
+    """Publisher revision of a completed EXPORT must fail closed, not be a cache hit.
+
+    Exercise actual manifest -> SQLite cache -> durable scheduler across a
+    restart. No changed archive or linked article is downloaded automatically.
+    """
+    from global_pulse.gdelt_schedule import Schedule, INTERVAL
+    from global_pulse.gdelt_batches import parse_manifest
+
+    original = archive_for(STAMP)
+    altered = bytearray(original)
+    altered[-1] ^= 1  # Same filename and byte length; different advertised digest.
+    current = {"archive": original}
+    requests = []
+
+    def handler(request):
+        url = str(request.url)
+        requests.append(url)
+        if url.endswith("lastupdate.txt"):
+            return httpx.Response(200, content=manifest_for(STAMP, current["archive"]))
+        if url.endswith(f"{STAMP}.export.CSV.zip"):
+            return httpx.Response(200, content=original)
+        raise AssertionError(f"Unexpected network destination: {url}")
+
+    database = tmp_path / "global-pulse.sqlite3"
+    now = 1794409200
+    schedule = Schedule(database)
+    with GdeltBatchCache(database) as cache, make_client(handler) as client:
+        token = schedule.claim(now=now, jitter=0)
+        assert token
+        first = poll_latest_export(cache, client=client)
+        assert first["status"] == "complete"
+        assert schedule.finish(token, first, now=now)
+        initial = cache.connection.execute(
+            "SELECT advertised_bytes,advertised_md5,status FROM gdelt_batches WHERE filename=?",
+            (f"{STAMP}.export.CSV.zip",)
+        ).fetchone()
+        assert initial[2] == "complete"
+        assert cache.status()["cached_rows"] == 1
+
+        current["archive"] = bytes(altered)
+        revised = parse_manifest(manifest_for(STAMP, bytes(altered)))["export"]
+        token = Schedule(database).claim(now=now + INTERVAL, jitter=0)
+        assert token
+        second = poll_latest_export(cache, client=client)
+        assert second["status"] == "error" and not second["downloaded"]
+        assert "completed archive metadata changed" in second["error"]
+        assert Schedule(database).finish(token, second, now=now + INTERVAL)
+        assert Schedule(database).status()["state"] == "error"
+        assert cache.connection.execute(
+            "SELECT advertised_bytes,advertised_md5,status FROM gdelt_batches WHERE filename=?",
+            (revised.filename,)
+        ).fetchone() == initial
+        assert cache.status()["cached_rows"] == 1
+        assert sum(url.endswith(f"{STAMP}.export.CSV.zip") for url in requests) == 1
+
+    # A normal exact-manifest replay is still recognized after reopening the DB.
+    current["archive"] = original
+    with GdeltBatchCache(database) as cache, make_client(handler) as client:
+        token = Schedule(database).claim(now=now + 2 * INTERVAL, jitter=0)
+        assert token
+        third = poll_latest_export(cache, client=client)
+        assert third["status"] == "already_imported" and not third["downloaded"]
+        assert Schedule(database).finish(token, third, now=now + 2 * INTERVAL)
+        assert Schedule(database).status()["state"] == "current"
+        assert cache.status()["cached_rows"] == 1
+        assert sum(url.endswith(f"{STAMP}.export.CSV.zip") for url in requests) == 1
