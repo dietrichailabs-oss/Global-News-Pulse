@@ -38,7 +38,7 @@ MAX_ITEMS = 600
 MAX_SUMMARY = 1000
 USER_AGENT = "GlobalPulse/0.1 (Dietrich AI Labs; https://www.dietrichailabs.com)"
 RESOURCE_DIR = Path(__file__).with_name("resources")
-SUPPORTED_ADAPTERS = {"rss", "atom", "gdacs", "usgs", "eonet", "nws", "cap", "worldbank", "swpc", "gdelt_doc", "manual"}
+SUPPORTED_ADAPTERS = {"rss", "atom", "gdacs", "usgs", "eonet", "nws", "cap", "worldbank", "swpc", "gdelt_doc", "who_don", "manual"}
 
 
 def utcnow() -> datetime:
@@ -480,6 +480,58 @@ def parse_nws(payload: dict, source: dict, retrieved: str) -> list[dict]:
     return result
 
 
+def parse_who_don(payload: dict, source: dict, retrieved: str) -> list[dict]:
+    """Parse WHO Disease Outbreak News API metadata without copying article bodies."""
+    rows = payload.get("value", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        raise ValueError("Invalid WHO Disease Outbreak News contract")
+    result = []
+    for item in rows[:MAX_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        title = plain(item.get("OverrideTitle") or item.get("Title"), 300)
+        published = item.get("PublicationDateAndTime") or item.get("PublicationDate")
+        identity = item.get("DonId") or item.get("Id") or item.get("UrlName")
+        item_url = item.get("ItemDefaultUrl") or (
+            "/emergencies/disease-outbreak-news/item/" + str(item.get("UrlName") or "")
+        )
+        report = _base(source, identity, title, item_url, published, retrieved)
+        if not report["title"] or not report["url"] or not report["published_at"]:
+            continue
+        # WHO's API exposes large narrative fields. Keep only bounded title /
+        # summary metadata for discovery and attribution; open the WHO page for
+        # the full text.
+        summary = plain(item.get("Summary"), 600)
+        if not summary:
+            summary = plain(item.get("Overview"), 600)
+        report.update(
+            summary=summary,
+            metadata_only=True,
+            kind="announcement",
+            official=True,
+            official_scope="statement",
+            independence="original",
+            origin_id=source.get("publisher_origin_id") or source["id"],
+            severity="unassessed",
+            source_updated_at=iso(item.get("LastModified")),
+        )
+        result.append(report)
+    return result
+
+
+@lru_cache(maxsize=1)
+def _map_iso3_codes() -> set[str]:
+    try:
+        doc = json.loads((RESOURCE_DIR / "world_countries.geojson").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    return {
+        str((feature.get("properties") or {}).get("code") or "").upper()
+        for feature in doc.get("features", [])
+        if re.fullmatch(r"[A-Z]{3}", str((feature.get("properties") or {}).get("code") or "").upper())
+    }
+
+
 def parse_worldbank(payload: list, source: dict, retrieved: str) -> list[dict]:
     if not isinstance(payload, list) or len(payload) < 2 or not isinstance(payload[0], dict) or not isinstance(payload[1], list):
         raise ValueError("Invalid World Bank indicator contract")
@@ -495,7 +547,11 @@ def parse_worldbank(payload: list, source: dict, retrieved: str) -> list[dict]:
         if not re.fullmatch(r"\d{4}", year):
             continue
         indicator_id = str(indicator.get("id") or source.get("indicator", ""))
-        country_code = str(row.get("countryiso3code") or country.get("id", ""))
+        country_code = str(row.get("countryiso3code") or "").upper()
+        # country/all also returns World Bank aggregates and regions. Admit only
+        # ISO3 identities represented by the bundled offline country map.
+        if country_code not in _map_iso3_codes():
+            continue
         result.append({"id": f"wb:{country_code}:{indicator_id}:{year}", "source_id": source["id"],
                        "indicator": indicator_id, "indicator_name": plain(indicator.get("value"), 200),
                        "country": plain(country.get("value"), 100), "country_code": country_code,
@@ -771,7 +827,9 @@ class Collector:
                 if adapter == "worldbank":
                     result["observations"] = parse_worldbank(payload, self.source, current_iso)
                 else:
-                    if adapter == "gdelt_doc":
+                    if adapter == "who_don":
+                        result["reports"] = parse_who_don(payload, self.source, current_iso)
+                    elif adapter == "gdelt_doc":
                         result["reports"] = parse_gdelt_doc(payload, self.source, current_iso)
                         state["country_cursor"] = gdelt_next_cursor
                         state["country_batch"] = gdelt_batch
