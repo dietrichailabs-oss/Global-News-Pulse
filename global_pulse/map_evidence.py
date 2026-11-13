@@ -126,7 +126,7 @@ def valid_nws_zone(value):
 def normalize_map_fields(raw):
     basis = raw.get("country_basis")
     result = {"country_basis": basis if isinstance(basis, str) and basis in COUNTRY_BASES else "unresolved"}
-    if isinstance(raw.get("area_status"), str) and raw["area_status"] in {"invalid_or_unsupported_geometry", "zone_geometry_not_resolved", "no_provider_geometry"}:
+    if isinstance(raw.get("area_status"), str) and raw["area_status"] in {"invalid_or_unsupported_geometry", "zone_geometry_not_resolved", "no_provider_geometry", "invalid_zone_references"}:
         result["area_status"] = raw["area_status"]
     if "area_geometry" in raw:
         try:
@@ -135,11 +135,20 @@ def normalize_map_fields(raw):
         except ValueError:
             result["area_status"] = "invalid_or_unsupported_geometry"
     zones = raw.get("affected_zones", [])
-    if isinstance(zones, list):
-        result["affected_zones"] = list(dict.fromkeys(z for z in zones[:MAX_ZONE_REFS] if valid_nws_zone(z)))
-    else:
-        result["affected_zones"] = []
-    if "area_geometry" not in result and result["affected_zones"]:
+    if zones is None:
+        zones = []
+    # An invalid neighbor or a 129th reference is not a license to silently
+    # map the first valid subset and call its area complete. Retain an honest
+    # unresolved state until the publisher supplies a bounded complete list.
+    complete_refs = (isinstance(zones, list) and len(zones) <= MAX_ZONE_REFS
+                     and all(valid_nws_zone(zone) for zone in zones))
+    result["affected_zones"] = list(dict.fromkeys(zones)) if complete_refs else []
+    if not complete_refs:
+        if raw.get("area_geometry_basis") == "nws_affected_zones":
+            result.pop("area_geometry", None)
+        if "area_geometry" not in result:
+            result["area_status"] = "invalid_zone_references"
+    elif "area_geometry" not in result and result["affected_zones"]:
         result["area_status"] = "zone_geometry_not_resolved"
     # Derived zone boundaries retain their exact NWS URLs and partial status.
     if raw.get("area_geometry_basis") == "nws_affected_zones" and "area_geometry" in result:
@@ -159,6 +168,14 @@ def normalize_map_fields(raw):
             result["area_geometry_basis"] = "nws_affected_zones"
             result["area_zone_sources"] = sources
             result["area_status"] = "provider_zone_geometry" if len(sources) == len(result["affected_zones"]) else "partial_provider_zones"
+        else:
+            # An asserted zone-derived polygon without even one matching,
+            # dated official zone fetch cannot be relabeled as direct alert
+            # geometry. Preserve zone identities for a bounded later retry,
+            # but do not render unsupported shapes.
+            result.pop("area_geometry", None)
+            result["area_status"] = ("zone_geometry_not_resolved" if complete_refs
+                                     else "invalid_zone_references")
     geocodes = raw.get("area_geocodes", {})
     result["area_geocodes"] = {}
     if isinstance(geocodes, dict):
@@ -192,6 +209,7 @@ def nws_map_fields(feature, properties):
     # Supplied valid polygons and affectedZones always win. Use raw geocodes so
     # invalid/truncated neighbors cannot silently turn into complete coverage.
     if (not result.get("area_geometry") and not result.get("affected_zones")
+            and properties.get("affectedZones") in (None, [])
             and properties.get("status") == "Actual"
             and properties.get("messageType", "Alert") in {"Alert", "Update"}):
         from .nws_ugc import ugc_zone_urls
@@ -259,13 +277,86 @@ def _country_identity(value):
     }.get(key, key)
 
 
-def incident_country(event):
-    """Return one attributable country or unknown; never a publisher fallback.
+def _word_text(value):
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
 
-    Existing explicit record.country fields are retained, but newly parsed
-    publisher-scope fields and known legacy catalog defaults are not incidents.
-    No headline inference or coordinates are manufactured by this function.
+
+@lru_cache(maxsize=1)
+def _country_text_phrases():
+    """Return longest-first explicit country phrases from the bundled map.
+
+    This is a conservative country-level evidence helper, not a geocoder.
+    Publisher/source geography is intentionally excluded and no coordinates are
+    manufactured. Short abbreviations such as US/UK are not accepted from text.
     """
+    path = Path(__file__).with_name("resources") / "world_countries.geojson"
+    values = {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for feature in data.get("features", []):
+            props = feature.get("properties") or {}
+            name = str(props.get("name") or "").strip()
+            phrase = _word_text(name)
+            if name and len(phrase) >= 4:
+                values[phrase] = name
+    except (OSError, ValueError, TypeError):
+        return ()
+    aliases = {
+        "united states": "United States of America",
+        "united states of america": "United States of America",
+        "czech republic": "Czechia",
+        "turkiye": "Turkey",
+        "ivory coast": "Côte d'Ivoire",
+        "democratic republic of the congo": "Dem. Rep. Congo",
+        "dr congo": "Dem. Rep. Congo",
+        "republic of the congo": "Congo",
+        "south sudan": "South Sudan",
+    }
+    values.update(aliases)
+    return tuple(sorted(values.items(), key=lambda item: (-len(item[0]), item[0])))
+
+
+def explicit_text_country(event):
+    """Return exactly one country explicitly named in eligible source text.
+
+    Longest phrases claim their spans first, preventing South Sudan from also
+    matching Sudan. Separate non-overlapping country names remain ambiguous.
+    """
+    reports = event.get("reports")
+    records = reports if isinstance(reports, list) and reports else [event]
+    matches = {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("future_dated"):
+            continue
+        if str(record.get("evidence_status", "active")).casefold() not in {"", "active"}:
+            continue
+        text = _word_text(" ".join(str(record.get(key, "") or "")
+                                  for key in ("title", "summary", "recap")))
+        if not text:
+            continue
+        padded = " " + text + " "
+        claimed = []
+        for phrase, country in _country_text_phrases():
+            token = " " + phrase + " "
+            cursor = 0
+            while True:
+                index = padded.find(token, cursor)
+                if index < 0:
+                    break
+                start, end = index + 1, index + 1 + len(phrase)
+                if not any(start < right and left < end for left, right in claimed):
+                    claimed.append((start, end))
+                    matches[_country_identity(country)] = country
+                    if len(matches) > 1:
+                        return ""
+                cursor = index + 1
+    return next(iter(matches.values())) if len(matches) == 1 else ""
+
+
+def structured_incident_country(event):
+    """Return country supported by structured record fields only."""
     reports = event.get("reports")
     if not isinstance(reports, list) or not reports:
         return _compact_country(event)
@@ -294,7 +385,20 @@ def incident_country(event):
             # Format and country-name aliases must not bypass this exclusion.
             continue
         countries[_country_identity(country)] = country
-    return next(iter(countries.values())) if len(countries) == 1 else ""
+    if len(countries) == 1:
+        return next(iter(countries.values()))
+    return ""
+
+
+def incident_country(event):
+    """Return one attributable country or unknown; never a publisher fallback.
+
+    Structured provider/record geography wins. When it is absent, exactly one
+    explicit country named in eligible source title/summary text may support a
+    country-level map boundary. No point coordinates are manufactured.
+    """
+    structured = structured_incident_country(event)
+    return structured or explicit_text_country(event)
 
 
 def event_areas(reports):

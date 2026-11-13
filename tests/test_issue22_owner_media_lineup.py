@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication,QMessageBox
 
-from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel
+from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel,AudioSession
 from global_pulse.single_media import Television,MediaPanel
 from global_pulse.sources import load_media_catalog
 from global_pulse.camera_context import camera_catalog
@@ -20,15 +20,15 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_direct_radio_lineup_is_expanded_and_documented():
-    assert len(STATIONS) >= 9
+def test_direct_radio_lineup_is_news_talk_only_and_documented():
     ids={item["id"] for item in STATIONS}
-    assert {"wnyc_fm","wnyc_am","wqxr","new_sounds","operavore",
-            "deutschlandfunk","deutschlandfunk_kultur",
-            "deutschlandfunk_nova","deutschlandfunk_debatten"} <= ids
+    assert ids=={"wnyc_fm","wnyc_am","deutschlandfunk",
+                 "deutschlandfunk_nova","deutschlandfunk_debatten"}
+    assert not {"wqxr","new_sounds","operavore","deutschlandfunk_kultur"} & ids
     for item in STATIONS:
         assert item["url"].startswith("https://")
         assert item["documentation"].startswith("https://")
+        assert "News" in item["language"]
 
 
 def test_ham_sdr_receiver_directories_are_visible_without_starting_audio(app):
@@ -73,13 +73,49 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
         panel.receiver_url.setText("https://receiver.example.org/")
         assert panel.connect_receiver()
         assert panel.receiver_connected
-        assert fake.loaded==["https://receiver.example.org/"]
+        assert fake.loaded==["https://receiver.example.org/?f=7100usb"]
         assert fake.shown
 
         panel.disconnect_receiver()
         assert not panel.receiver_connected
         assert fake.stopped and fake.blank and fake.deleted
         assert panel.receiver_view is None
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatch):
+    panel=RadioPanel(confirm=lambda:False)
+    try:
+        panel.receiver_url.setText("https://receiver.example.org/rx")
+        panel.frequency.setText("14200.5")
+        panel.mode.setCurrentIndex(panel.mode.findData("usb"))
+        kiwi,host=panel._tuned_receiver_url()
+        assert host=="receiver.example.org"
+        assert kiwi=="https://receiver.example.org/rx?f=14200.5usb"
+
+        panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
+        panel.mode.setCurrentIndex(panel.mode.findData("lsb"))
+        websdr,_=panel._tuned_receiver_url("7200")
+        assert websdr=="https://receiver.example.org/rx?tune=7200lsb"
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_sdr_scan_steps_bounded_range_and_stops(app,monkeypatch):
+    panel=RadioPanel(confirm=lambda:False)
+    tuned=[]
+    try:
+        monkeypatch.setattr(panel,"tune_receiver",lambda frequency=None:(tuned.append(float(frequency)) or True))
+        panel.scan_start.setText("7000")
+        panel.scan_end_edit.setText("7010")
+        panel.scan_step_edit.setText("5")
+        panel.scan_dwell.setText("1")
+        assert panel.start_scan()
+        assert tuned==[7000.0]
+        panel._scan_next();panel._scan_next();panel._scan_next()
+        assert tuned==[7000.0,7005.0,7010.0]
+        assert not panel.scan_timer.isActive()
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
 
@@ -170,3 +206,128 @@ def test_news_refresh_does_not_start_radio_tv_or_camera(app):
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_decoded_radio_buffer_without_system_output_fails_closed(app, monkeypatch):
+    """A headless decoder is not truthful audible PLAYING."""
+    class Buffer:
+        def isValid(self): return True
+        def frameCount(self): return 512
+
+    class Output:
+        def __init__(self): self.muted = False
+        def setMuted(self, value): self.muted = value
+
+    class Player:
+        def __init__(self): self.stopped = False; self.cleared = False
+        def stop(self): self.stopped = True
+        def setSource(self, url): self.cleared = url.isEmpty()
+
+    session = AudioSession("wnyc_fm")
+    events = []
+    session.changed.connect(lambda state, detail: events.append((state, detail)))
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: False))
+    try:
+        session.active = True
+        session.state = "CONNECTING"
+        session.output = Output()
+        session.player = Player()
+        session._buffer(Buffer())
+        assert session.state == "ERROR"
+        assert [state for state, _ in events] == ["ERROR"]
+        assert "audio-output" in events[0][1]
+        assert session.closed and not session.active
+        assert session.output.muted and session.player.stopped and session.player.cleared
+        assert session.buffers == 0 and session.frames == 0
+        # A delayed decoder signal cannot reactivate a released session.
+        session._buffer(Buffer())
+        assert len(events) == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
+
+
+def test_decoded_radio_buffer_with_available_output_can_mark_playing(app, monkeypatch):
+    """Positive decoder path keeps the existing real-frame liveness contract."""
+    class Buffer:
+        def isValid(self): return True
+        def frameCount(self): return 256
+
+    session = AudioSession("wnyc_fm")
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: True))
+    try:
+        session.active = True
+        session.state = "CONNECTING"
+        session._buffer(Buffer())
+        assert session.state == "PLAYING"
+        assert session.buffers == 1 and session.frames == 256
+        assert session.last_frame > 0
+        session.stop()
+        assert session.state == "OFF"
+    finally:
+        session.deleteLater()
+        app.processEvents()
+
+
+def test_radio_watchdog_disconnects_after_audio_device_hot_unplug(app, monkeypatch):
+    """Once playback was real, losing the output must stop even without new buffers."""
+    import time
+
+    class Output:
+        def __init__(self): self.muted = False
+        def setMuted(self, value): self.muted = value
+
+    class Player:
+        def __init__(self): self.stopped = self.cleared = False
+        def stop(self): self.stopped = True
+        def setSource(self, url): self.cleared = url.isEmpty()
+
+    session = AudioSession("wnyc_fm")
+    seen = []
+    session.changed.connect(lambda state, detail: seen.append((state, detail)))
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: False))
+    try:
+        session.active = True
+        session.state = "PLAYING"
+        session.frames = 256
+        session.buffers = 1
+        session.last_frame = time.monotonic()
+        session.output = Output()
+        session.player = Player()
+        # There is no new _buffer signal after hot-unplug. The watchdog alone
+        # must shut down the player and clear its network stream.
+        session._watch()
+        assert session.state == "ERROR"
+        assert session.closed and not session.active
+        assert session.output.muted and session.player.stopped and session.player.cleared
+        assert [s for s, _ in seen] == ["ERROR"]
+        assert "disconnected" in seen[0][1]
+        session._watch()  # late timer callback cannot restart it
+        assert len(seen) == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
+
+
+def test_radio_watchdog_keeps_recent_audio_when_output_remains_available(app, monkeypatch):
+    """Hot-unplug detection must not terminate valid fresh decoded playback."""
+    import time
+
+    session = AudioSession("wnyc_fm")
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: True))
+    try:
+        session.active = True
+        session.state = "PLAYING"
+        session.frames = 256
+        session.buffers = 1
+        session.last_frame = time.monotonic()
+        session._watch()
+        assert session.active and not session.closed
+        assert session.state == "PLAYING"
+        assert session.buffers == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
