@@ -1,0 +1,89 @@
+name: Diagnostic Owner Map Targets
+
+on:
+  push:
+    branches: [diag/owner-map-targets-20261113]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe real Ukraine Iran map evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from datetime import datetime,timezone,timedelta
+          import json
+          from global_pulse.sources import Collector,load_catalog
+          from global_pulse.core import Store
+          from global_pulse.crisis_overlay import build_country_activity,classify_event,normalize_country
+          from global_pulse.map_evidence import incident_country
+          from global_pulse.gdelt_batches import GdeltBatchCache
+          from global_pulse.gdelt_poll import poll_latest_export
+          from global_pulse.gdelt_map_data import read_archive
+
+          ids=['who','un_peace_security','un_humanitarian_aid','un_health','un_affairs',
+               'rferl_news','euronews_rss','crisisgroup_global','msf_global']
+          catalog={row['id']:row for row in load_catalog()}
+          reports=[]
+          for identity in ids:
+              result=Collector(catalog[identity]).collect()
+              reports.extend(result.get('reports',[]))
+          with TemporaryDirectory(dir=Path.cwd()) as td:
+              db=Path(td)/'gp.sqlite3'
+              with Store(db,mode='live') as store:
+                  events=store.ingest(reports)
+                  reopened=store.list_events(map_evidence=True,limit=5000)
+                  now=datetime.now(timezone.utc)
+                  activity=build_country_activity(reopened,now=now)
+                  for target in ('Ukraine','Iran'):
+                      key=normalize_country(target)
+                      print('TARGET_ACTIVITY',target,activity.get(key))
+                      count=0
+                      for event in reopened:
+                          if normalize_country(incident_country(event))!=key:
+                              continue
+                          print('TARGET_EVENT',target,
+                                'title='+str(event.get('title',''))[:240],
+                                'category='+str(event.get('category')),
+                                'verification='+str(event.get('verification')),
+                                'official='+str(any(r.get('official') for r in event.get('reports',[]))),
+                                'origins='+','.join(str(x) for x in event.get('independent_origins',[])),
+                                'kinds='+','.join(sorted(classify_event(event))))
+                          count+=1
+                          if count>=15:break
+              with GdeltBatchCache(db) as cache:
+                  result=poll_latest_export(cache)
+                  print('GDELT_POLL',result)
+              map_names=[]
+              geo=json.loads((Path('global_pulse/resources/world_countries.geojson')).read_text(encoding='utf-8'))
+              map_names=[str(f.get('properties',{}).get('name','')) for f in geo.get('features',[])]
+              snap=read_archive(db,map_names,since=datetime.now(timezone.utc)-timedelta(days=1),now=datetime.now(timezone.utc))
+              for target in ('Ukraine','Iran'):
+                  print('GDELT_TARGET',target,snap['countries'].get(normalize_country(target)))
+              print('GDELT_TOTAL',snap['message'])
+          PY
