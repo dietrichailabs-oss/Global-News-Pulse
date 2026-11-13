@@ -178,7 +178,14 @@ class WorldMap(QWidget):
                 # not the country aggregate (which may contain other records).
                 # A qualifying current report must not also be counted or
                 # drawn as neutral historical country-only evidence.
-                if build_country_activity((record,), now=now).get(country):
+                # A singleton source cannot qualify for a current crisis
+                # when the full source-backed aggregate has no activity for
+                # this country. Avoid repeating the expensive temporal/source
+                # classifier for thousands of neutral archives (e.g. India).
+                # Countries with activity still require exact per-record
+                # classification: aggregate event_ids is intentionally capped.
+                if (country in self.country_activity
+                        and build_country_activity((record,), now=now).get(country)):
                     continue
                 entry = self.country_only_evidence.setdefault(country, {"count": 0, "events": []})
                 entry["count"] += 1
