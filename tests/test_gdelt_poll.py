@@ -22,8 +22,31 @@ def archive_for(stamp):
     contents = ("\t".join(row) + "\n").encode("utf-8")
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zipped:
-        zipped.writestr(f"{stamp}.export.CSV", contents)
+        # ZipFile.writestr(name, ...) otherwise embeds *the current local
+        # wall-clock time* in the ZIP member. After even a two-second rollover,
+        # replaying an identical GDELT fixture changes its archive MD5 and
+        # legitimately triggers the production completed-checkpoint guard.
+        # Fix the offline test fixture, never relax source checksum validation.
+        entry = zipfile.ZipInfo(f"{stamp}.export.CSV", date_time=(2020, 1, 1, 0, 0, 0))
+        entry.compress_type = zipfile.ZIP_DEFLATED
+        zipped.writestr(entry, contents)
     return out.getvalue()
+
+
+def test_export_fixture_archive_identity_does_not_depend_on_wall_clock():
+    """An identical publisher batch fixture must have identical ZIP bytes.
+
+    The default string-name writestr() stamps the current wall-clock time,
+    and a rollover between import and restart changes the MD5 of a replayed
+    fixture. Pin metadata rather than weakening the real checksum gate.
+    """
+    first = archive_for(STAMP)
+    second = archive_for(STAMP)
+    assert first == second
+    with zipfile.ZipFile(io.BytesIO(first)) as zipped:
+        names = zipped.namelist()
+        assert names == [f"{STAMP}.export.CSV"]
+        assert zipped.infolist()[0].date_time == (2020, 1, 1, 0, 0, 0)
 
 
 def manifest_for(stamp, contents, size=None):
