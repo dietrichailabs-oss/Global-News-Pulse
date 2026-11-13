@@ -28,7 +28,10 @@ SOURCE_IDS=[
     "nz_infrastructure","nz_national_security","nz_trade",
     # Batch 3 candidates.
     "bls_employment","bls_jolts","bls_cpi","bls_ppi",
-    "bls_import_export","bls_work_stoppages","doe_hgeo",
+    "bls_import_export","bls_work_stoppages",
+    # Batch 4 candidates.
+    "uk_mod","uk_home_office","uk_desnz","uk_dft","uk_dhsc","uk_defra","uk_dsit",
+    "ons_releases",
 ]
 
 ALLOW_EMPTY={
