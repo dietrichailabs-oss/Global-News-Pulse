@@ -65,6 +65,10 @@ jobs:
           from urllib.parse import urlsplit
           from global_pulse.sources import Collector,timestamp
           candidates=[
+            ("br_bcb_press","Banco Central do Brasil - Press Releases","https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/notasImprensa?ano=2021","br_bcb","Economy","South America","Brazil","pt",["www.bcb.gov.br","bcb.gov.br"]),
+            ("br_bcb_news","Banco Central do Brasil - News","https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/noticias?ano=2024","br_bcb","Economy","South America","Brazil","pt",["www.bcb.gov.br","bcb.gov.br"]),
+            ("br_bcb_acts","Banco Central do Brasil - Acts and Communications","https://www.bcb.gov.br/api/feed/app/demaisnormativos/atosecomunicados?ano=2025","br_bcb","Government","South America","Brazil","pt",["www.bcb.gov.br","bcb.gov.br"]),
+            ("br_bcb_focus","Banco Central do Brasil - Focus Market Survey","https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/focus","br_bcb","Economy","South America","Brazil","pt",["www.bcb.gov.br","bcb.gov.br"]),
             ("ecb_mid","ECB MID payment systems and monetary data","https://mid.ecb.europa.eu/rss/mid.xml","eu_ecb","Infrastructure","Europe / Global","","en",["mid.ecb.europa.eu","www.ecb.europa.eu"]),
             ("afdb_news","African Development Bank News","https://www.afdb.org/en/news-and-events/rss","afdb","Economy","Africa","","en",["www.afdb.org"]),
             ("za_sars_news","South African Revenue Service latest news","https://www.sars.gov.za/feed/?post_type=latest_news","za_sars","Government","Africa","South Africa","en",["www.sars.gov.za"]),
