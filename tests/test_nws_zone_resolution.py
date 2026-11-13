@@ -159,3 +159,63 @@ def test_pending_geometry_does_not_get_stuck_behind_304():
     result=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=r).collect({'etag':'old','last_modified':'yesterday','nws_zones_pending':True})
     assert 'if-none-match' not in calls[0].headers and 'if-modified-since' not in calls[0].headers
     assert result['state']['nws_zones_pending'] is False
+
+@pytest.mark.parametrize('refs', [
+    [ZONE, 'https://api.weather.gov.evil.test/zones/marine/PKZ802'],
+    [f'https://api.weather.gov/zones/marine/PKZ{i:03d}' for i in range(1, 130)],
+])
+def test_incomplete_explicit_affected_zones_never_claim_complete_area(tmp_path, refs):
+    # Reproduce the actual source -> collector -> stored report path: neither
+    # an invalid neighbor nor a reference past the cap can be discarded to
+    # make a deceptively complete polygon. UGC cannot override bad explicit refs.
+    source=next(s for s in load_catalog() if s['id']=='nws')
+    alert_id='https://api.weather.gov/alerts/synthetic-zone-integrity'
+    payload={'features':[{'id':alert_id,'geometry':None,'properties':{
+        'id':alert_id,'status':'Actual','messageType':'Alert',
+        'headline':'Synthetic Alaska offshore warning','event':'Heavy Freezing Spray Warning',
+        'severity':'Severe','sent':'2026-11-11T08:00:00Z',
+        'expires':'2026-11-11T12:00:00Z','ends':'2026-11-11T14:00:00Z',
+        'description':'Synthetic fixture','areaDesc':'Alaska offshore',
+        'affectedZones':refs,'geocode':{'UGC':['PKZ801']}}}]}
+    def handler(req):
+        assert '/zones/' not in str(req.url), 'Partial/unsafe NWS boundary lookup'
+        return httpx.Response(200,json=payload,request=req)
+    factory,calls=transport(handler)
+    r,_=resolver()
+    received=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=r).collect()
+    assert len(calls)==1 and len(received['reports'])==1
+    row=received['reports'][0]
+    assert row['affected_zones']==[] and row['area_status']=='invalid_zone_references'
+    assert not row.get('area_geometry') and row.get('area_zone_reference_basis') is None
+    assert row['expires_at']=='2026-11-11T12:00:00Z'
+    assert row['ends_at']=='2026-11-11T14:00:00Z'
+    path=tmp_path/'zone_integrity.sqlite3'
+    with Store(path,mode='live') as db:
+        db.ingest(received['reports'],now='2026-11-11T09:00:00Z')
+    with Store(path,mode='live') as db:
+        saved=db.list_events(map_evidence=True)
+        assert len(saved)==1
+        stored=saved[0]['reports'][0]
+        assert stored['area_status']=='invalid_zone_references'
+        assert event_areas([stored])==[]
+
+
+def test_unsafe_preparsed_zone_input_is_not_partially_resolved():
+    r,_=resolver()
+    factory,calls=transport(lambda req:pytest.fail('Unsafe provider list must never be requested'))
+    out,stats=r.enrich([report([ZONE, 'bad zone'])],client_factory=factory)
+    assert not calls and not out[0].get('area_geometry')
+    assert out[0]['area_status']=='invalid_zone_references'
+    assert stats['unresolved_alerts']==1
+
+
+def test_original_provider_polygon_still_wins_over_malformed_zone_list():
+    from global_pulse.map_evidence import normalize_map_fields, nws_map_fields
+    fields=normalize_map_fields({'area_geometry':GEO,'affected_zones':[ZONE,'bad zone']})
+    assert fields['area_geometry']==GEO and fields['area_status']=='provider_geometry'
+    feature={'geometry':GEO}
+    props={'status':'Actual','messageType':'Alert','affectedZones':[ZONE,'bad zone'],
+           'geocode':{'UGC':['PKZ801']},'event':'Heavy Freezing Spray Warning'}
+    selected=nws_map_fields(feature,props)
+    assert selected['area_geometry']==GEO and selected['affected_zones']==[]
+    assert 'area_zone_reference_basis' not in selected
