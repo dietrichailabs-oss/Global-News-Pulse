@@ -8,7 +8,7 @@ def _catalog():
 
 def test_admitted_expansion_sources_are_enabled_metadata_only_and_grouped():
     c=_catalog()
-    uk={"fcdo","ukhsa","hm_treasury","cabinet_office"}
+    uk={"fcdo","ukhsa","hm_treasury","cabinet_office","uk_mod","uk_home_office","uk_desnz","uk_dft","uk_dhsc","uk_defra","uk_dsit"}
     canada={"health_canada_news"}
     ecdc={"ecdc_news"}
     independent={"rba_media","eurostat_news","bank_canada_press","eu_council_press"}
@@ -29,7 +29,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
         "voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine",
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
         "phac_public_health","phac_travel_health","ecdc_cdtr",
-        "eia_today","eia_press","occ_news","occ_bulletins",
+        "eia_today","eia_press","occ_news","occ_bulletins","doe_hgeo",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
@@ -86,7 +86,6 @@ def test_second_batch_is_metadata_only_and_publisher_grouped():
         "nz_government":{"nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health","nz_infrastructure","nz_national_security","nz_trade"},
         "who":{"who","who_afro_emergencies"},
         "bls":{"bls_latest","bls_employment","bls_jolts","bls_cpi","bls_ppi","bls_import_export","bls_work_stoppages"},
-        "doe":{"doe_hgeo"},
     }
     new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies","bls_latest"}
     for identity in new_ids:
@@ -109,3 +108,13 @@ def test_second_batch_spans_economy_health_government_disaster_and_infrastructur
     assert c["ec_energy_news"]["category"]=="Infrastructure"
     assert c["nz_health"]["category"]=="Health"
     assert c["nz_national_security"]["category"]=="Government"
+
+
+def test_ons_feed_is_open_government_statistics_source():
+    c=_catalog()
+    row=c["ons_releases"]
+    assert row["enabled"] is True
+    assert row["publisher_origin_id"]=="ons"
+    assert row["metadata_only"] is True
+    assert row["category"]=="Economy"
+    assert "releasecalendar" in row["url"]
