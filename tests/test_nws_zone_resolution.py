@@ -219,3 +219,89 @@ def test_original_provider_polygon_still_wins_over_malformed_zone_list():
     selected=nws_map_fields(feature,props)
     assert selected['area_geometry']==GEO and selected['affected_zones']==[]
     assert 'area_zone_reference_basis' not in selected
+
+
+@pytest.mark.parametrize('receipts', [
+    [],
+    [{'url': ZONE, 'retrieved_at': 'not-a-timestamp'}],
+    [{'url': OTHER, 'retrieved_at': '2026-11-11T09:00:00Z'}],
+    [{'url': 'https://api.weather.gov.evil.test/zones/forecast/PKZ801',
+      'retrieved_at': '2026-11-11T09:00:00Z'}],
+])
+def test_zone_derived_polygon_without_matching_dated_zone_evidence_is_not_direct_geometry(receipts):
+    """Do not launder an unattributed zone composite into a provider alert polygon."""
+    raw = report([ZONE], area_geometry=GEO,
+                 area_geometry_basis='nws_affected_zones', area_zone_sources=receipts)
+    normalized = normalize_map_fields(raw)
+    assert normalized['affected_zones'] == [ZONE]
+    assert normalized['area_status'] == 'zone_geometry_not_resolved'
+    assert 'area_geometry' not in normalized
+    assert 'area_geometry_basis' not in normalized
+    assert event_areas([dict(raw, **normalized, area_geometry=normalized.get('area_geometry'))]) == []
+
+
+def test_zone_geometry_with_no_zone_refs_cannot_gain_direct_provider_attribution():
+    raw = report([], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[{'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}])
+    result = normalize_map_fields(raw)
+    assert not result['affected_zones'] and 'area_geometry' not in result
+    assert result['area_status'] == 'zone_geometry_not_resolved'
+
+
+def test_valid_dated_zone_receipt_still_admits_true_dateline_geometry():
+    raw = report([ZONE], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[{'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}])
+    result = normalize_map_fields(raw)
+    assert result['area_geometry'] == GEO
+    assert result['area_status'] == 'provider_zone_geometry'
+    assert result['area_geometry_basis'] == 'nws_affected_zones'
+    assert len(list(wrapped_polygons(result['area_geometry']))) == 2
+
+
+def test_unverified_derived_geometry_fails_closed_through_collector_store_and_map(tmp_path):
+    """Synthetic resolver regression: source -> Collector -> persisted SQLite -> map."""
+    source = next(s for s in load_catalog() if s['id'] == 'nws')
+    alert_id = 'https://api.weather.gov/alerts/synthetic-unattributed-zone'
+    payload = {'features': [{'id': alert_id, 'geometry': None, 'properties': {
+        'id': alert_id, 'status': 'Actual', 'messageType': 'Alert',
+        'headline': 'Synthetic Alaska offshore warning provenance check',
+        'event': 'Heavy Freezing Spray Warning', 'severity': 'Severe',
+        'sent': '2026-11-11T08:00:00Z',
+        'expires': '2026-11-11T12:00:00Z', 'ends': '2026-11-11T14:00:00Z',
+        'description': 'Synthetic warning, no actual provider area fetch',
+        'areaDesc': 'Synthetic Alaska offshore',
+        'affectedZones': [ZONE]}}]}
+
+    class MissingReceiptResolver:
+        def enrich(self, rows, *, client_factory=None):
+            # Model an incomplete resolver/store handoff; there is no second
+            # zone HTTP request and no verified geometry source receipt.
+            return [dict(row, area_geometry=copy.deepcopy(GEO),
+                         area_geometry_basis='nws_affected_zones',
+                         area_zone_sources=[]) for row in rows], {'unresolved_alerts': 1}
+
+    def handler(request):
+        assert '/zones/' not in str(request.url)
+        return httpx.Response(200, json=payload, request=request)
+
+    factory, calls = transport(handler)
+    result = Collector(source, client_factory=factory, now=lambda: NOW,
+                       zone_resolver=MissingReceiptResolver()).collect()
+    assert result['state']['status'] == 'available' and len(calls) == 1
+    assert len(result['reports']) == 1
+    assert result['reports'][0]['area_geometry_basis'] == 'nws_affected_zones'
+    db_path = tmp_path / 'unverified-zone-provenance.sqlite3'
+    with Store(db_path, mode='live') as store:
+        stored = store.ingest(result['reports'], now='2026-11-11T09:00:00Z')
+        assert stored and not store.last_ingest_errors
+    with Store(db_path, mode='live') as store:
+        events = store.list_events(limit=50)
+        assert len(events) == 1
+        report_row = events[0]['reports'][0]
+        assert report_row['affected_zones'] == [ZONE]
+        assert report_row['area_status'] == 'zone_geometry_not_resolved'
+        assert not report_row.get('area_geometry')
+        assert report_row['expires_at'] == '2026-11-11T12:00:00Z'
+        assert report_row['ends_at'] == '2026-11-11T14:00:00Z'
+        assert event_areas([report_row]) == []
+        assert all(not e.get('map_areas') for e in store.list_events(map_evidence=True))

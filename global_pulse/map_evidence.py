@@ -168,6 +168,14 @@ def normalize_map_fields(raw):
             result["area_geometry_basis"] = "nws_affected_zones"
             result["area_zone_sources"] = sources
             result["area_status"] = "provider_zone_geometry" if len(sources) == len(result["affected_zones"]) else "partial_provider_zones"
+        else:
+            # An asserted zone-derived polygon without even one matching,
+            # dated official zone fetch cannot be relabeled as direct alert
+            # geometry. Preserve zone identities for a bounded later retry,
+            # but do not render unsupported shapes.
+            result.pop("area_geometry", None)
+            result["area_status"] = ("zone_geometry_not_resolved" if complete_refs
+                                     else "invalid_zone_references")
     geocodes = raw.get("area_geocodes", {})
     result["area_geocodes"] = {}
     if isinstance(geocodes, dict):
