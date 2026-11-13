@@ -15,10 +15,9 @@ from global_pulse.map_evidence import incident_country
 from global_pulse.sources import Collector,load_catalog
 
 SOURCE_IDS=[
-    "voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine",
-    "voa_economy","voa_health",
-    "fda_outbreaks","fda_press","fda_medwatch",
     "ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news",
+    "phac_public_health","phac_travel_health","health_canada_news",
+    "bank_canada_press","ecdc_cdtr","ecdc_news","eu_council_press",
 ]
 
 def main():
