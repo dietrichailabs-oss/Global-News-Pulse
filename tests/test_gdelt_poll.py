@@ -550,8 +550,9 @@ def test_master_tail_rejects_mismatching_declared_length_even_with_complete_rang
     earlier = "20261111074500"
     previous_archive = archive_for(earlier)
     latest_archive = archive_for(STAMP)
-    tail = b"partial-first-row\\n" + manifest_for(earlier, previous_archive)
+    tail = b"partial-first-row\n" + manifest_for(earlier, previous_archive)
     calls = []
+    broken = {"value": True}
     monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep", lambda _seconds: None)
 
     def handler(request):
@@ -565,7 +566,7 @@ def test_master_tail_rejects_mismatching_declared_length_even_with_complete_rang
             start = 100000
             return httpx.Response(206, content=tail, headers={
                 "Content-Range": f"bytes {start}-{start + len(tail) - 1}/9999999",
-                "Content-Length": str(len(tail) + 1),
+                "Content-Length": str(len(tail) + (1 if broken["value"] else 0)),
             })
         raise AssertionError(f"Unapproved fallback request: {url}")
 
@@ -575,3 +576,13 @@ def test_master_tail_rejects_mismatching_declared_length_even_with_complete_rang
         assert "master-list Content-Length body length mismatch" in result["error"]
         assert cache.status()["cached_rows"] == 0
         assert len(calls) == 5  # Manifest, 3 same-URL 404 attempts, 1 tail.
+        # A later honest transfer of exactly the same official tail can still
+        # recover a checksum-backed earlier batch. This positive control makes
+        # the integrity test depend on HTTP framing, not malformed fixture text.
+        broken["value"] = False
+        repaired = poll_latest_export(cache, client=client)
+        assert repaired["status"] == "complete" and repaired["added"] == 1
+        assert repaired["recovered_from_master_list"] is True
+        assert repaired["replication_pending"] is True
+        assert cache.status()["cached_rows"] == 1
+        assert not any("example.org" in url for url in calls)
