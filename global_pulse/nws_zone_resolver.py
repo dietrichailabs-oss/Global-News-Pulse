@@ -106,7 +106,11 @@ class ZoneResolver:
                     if response.headers.get('content-encoding','identity').lower() not in {'','identity'}:
                         raise ValueError('Unexpected compressed zone transfer')
                     length=response.headers.get('content-length','')
-                    if length.isdigit() and int(length)>MAX_RESPONSE_BYTES:raise ValueError('Zone response too large')
+                    if length and (not length.isascii() or not length.isdigit()):
+                        raise ValueError('Invalid zone response Content-Length')
+                    claimed_length=int(length) if length else None
+                    if claimed_length is not None and claimed_length>MAX_RESPONSE_BYTES:
+                        raise ValueError('Zone response too large')
                     raw=bytearray()
                     # Do not buffer 64KiB before checking elapsed time: a slow
                     # drip must be checked at each delivered transport chunk.
@@ -114,6 +118,11 @@ class ZoneResolver:
                         if self.clock()>=deadline or len(raw)+len(part)>MAX_RESPONSE_BYTES:
                             raise ValueError('Zone response bound exceeded')
                         raw.extend(part)
+                    # A syntactically valid JSON prefix is not proof of a
+                    # complete official zone response. Verify HTTP framing
+                    # before admitting its coordinates as warning evidence.
+                    if claimed_length is not None and len(raw)!=claimed_length:
+                        raise ValueError('Zone response Content-Length mismatch')
             payload=json.loads(raw)
             if not isinstance(payload,dict) or payload.get('type')!='Feature':raise ValueError('Expected zone Feature')
             props=payload.get('properties')
@@ -147,8 +156,13 @@ class ZoneResolver:
                     try:normalize_geometry(report['area_geometry']);continue
                     except ValueError:pass
                 refs=report.get('affected_zones',[])
-                if not isinstance(refs,list):continue
-                refs=list(dict.fromkeys(r for r in refs[:MAX_ZONE_REFS] if valid_nws_zone(r)))
+                if (not isinstance(refs,list) or len(refs)>MAX_ZONE_REFS
+                        or any(not valid_nws_zone(ref) for ref in refs)):
+                    if refs and not report.get('area_geometry'):
+                        report['area_status']='invalid_zone_references'
+                        stats['unresolved_alerts']+=1
+                    continue
+                refs=list(dict.fromkeys(refs))
                 if not refs:continue
                 polygons=[];used=[]
                 for url in refs:

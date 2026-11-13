@@ -62,10 +62,57 @@ def test_known_english_and_explicit_non_english_language_preserved():
     assert parse_feed(rss("Breve aviso"), source, RETRIEVED)[0]["language"] == "es"
 
 
-def test_unknown_cyrillic_and_arabic_script_not_mislabeled_english():
+def test_undeclared_short_cyrillic_and_arabic_script_remain_unknown():
     source = custom()
-    assert parse_feed(rss("Последние новости"), source, RETRIEVED)[0]["language"] == "ru"
-    assert parse_feed(rss("أخبار المنطقة"), source, RETRIEVED)[0]["language"] == "ar"
+    # Script is not language: Ukrainian/Russian/Belarusian share Cyrillic,
+    # and Arabic/Persian/Urdu share much of Arabic script.
+    assert parse_feed(rss("Последние новости"), source, RETRIEVED)[0]["language"] == "und"
+    assert parse_feed(rss("أخبار المنطقة"), source, RETRIEVED)[0]["language"] == "und"
+    assert parse_feed(rss("خبر فوری"), source, RETRIEVED)[0]["language"] == "und"
+
+
+def test_distinct_ukrainian_letters_route_without_russian_fallback():
+    assert parse_feed(rss("Київ: новини"), custom(), RETRIEVED)[0]["language"] == "uk"
+
+
+def test_rss_channel_language_routes_declared_ukrainian_and_persian():
+    source = custom()
+    for tag, expected in [("uk-UA", "uk"), ("fa-IR", "fa"),
+                          ("zh-TW", "zt"), ("en-GB", "en")]:
+        payload = rss("News").replace(
+            b"<channel>", f"<channel><language>{tag}</language>".encode())
+        assert parse_feed(payload, source, RETRIEVED)[0]["language"] == expected
+
+
+def test_rss_item_xml_language_overrides_channel_and_catalog():
+    source = custom()
+    source["language"] = "ru"
+    payload = rss("Новини України").replace(
+        b"<channel>", b"<channel><language>ru-RU</language>").replace(
+        b"<item>", b'<item xml:lang="uk-UA">')
+    report = parse_feed(payload, source, RETRIEVED)[0]
+    assert report["language"] == "uk" and report["source_id"] == source["id"]
+
+
+def test_atom_feed_and_entry_language_routing_preserve_original_headlines():
+    source = custom()
+    atom = (b'<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="fa-IR">'
+            b'<entry><id>persian</id><title>News</title>'
+            b'<link href="https://example.org/reports/notice-2"/>'
+            b'<published>2026-11-11T19:00:00Z</published></entry>'
+            b'<entry xml:lang="uk-UA"><id>ukrainian</id><title>News</title>'
+            b'<link href="https://example.org/reports/notice-3"/>'
+            b'<published>2026-11-11T19:00:00Z</published></entry></feed>')
+    rows = parse_feed(atom, source, RETRIEVED)
+    assert [row["language"] for row in rows] == ["fa", "uk"]
+    assert [row["title"] for row in rows] == ["News", "News"]
+
+
+def test_unrecognized_feed_language_is_not_english():
+    source = custom()
+    payload = rss("Short notice").replace(
+        b"<channel>", b"<channel><language>123-???</language>")
+    assert parse_feed(payload, source, RETRIEVED)[0]["language"] == "und"
 
 
 def test_collector_to_persisted_report_preserves_unknown_language(tmp_path):
@@ -99,3 +146,27 @@ def test_collector_to_persisted_report_preserves_unknown_language(tmp_path):
         assert matches[0]["published_at"] == parsed["published_at"]
     finally:
         reopened.close()
+
+def test_declared_language_survives_collector_and_store_restart(tmp_path):
+    source = custom()
+    payload = rss("Київ: місцеві новини").replace(
+        b"<channel>", b"<channel><language>uk-UA</language>")
+    def handler(request):
+        return httpx.Response(200, headers={"content-type": "application/rss+xml"}, content=payload)
+    def client_factory(**kwargs):
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+    result = Collector(source, now=lambda: NOW, client_factory=client_factory).collect(
+        {"configured_interval": 600})
+    assert result["state"]["status"] == "available"
+    assert len(result["reports"]) == 1
+    report = result["reports"][0]
+    assert report["language"] == "uk" and report["title"] == "Київ: місцеві новини"
+    archive = tmp_path / "language-provenance.sqlite3"
+    with Store(archive, mode="live") as store:
+        store.ingest(result["reports"])
+    with Store(archive, mode="live") as store:
+        persisted = [r for event in store.list_events(limit=100)
+                     for r in event.get("reports", []) if r.get("id") == report["id"]]
+        assert len(persisted) == 1
+        assert persisted[0]["language"] == "uk"
+        assert persisted[0]["title"] == report["title"]

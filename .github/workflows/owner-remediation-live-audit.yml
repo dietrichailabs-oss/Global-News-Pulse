@@ -1,0 +1,101 @@
+name: Owner Remediation Live Source Audit
+
+on:
+  push:
+    branches: [eng/owner-remediation-map-gdelt-radio-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: owner-remediation-live-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Live official/open source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from datetime import datetime, timezone
+          from global_pulse.sources import Collector,load_catalog
+          from global_pulse.core import Store
+          from global_pulse.crisis_overlay import build_country_activity
+          from global_pulse.map_evidence import incident_country
+          from global_pulse.gdelt_batches import GdeltBatchCache
+          from global_pulse.gdelt_poll import poll_latest_export
+
+          catalog={row['id']:row for row in load_catalog()}
+          required=[
+              'who','un_peace_security','un_humanitarian_aid','un_health',
+              'un_economic_development','un_migrants_refugees','un_affairs',
+              'wb_gdp','rferl_news','euronews_rss','crisisgroup_global','msf_global'
+          ]
+          all_reports=[]
+          failures=[]
+          for identity in required:
+              result=Collector(catalog[identity]).collect()
+              state=result['state']
+              reports=result.get('reports',[])
+              observations=result.get('observations',[])
+              countries=sorted({
+                  incident_country({'reports':[report]})
+                  for report in reports if incident_country({'reports':[report]})
+              })
+              print('LIVE_SOURCE',identity,'status='+str(state.get('status')),
+                    'http='+str(state.get('http_status')),
+                    'reports='+str(len(reports)),'observations='+str(len(observations)),
+                    'countries='+','.join(countries[:20]))
+              if identity in {'who','un_peace_security','un_humanitarian_aid','un_health',
+                              'un_economic_development','un_migrants_refugees','un_affairs'}:
+                  if state.get('status') not in {'available','stale','not_modified'} or not reports:
+                      failures.append(identity+':'+str(state.get('status'))+':'+str(state.get('http_status')))
+              if identity=='wb_gdp':
+                  if state.get('status') not in {'available','stale','not_modified'} or len(observations)<100:
+                      failures.append(identity+':'+str(state.get('status'))+':rows='+str(len(observations)))
+              all_reports.extend(reports)
+
+          with TemporaryDirectory(dir=Path.cwd()) as td:
+              db=Path(td)/'global-pulse.sqlite3'
+              with Store(db,mode='live') as store:
+                  events=store.ingest(all_reports)
+                  reopened=store.list_events(map_evidence=True,limit=5000)
+                  activity=build_country_activity(reopened,now=datetime.now(timezone.utc))
+                  print('LIVE_MAP_ACTIVITY_COUNTRIES',','.join(sorted(activity)[:80]))
+                  print('LIVE_MAP_UKRAINE',activity.get('ukraine'))
+                  print('LIVE_MAP_IRAN',activity.get('iran'))
+              with GdeltBatchCache(db) as cache:
+                  gdelt=poll_latest_export(cache)
+                  print('LIVE_GDELT',gdelt)
+                  if gdelt.get('status') not in {'complete','already_imported'}:
+                      failures.append('gdelt:'+str(gdelt.get('status'))+':'+str(gdelt.get('http_status')))
+                  if cache.status().get('cached_rows',0)<=0:
+                      failures.append('gdelt:no_rows')
+
+          if failures:
+              raise SystemExit('LIVE_AUDIT_FAILURES '+','.join(failures))
+          PY
