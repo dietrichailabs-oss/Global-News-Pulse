@@ -1,0 +1,3 @@
+Independent QA R3 target: 88a670fdc62c02744899e87422d738194cabc78d
+170 configured / 127 enabled expected.
+Product/source files are unchanged on this QA branch.
