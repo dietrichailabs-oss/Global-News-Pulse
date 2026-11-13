@@ -618,7 +618,7 @@
     {
       "id": "who",
       "name": "World Health Organization — Disease Outbreak News",
-      "url": "https://www.who.int/api/news/diseaseoutbreaknews",
+      "url": "https://www.who.int/api/news/diseaseoutbreaknews?%24select=Id%2CDonId%2CPublicationDateAndTime%2CPublicationDate%2CItemDefaultUrl%2CSummary%2CTitle%2COverrideTitle%2CLastModified&%24orderby=PublicationDateAndTime%20desc&%24top=100",
       "homepage": "https://www.who.int/emergencies/disease-outbreak-news/",
       "adapter": "who_don",
       "category": "Health",
