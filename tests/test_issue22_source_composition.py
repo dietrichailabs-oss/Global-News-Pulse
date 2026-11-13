@@ -59,6 +59,24 @@ def test_expansion_keeps_historical_who_and_ecb_origin_identity_without_duplicat
     assert historical["origin_id"] == expanded["origin_id"] == "ecb"
 
 
+def test_sanews_family_preserves_unknown_legacy_trust_and_one_configured_publisher_origin():
+    catalog = {entry["id"]: entry for entry in load_catalog()}
+    assert {catalog[key]["publisher_origin_id"] for key in
+            ("sanews", "za_sanews_news", "za_sanews_features")} == {"sanews"}
+    assert catalog["sanews"]["independence"] == "unknown"
+    assert catalog["za_sanews_news"]["independence"] == "original"
+    assert catalog["za_sanews_features"]["independence"] == "original"
+    rss = (b"<rss><channel><item><guid>ZA-1</guid>"
+           b"<title>Government update</title>"
+           b"<link>https://www.sanews.gov.za/south-africa/government-update</link>"
+           b"<pubDate>Thu, 12 Nov 2026 12:00:00 GMT</pubDate>"
+           b"</item></channel></rss>")
+    legacy = parse_feed(rss, catalog["sanews"], "2026-11-13T12:00:00Z")[0]
+    expanded = parse_feed(rss, catalog["za_sanews_news"], "2026-11-13T12:00:00Z")[0]
+    assert legacy["origin_id"] == ""
+    assert expanded["origin_id"] == "sanews"
+
+
 def test_metadata_only_embedded_media_is_rejected_at_parser_and_store_boundaries():
     source = next(row for row in load_catalog() if row["id"] == "fed_monetary")
     rss = (b"<rss><channel><item><guid>f1</guid>"
