@@ -99,10 +99,14 @@ def parse_manifest(raw: str | bytes) -> dict[str, GdeltBatch]:
         size = int(size_text)
         if size < 1:
             raise GdeltBatchError("Invalid GDELT advertised archive size")
-        # The GDELT listing may contain HTTP links; constrain host/path, then
-        # upgrade exactly those links to HTTPS without following redirects.
-        entries[kind] = GdeltBatch(filename, kind, match.group("stamp"),
-                                    f"https://{HOST}{parsed.path}", size, checksum.lower())
+        # The HTTPS manifest currently publishes HTTP archive URLs. Preserve
+        # that exact reviewed provider transport instead of rewriting it to an
+        # HTTPS URL that may not exist. Archive bytes are still bounded and
+        # must match the HTTPS-manifest advertised size + MD5 before import.
+        entries[kind] = GdeltBatch(
+            filename, kind, match.group("stamp"),
+            f"{parsed.scheme}://{HOST}{parsed.path}", size, checksum.lower()
+        )
     if not entries or set(entries) - set(KINDS):
         raise GdeltBatchError("No supported GDELT manifest entries")
     return entries
