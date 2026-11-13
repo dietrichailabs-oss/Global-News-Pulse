@@ -1,7 +1,8 @@
-"""Live admission audit for the open/public source-expansion batch.
+"""Live admission audit for the open/public source-expansion batches.
 
 No article bodies, images, audio, or video are downloaded by Global Pulse.
-The admitted feeds are metadata-only RSS/Atom sources.
+Admitted feeds are metadata-only RSS/Atom sources. Current-source admission
+rejects stale feeds; explicitly seasonal/release-day feeds may be empty.
 """
 from __future__ import annotations
 import argparse,json,sys
@@ -15,9 +16,25 @@ from global_pulse.map_evidence import incident_country
 from global_pulse.sources import Collector,load_catalog
 
 SOURCE_IDS=[
+    # Batch 1, already admitted.
     "ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news",
     "health_canada_news","bank_canada_press","ecdc_news","eu_council_press",
+    # Batch 2 candidates.
+    "eia_today","eia_press","occ_news","occ_bulletins",
+    "nass_news","nass_reports","sec_litigation","sec_suspensions",
+    "noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook",
+    "ec_trade_news","ec_energy_news","ec_environment_news",
+    "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
+    "nz_infrastructure","nz_national_security","nz_trade",
 ]
+
+ALLOW_EMPTY={
+    # NASS Today's Reports is documented to be empty on days without releases.
+    "nass_reports",
+    # Tropical outlook feeds can be valid but contain no active item outside
+    # relevant issuance windows/seasons.
+    "nhc_atlantic_outlook","nhc_east_pacific_outlook",
+}
 
 def main():
     parser=argparse.ArgumentParser()
@@ -55,9 +72,9 @@ def main():
         }
         evidence["results"].append(row)
         print("SOURCE_EXPANSION",json.dumps(row,sort_keys=True),flush=True)
-        if state.get("status") not in {"available","stale","not_modified"}:
+        if state.get("status") not in {"available","not_modified"}:
             failures.append(f"{identity}:{state.get('status')}:{state.get('http_status')}")
-        elif not reports:
+        elif not reports and identity not in ALLOW_EMPTY:
             failures.append(f"{identity}:no_reports")
 
     if failures:
