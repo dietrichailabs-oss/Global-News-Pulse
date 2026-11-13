@@ -16,8 +16,7 @@ from global_pulse.sources import Collector,load_catalog
 
 SOURCE_IDS=[
     "ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news",
-    "phac_public_health","phac_travel_health","health_canada_news",
-    "bank_canada_press","ecdc_cdtr","ecdc_news","eu_council_press",
+    "health_canada_news","bank_canada_press","ecdc_news","eu_council_press",
 ]
 
 def main():
