@@ -1367,7 +1367,8 @@
         "www.federalreserve.gov"
       ],
       "feed_documentation": "https://www.federalreserve.gov/feeds/feeds.htm",
-      "limitation": "Official statements are attributable to the issuing agency, not independent confirmation of every claim. Third-party media/full articles are excluded. Publisher location is not incident geography."
+      "limitation": "Official statements are attributable to the issuing agency, not independent confirmation of every claim. Third-party media/full articles are excluded. Publisher location is not incident geography.",
+      "publisher_origin_id": "federal_reserve_press"
     },
     {
       "id": "un_peace_security",
