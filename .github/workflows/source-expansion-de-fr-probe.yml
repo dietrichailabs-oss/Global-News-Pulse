@@ -4,6 +4,7 @@ on:
     branches: [eng/source-expansion-open-feeds-20261113]
     paths:
       - .github/workflows/source-expansion-de-fr-probe.yml
+      - tests/test_source_expansion_de_fr.py
   workflow_dispatch:
 
 permissions:
@@ -30,7 +31,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Test publisher-direct live admission before any catalog enablement
+      - name: Offline parser and provenance regression for admitted Germany/France sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_source_expansion_de_fr.py
+      - name: Confirm publisher-direct admission against the checked-out catalog
         shell: bash
         run: |
           set -euo pipefail
@@ -38,7 +44,7 @@ jobs:
           import json
           from datetime import datetime, timezone
           from urllib.parse import urlsplit
-          from global_pulse.sources import Collector, timestamp
+          from global_pulse.sources import Collector, load_catalog, timestamp
 
           base = {
               "adapter": "rss", "enabled": True, "metadata_only": True,
@@ -71,9 +77,15 @@ jobs:
                   "country": "France", "region": "Europe", "language": "fr",
               },
           ]
+          catalog = {row["id"]: row for row in load_catalog()}
           failures = []
           for candidate in candidates:
-              found = Collector(candidate).collect()
+              actual = catalog.get(candidate["id"])
+              assert actual is not None, candidate["id"] + ": missing from catalog"
+              for field in ("url", "adapter", "publisher_origin_id", "language", "allowed_domains", "article_domains", "category", "country"):
+                  assert actual.get(field) == candidate.get(field), f"{candidate['id']}: unexpected {field}"
+              assert actual["enabled"] is True and actual["metadata_only"] is True
+              found = Collector(actual).collect()
               state = found["state"]
               reports = found["reports"]
               recent = [
