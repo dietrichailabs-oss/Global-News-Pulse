@@ -1,0 +1,81 @@
+name: Source Expansion - NASA Earth Direct Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-nasa-earth-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nasa-first-party-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: First-party RSS Collector admission probes (no catalog enablement)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          candidates=[
+            ("nasa_eo_natural","NASA Earth Observatory Natural Events","https://science.nasa.gov/feed/earth-observatory/natural-events","Disaster",["science.nasa.gov"]),
+            ("nasa_eo_daily","NASA Earth Observatory Image of the Day","https://science.nasa.gov/feed/earth-observatory/image-of-the-day","Environment",["science.nasa.gov"]),
+            ("nasa_press","NASA News Releases","https://www.nasa.gov/news-release/feed/","Government",["www.nasa.gov","nasa.gov"]),
+            ("nasa_cneos","NASA/JPL CNEOS News","https://cneos.jpl.nasa.gov/feed/news.xml","Disaster",["cneos.jpl.nasa.gov","www.jpl.nasa.gov","www.nasa.gov"]),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for i,(sid,name,url,category,hosts) in enumerate(candidates):
+              if i: time.sleep(3)
+              s=dict(id=sid,name=name,url=url,adapter="rss",category=category,
+                 enabled=True,metadata_only=True,access_status="reviewed_public",
+                 language="en",region="Global",country="",publisher_origin_id="nasa",
+                 independence="original",official=True,official_scope="statement",
+                 min_interval=3600,retention_days=180,stale_after_days=30,
+                 allowed_domains=[urlsplit(url).hostname],
+                 article_domains=hosts,attribution="NASA; original direct link; no endorsement")
+              try:
+                  response=Collector(s).collect()
+                  state=response["state"]; reports=response.get("reports",[])
+                  fresh=[r for r in reports if r.get("published_at") and 0<=now-timestamp(r["published_at"])<=30*86400]
+                  invalid=[r for r in reports if not r.get("title") or not r.get("published_at")
+                    or not r.get("attribution") or r.get("summary") or r.get("media")
+                    or r.get("origin_id")!="nasa" or r.get("country_basis")!="publisher_coverage"
+                    or r.get("original_url")!=r.get("url")
+                    or r.get("latitude") is not None or r.get("longitude") is not None
+                    or urlsplit(r.get("url","")).scheme!="https"
+                    or urlsplit(r.get("url","")).hostname not in hosts]
+                  eligible=bool(state.get("status")=="available" and state.get("http_status")==200
+                    and reports and fresh and not invalid)
+                  record=dict(id=sid,eligible=eligible,status=state.get("status"),
+                    http_status=state.get("http_status"),reports=len(reports),
+                    fresh_30d=len(fresh),violations=len(invalid),
+                    latest=state.get("latest_publication"),error=state.get("error",""),
+                    sample_original_links=[r.get("original_url") for r in reports[:2]],
+                    publisher_origin_id="nasa")
+              except Exception as exc:
+                  record=dict(id=sid,eligible=False,error=type(exc).__name__+": "+str(exc)[:180])
+              print("NASA_EARTH_PRE_ADMISSION",json.dumps(record,sort_keys=True),flush=True)
+          print("NASA_EARTH_PROBE_ONLY no catalog mutation or source admission",flush=True)
+          PY
