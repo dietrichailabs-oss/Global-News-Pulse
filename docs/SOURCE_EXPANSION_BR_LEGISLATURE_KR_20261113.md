@@ -2,7 +2,7 @@
 
 ## Scope, status and freeze
 
-Engineering-only source-expansion work on [draft PR #7](https://github.com/dietrichailabs-oss/Global-News-Pulse/pull/7), stacked behind PR #6. **No merge, release, Windows package, redistribution or article scraping is authorized.** Source catalog is now **168 configurations, 135 enabled**, with three newly admitted Agência Câmara RSS feeds under **one** independent publisher family `br_camara`. Independent QA (display rights, source clock, reuse terms, correction/retraction and reliability) remains required. The catalog retains `remote_updates=disabled`.
+Engineering-only source-expansion work on [draft PR #7](https://github.com/dietrichailabs-oss/Global-News-Pulse/pull/7), stacked behind PR #6. **No merge, release, Windows package, redistribution or article scraping is authorized.** Source catalog is now **168 configurations, 128 enabled** (three Câmara admissions, seven prior NZ Beehive feeds quarantined after live denial), with three newly admitted Agência Câmara RSS feeds under **one** independent publisher family `br_camara`. Independent QA (display rights, source clock, reuse terms, correction/retraction and reliability) remains required. The catalog retains `remote_updates=disabled`.
 
 ## Brazil — admitted three first-party feeds only after direct live checks
 
@@ -49,3 +49,14 @@ Both Bank of Korea feeds **remain unadmitted** because a clear official permissi
 3. Recheck sustained hourly host stability, origin grouping across all three siblings, and refusal of non-publisher original article links.
 4. Review admission and broader source audit job logs before QA sign-off; a workflow having run is not itself a source admission pass.
 5. Leave PR #7 draft/unmerged and all release/package gates unchanged.
+
+
+## NZ Beehive host-wide access-denial quarantine
+
+The [broader full source audit 43414479879](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43414479879) passed its offline stage but **failed live** on November 13, 2026 when **all seven** previously active `www.beehive.govt.nz` topic RSS feeds returned **HTTP 403**. These were `nz_economic_growth`, `nz_energy`, `nz_foreign_affairs`, `nz_health`, `nz_infrastructure`, `nz_national_security` and `nz_trade`. Earlier audit 43413912312 had passed (intermittent publisher host access); therefore this is an access reliability/denial, not proof these feeds are permanently gone. Per conservative admission policy, **all seven are now disabled** in catalog [quarantine commit a55e76a](https://github.com/dietrichailabs-oss/Global-News-Pulse/commit/a55e76ac149faf479c532e2551acdaf376c4da22). They remain visible for audit and retain their original `publisher_origin_id=nz_government`; disabled feeds cannot contribute data.
+
+The broad audit now logs `SOURCE_QUARANTINE` without contacting denied siblings, requires all seven remain disabled, and fails closed if they are accidentally re-enabled. This respects Collector's minimum 24-hour host denial hold: do not bypass access denials with a different client, provider alias or immediate retrials. [Audit-circuit fix 2add702](https://github.com/dietrichailabs-oss/Global-News-Pulse/commit/2add702a944190ba7e14c9312791914c22697d07); [quarantine assertion 8146c93](https://github.com/dietrichailabs-oss/Global-News-Pulse/commit/8146c935f2fae7c64442c84ed225d2d15c6ef9bd).
+
+Broad publisher audits previously launched on *every* documentation/probe commit. [CI pacing fix 2ed39e4](https://github.com/dietrichailabs-oss/Global-News-Pulse/commit/2ed39e422948f627b0bb9fed51595ab698d6a2b8) restricts automatic full audits to catalog/Collector/audit-script changes, retaining explicit manual dispatch. This prevents innocuous documentation or probe-only pushes from repeatedly hammering unrelated publishers. Existing independent source-specific workflows may also fire after catalog changes and still warrant pacing review.
+
+**This quarantine does not reverse the three independent Câmara feed post-admission passes.** Full audit after quarantine must be examined as its own workflow result, and no previous failing audit may be re-labeled as a pass. Before restoring NZ feeds, obtain publisher-direct successful HTTP 200, parseable original links/recent content, and valid reuse/display rights after the access-denial hold. No source was silently re-enabled.
