@@ -95,12 +95,13 @@ def test_nz_access_denial_is_quarantined_fail_closed():
         assert row["publisher_origin_id"] == "nz_government"
         assert "403" in row.get("limitation", "")
 
-def test_statcan_date_and_nested_title_exceptions_are_exactly_scoped():
+def test_source_specific_nested_title_and_updated_time_exceptions_are_bounded():
     c = catalog()
     nested = {i for i, row in c.items() if row.get("nested_feed_text")}
     updated = {i for i, row in c.items() if row.get("updated_is_publication_time")}
+    bcb = {"br_bcb_press","br_bcb_news","br_bcb_acts","br_bcb_focus"}
     assert nested == STATCAN
-    assert updated == STATCAN
+    assert updated == STATCAN | bcb
 
 def test_statcan_nested_markup_is_sanitized_metadata_only():
     source = catalog()["statcan_prices"]
