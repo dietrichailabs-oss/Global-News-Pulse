@@ -5,7 +5,7 @@ Admitted feeds are metadata-only RSS/Atom sources. Current-source admission
 rejects stale feeds; explicitly seasonal/release-day feeds may be empty.
 """
 from __future__ import annotations
-import argparse,json,sys
+import argparse,json,sys,time
 from datetime import datetime,timezone
 from pathlib import Path
 
@@ -14,6 +14,8 @@ sys.path.insert(0,str(ROOT))
 
 from global_pulse.map_evidence import incident_country
 from global_pulse.sources import Collector,load_catalog
+from defusedxml import ElementTree as SafeET
+import httpx
 
 SOURCE_IDS=[
     # Batch 1, already admitted.
@@ -91,6 +93,24 @@ def main():
         }
         evidence["results"].append(row)
         print("SOURCE_EXPANSION",json.dumps(row,sort_keys=True),flush=True)
+        if identity.startswith("statcan_") and state.get("http_status")==200 and not reports:
+            try:
+                response=httpx.get(catalog[identity]["url"],timeout=12.0,headers={"User-Agent":"GlobalPulse/0.1 (Dietrich AI Labs; https://www.dietrichailabs.com)"})
+                root=SafeET.fromstring(response.content)
+                locals_=[node.tag.rsplit("}",1)[-1] for node in root.iter()]
+                first=next((node for node in root.iter() if node.tag.rsplit("}",1)[-1].lower() in {"entry","item"}),None)
+                print("STATCAN_FORMAT",json.dumps({
+                    "source_id":identity,
+                    "root":root.tag,
+                    "entry_count":sum(1 for x in locals_ if x.lower()=="entry"),
+                    "item_count":sum(1 for x in locals_ if x.lower()=="item"),
+                    "first_children":[] if first is None else [x.tag.rsplit("}",1)[-1] for x in list(first)[:20]],
+                    "first_link_attrs":[] if first is None else [dict(x.attrib) for x in list(first) if x.tag.rsplit("}",1)[-1].lower()=="link"][:5],
+                },sort_keys=True),flush=True)
+            except Exception as exc:
+                print("STATCAN_FORMAT_ERROR",identity,type(exc).__name__,flush=True)
+        if identity.startswith("statcan_"):
+            time.sleep(1.5)
         if state.get("status") not in {"available","not_modified"} and not (
             state.get("status")=="stale" and identity in ALLOW_STALE
         ):
