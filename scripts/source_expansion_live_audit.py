@@ -42,7 +42,7 @@ SOURCE_IDS=[
     "japan_statistics_news","jma_weather_updates","jma_eqvol_updates",
     "japan_mod_updates","japan_mod_press","japan_mofa_safety",
     # U.S. public-domain/current-feed batch.
-    "cdc_travel_notices","bea_news_releases","fdic_site_updates",
+    "cdc_travel_notices","fdic_site_updates",
 ]
 
 ALLOW_EMPTY={
