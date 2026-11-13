@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.11.official4",
-  "reviewed_at": "2026-11-11",
+  "catalog_version": "2026.11.13.owner-remediation1",
+  "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
     {
@@ -352,7 +352,7 @@
     {
       "id": "wb_inflation",
       "name": "World Bank — Consumer-price inflation",
-      "url": "https://api.worldbank.org/v2/country/US;CA;BR;MX;GB;DE;FR;ZA;NG;EG;IN;CN;JP;KR;ID;AU;AR;TR;UA;IL/indicator/FP.CPI.TOTL.ZG?format=json&mrv=10&per_page=500",
+      "url": "https://api.worldbank.org/v2/country/all/indicator/FP.CPI.TOTL.ZG?format=json&mrv=3&per_page=2000",
       "homepage": "https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG",
       "adapter": "worldbank",
       "category": "Economy",
@@ -377,12 +377,13 @@
       "independence": "unknown",
       "indicator": "FP.CPI.TOTL.ZG",
       "unit": "annual %",
-      "indicator_description": "Annual percentage change in consumer prices; methodology varies by economy."
+      "indicator_description": "Annual percentage change in consumer prices; methodology varies by economy.",
+      "limitation": "Annual country observations from the World Bank Indicators API. Aggregates/regions are filtered locally; source dates remain visible and no economic crisis is inferred."
     },
     {
       "id": "wb_unemployment",
       "name": "World Bank — Unemployment",
-      "url": "https://api.worldbank.org/v2/country/US;CA;BR;MX;GB;DE;FR;ZA;NG;EG;IN;CN;JP;KR;ID;AU;AR;TR;UA;IL/indicator/SL.UEM.TOTL.ZS?format=json&mrv=10&per_page=500",
+      "url": "https://api.worldbank.org/v2/country/all/indicator/SL.UEM.TOTL.ZS?format=json&mrv=3&per_page=2000",
       "homepage": "https://data.worldbank.org/indicator/SL.UEM.TOTL.ZS",
       "adapter": "worldbank",
       "category": "Economy",
@@ -407,12 +408,13 @@
       "independence": "unknown",
       "indicator": "SL.UEM.TOTL.ZS",
       "unit": "% of total labor force",
-      "indicator_description": "Modeled ILO estimate of unemployment; revisions and comparability limitations apply."
+      "indicator_description": "Modeled ILO estimate of unemployment; revisions and comparability limitations apply.",
+      "limitation": "Annual country observations from the World Bank Indicators API. Aggregates/regions are filtered locally; source dates remain visible and no economic crisis is inferred."
     },
     {
       "id": "wb_gdp",
       "name": "World Bank — Real GDP growth",
-      "url": "https://api.worldbank.org/v2/country/US;CA;BR;MX;GB;DE;FR;ZA;NG;EG;IN;CN;JP;KR;ID;AU;AR;TR;UA;IL/indicator/NY.GDP.MKTP.KD.ZG?format=json&mrv=10&per_page=500",
+      "url": "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.MKTP.KD.ZG?format=json&mrv=3&per_page=2000",
       "homepage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG",
       "adapter": "worldbank",
       "category": "Economy",
@@ -437,7 +439,8 @@
       "independence": "unknown",
       "indicator": "NY.GDP.MKTP.KD.ZG",
       "unit": "annual %",
-      "indicator_description": "Annual percentage growth in GDP at market prices based on constant local currency."
+      "indicator_description": "Annual percentage growth in GDP at market prices based on constant local currency.",
+      "limitation": "Annual country observations from the World Bank Indicators API. Aggregates/regions are filtered locally; source dates remain visible and no economic crisis is inferred."
     },
     {
       "id": "bbc",
@@ -525,7 +528,8 @@
       "metadata_only": true,
       "article_domains": [
         "news.un.org"
-      ]
+      ],
+      "publisher_origin_id": "un_news"
     },
     {
       "id": "agencia_brasil",
@@ -613,31 +617,36 @@
     },
     {
       "id": "who",
-      "name": "World Health Organization",
-      "url": "https://www.who.int/emergencies/disease-outbreak-news",
-      "homepage": "https://www.who.int/emergencies/disease-outbreak-news",
-      "adapter": "manual",
+      "name": "World Health Organization — Disease Outbreak News",
+      "url": "https://www.who.int/api/news/diseaseoutbreaknews?%24select=Id%2CDonId%2CPublicationDateAndTime%2CPublicationDate%2CItemDefaultUrl%2CSummary%2CTitle%2COverrideTitle%2CLastModified&%24orderby=PublicationDateAndTime%20desc&%24top=100",
+      "homepage": "https://www.who.int/emergencies/disease-outbreak-news/",
+      "adapter": "who_don",
       "category": "Health",
       "region": "Global",
       "country": "",
-      "enabled": false,
-      "min_interval": 600,
+      "enabled": true,
+      "min_interval": 1800,
       "allowed_domains": [
         "www.who.int"
       ],
-      "access": "Manual link / unavailable automation",
-      "access_status": "review_required",
-      "license": "WHO publication-specific terms and third-party exclusions apply.",
-      "license_url": "https://www.who.int/about/policies/publishing/copyright",
-      "attribution": "World Health Organization",
-      "status": "disabled",
-      "authentication": "See limitation",
-      "review_date": "2026-11-08",
+      "access": "Official public HTTPS Disease Outbreak News API; no account or key",
+      "access_status": "reviewed_public",
+      "license": "WHO public API metadata and bounded extracts with WHO attribution and article URL retained. Full narrative text, logos and third-party materials are not copied; WHO site reuse terms apply.",
+      "license_url": "https://www.who.int/about/policies/terms-of-use",
+      "attribution": "World Health Organization — Disease Outbreak News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-12",
       "retention_days": 365,
       "language": "en",
-      "official": false,
-      "independence": "unknown",
-      "limitation": "Official outbreak news directory; no automatic ingestion enabled."
+      "official": true,
+      "independence": "original",
+      "limitation": "Disease Outbreak News is selective rather than exhaustive. Map placement requires explicit country evidence in the WHO record text; no location is inferred from WHO publisher geography.",
+      "metadata_only": true,
+      "article_domains": [
+        "www.who.int"
+      ],
+      "publisher_origin_id": "who_don"
     },
     {
       "id": "sec",
@@ -1353,6 +1362,210 @@
       ],
       "feed_documentation": "https://www.federalreserve.gov/feeds/feeds.htm",
       "limitation": "Official statements are attributable to the issuing agency, not independent confirmation of every claim. Third-party media/full articles are excluded. Publisher location is not incident geography."
+    },
+    {
+      "id": "un_peace_security",
+      "name": "United Nations News — Peace and Security",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/peace-and-security/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/peace-and-security/feed/rss.xml",
+      "adapter": "rss",
+      "category": "News",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
+    },
+    {
+      "id": "un_humanitarian_aid",
+      "name": "United Nations News — Humanitarian Aid",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/humanitarian-aid/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/humanitarian-aid/feed/rss.xml",
+      "adapter": "rss",
+      "category": "Humanitarian",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
+    },
+    {
+      "id": "un_health",
+      "name": "United Nations News — Health",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/health/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/health/feed/rss.xml",
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
+    },
+    {
+      "id": "un_economic_development",
+      "name": "United Nations News — Economic Development",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/economic-development/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/economic-development/feed/rss.xml",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
+    },
+    {
+      "id": "un_migrants_refugees",
+      "name": "United Nations News — Migrants and Refugees",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/migrants-and-refugees/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/migrants-and-refugees/feed/rss.xml",
+      "adapter": "rss",
+      "category": "Humanitarian",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
+    },
+    {
+      "id": "un_affairs",
+      "name": "United Nations News — UN Affairs",
+      "url": "https://news.un.org/feed/subscribe/en/news/topic/un-affairs/feed/rss.xml",
+      "homepage": "https://news.un.org/feed/subscribe/en/news/topic/un-affairs/feed/rss.xml",
+      "adapter": "rss",
+      "category": "Government",
+      "region": "Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 600,
+      "allowed_domains": [
+        "news.un.org"
+      ],
+      "access": "Official public UN News RSS feed; no account or key",
+      "access_status": "reviewed_public",
+      "license": "Official UN News RSS headline/summary metadata only. Global Pulse preserves UN attribution and original links; no media mirroring or full article republication is claimed.",
+      "license_url": "https://www.un.org/en/about-us/terms-of-use",
+      "attribution": "United Nations News",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-09",
+      "retention_days": 180,
+      "language": "en",
+      "official": true,
+      "independence": "original",
+      "official_scope": "statement",
+      "metadata_only": true,
+      "article_domains": [
+        "news.un.org"
+      ],
+      "publisher_origin_id": "un_news",
+      "limitation": "UN News topic feed; same publisher identity as the all-news UN feed, so sections never count as independent corroboration. Metadata/headline collection only; country-level placement requires explicit source evidence."
     }
   ]
 }

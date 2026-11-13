@@ -61,3 +61,44 @@ def test_map_navigation_refresh_cannot_activate_off_radio(tmp_path):
         assert window.media.radio.status.text() == "OFF"
     finally:
         _close(app, controller, window)
+
+def test_startup_initializer_is_visible_until_real_desktop_is_ready(tmp_path):
+    """A painted initialization notice precedes Store/UI loading, then closes.
+
+    This checks the actual Qt display/lifecycle in offscreen mode, not physical
+    Windows 11 responsiveness or whether a long Store migration can still stall.
+    """
+    from global_pulse.__main__ import show_initialization_splash
+
+    app = QApplication.instance() or QApplication([])
+    splash = show_initialization_splash(app)
+    assert splash.isVisible()
+    assert splash.accessibleName() == "Global Pulse initializing"
+    assert "INITIALIZING GLOBAL PULSE" in splash.message()
+    assert "local archive" in splash.message()
+    # Qt's default QSplashScreen closes on a click; that would falsely show an
+    # apparently stuck/blank app while its Store and map are still initializing.
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt
+    QTest.mouseClick(splash, Qt.MouseButton.LeftButton)
+    app.processEvents()
+    assert splash.isVisible()
+
+    controller = None
+    window = None
+    try:
+        controller = Controller(tmp_path, demo=True)
+        window = MainWindow(controller)
+        assert splash.isVisible(), "Do not expose partially initialized controls"
+        window.show()
+        splash.finish(window)
+        app.processEvents()
+        assert not splash.isVisible()
+        assert window.isVisible()
+        assert isinstance(window.world_map, WorldMap)
+    finally:
+        splash.close()
+        if window is not None:
+            _close(app, controller, window)
+        elif controller is not None:
+            controller.close()
