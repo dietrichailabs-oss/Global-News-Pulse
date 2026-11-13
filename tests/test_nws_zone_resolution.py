@@ -305,3 +305,38 @@ def test_unverified_derived_geometry_fails_closed_through_collector_store_and_ma
         assert report_row['ends_at'] == '2026-11-11T14:00:00Z'
         assert event_areas([report_row]) == []
         assert all(not e.get('map_areas') for e in store.list_events(map_evidence=True))
+
+
+@pytest.mark.parametrize('bad_receipts', [
+    [],
+    [{'url': ZONE, 'retrieved_at': 'not-a-date'}],
+    [{'url': OTHER, 'retrieved_at': '2026-11-11T09:00:00Z'}],
+    [{'url': 'https://api.weather.gov.evil.test/zones/forecast/PKZ801',
+      'retrieved_at': '2026-11-11T09:00:00Z'}],
+])
+def test_map_renderer_refuses_legacy_unvalidated_zone_composite_without_store_pass(bad_receipts):
+    """Direct map projection of an old saved report must enforce provenance too."""
+    raw = report([ZONE], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=bad_receipts)
+    original = copy.deepcopy(raw)
+    assert event_areas([raw]) == []
+    assert raw == original
+
+
+def test_map_renderer_retains_valid_offshore_zone_and_honest_partial_coverage():
+    valid = {'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}
+    raw = report([ZONE, OTHER], area_geometry=GEO,
+                 area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[valid])
+    areas = event_areas([raw])
+    assert len(areas) == 1
+    assert areas[0]['basis'] == 'provider_affected_zone_geometry'
+    assert '1/2 zones' in areas[0]['description']
+    assert 'partial area' in areas[0]['description']
+    assert len(list(wrapped_polygons(areas[0]['geometry']))) == 2
+    # An invalid neighbor cannot make the one verified zone look complete.
+    invalid = dict(raw, affected_zones=[ZONE, 'untrusted zone'])
+    assert event_areas([invalid]) == []
+    # Actual direct NWS bulletin area does not require fetched zone receipts.
+    direct = report([ZONE], area_geometry=GEO)
+    assert event_areas([direct])[0]['basis'] == 'provider_alert_geometry'

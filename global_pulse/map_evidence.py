@@ -411,15 +411,21 @@ def event_areas(reports):
             continue
         if report.get("evidence_status", "active") != "active" or not report.get("area_geometry"):
             continue
+        zone_based = report.get("area_geometry_basis") == "nws_affected_zones"
+        # Revalidate zone provenance at the final presentation boundary too.
+        # Old saved records and direct callers may predate Store's normalization;
+        # an unverified derived polygon must never be drawn as a bulletin area.
+        checked = normalize_map_fields(report) if zone_based else report
+        if zone_based and not checked.get("area_geometry"):
+            continue
         try:
-            geometry = normalize_geometry(report["area_geometry"])
+            geometry = normalize_geometry(checked["area_geometry"])
         except ValueError:
             continue
-        zone_based = report.get("area_geometry_basis") == "nws_affected_zones"
         zone_note = ""
         if zone_based:
-            done = len(report.get("area_zone_sources", []))
-            total = len(report.get("affected_zones", []))
+            done = len(checked.get("area_zone_sources", []))
+            total = len(checked.get("affected_zones", []))
             zone_note = f" — NWS affected-zone boundaries: {done}/{total} zones"
             if report.get("area_zone_reference_basis") == "provider_ugc":
                 zone_note += " (source UGC references)"
