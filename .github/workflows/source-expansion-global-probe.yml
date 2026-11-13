@@ -100,5 +100,23 @@ jobs:
                      sample_article_urls=[r.get("url") for r in reports[:2]]),sort_keys=True),flush=True)
               except Exception as e:
                   print("GLOBAL_DIVERSITY_PRE_ADMISSION",json.dumps(dict(id=sid,eligible=False,error=type(e).__name__+":"+str(e)[:150])),flush=True)
+          # Publisher Atom dates diagnostic only: do not infer freshness from retrieval time.
+          from urllib.request import Request,urlopen
+          from global_pulse.sources import SafeET
+          for sid,name,url,origin,cat,region,country,lang,hosts in candidates[:4]:
+              try:
+                  with urlopen(Request(url,headers={"User-Agent":"GlobalPulse/0.1 (Dietrich AI Labs; https://www.dietrichailabs.com)","Accept":"application/atom+xml, application/xml;q=0.9"}), timeout=12) as r:
+                      data=r.read(350000)
+                  root=SafeET.fromstring(data)
+                  def local(tag): return tag.split("}")[-1].lower()
+                  entries=[e for e in root.iter() if local(e.tag)=="entry"][:3]
+                  fields=[]
+                  for e in entries:
+                      fields.append({local(c.tag):(c.text or "").strip()[:50] for c in e
+                                    if local(c.tag) in {"published","updated","issued","date","created"}})
+                  print("BCB_ATOM_DATES_ONLY",json.dumps(dict(id=sid,feed_root=local(root.tag),
+                        date_fields=fields),sort_keys=True),flush=True)
+              except Exception as e:
+                  print("BCB_ATOM_DATES_ONLY",json.dumps(dict(id=sid,error=type(e).__name__+":"+str(e)[:100])),flush=True)
           print("NO_SOURCES_ENABLED_BY_PROBE",flush=True)
           PY
