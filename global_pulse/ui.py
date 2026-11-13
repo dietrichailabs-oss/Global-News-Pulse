@@ -313,9 +313,11 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
-        # Many independent source status signals can arrive back-to-back.
+        # Many provider status-only signals can arrive back-to-back. Qt
+        # marshals these from Scheduler's worker thread before timer startup.
+        # Report ingestion and user actions bypass this timer entirely.
         # Paint at most once per short UI interval instead of requerying the
-        # whole SQLite archive, map and source tables on every callback.
+        # whole SQLite archive, map and source tables on every status callback.
         # Do not restart an active timer: continuous collection must not
         # indefinitely postpone a visible update.
         self._collection_refresh_timer=QTimer(self)
@@ -324,7 +326,11 @@ class MainWindow(SituationActions, QMainWindow):
         self._collection_refresh_timer.timeout.connect(self.refresh_data)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        controller.data_changed.connect(self._schedule_collected_refresh)
+        # Saved evidence, actual reports, translations, and explicit user
+        # actions must refresh immediately. Only provider status chatter uses
+        # the coalesced GUI-thread timer below.
+        controller.data_changed.connect(self.refresh_data)
+        controller.source_status_changed.connect(self._schedule_collected_refresh)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -596,14 +602,14 @@ class MainWindow(SituationActions, QMainWindow):
         return filters
 
     def _schedule_collected_refresh(self):
-        """Coalesce collector bursts without delaying direct user-filter actions."""
+        """Coalesce provider-status-only bursts; evidence updates stay immediate."""
         if not self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.start()
 
     def refresh_data(self,*args):
         if self._refreshing:return
-        # A user-initiated refresh (filter, navigation or first load) already
-        # sees all source updates. Do not repeat it at the old timer deadline.
+        # Any actual evidence update or user action already queried the latest
+        # provider status too. Cancel the redundant delayed status repaint.
         if self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.stop()
         self._refreshing=True
