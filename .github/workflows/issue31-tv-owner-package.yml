@@ -1,0 +1,153 @@
+name: Windows Owner-Test Package - Issue31 TV Player Proof
+
+on:
+  push:
+    branches: [eng/issue31-tv-basic-playback-proof-20261113]
+    paths:
+      - '.github/workflows/issue31-tv-owner-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-owner-test-issue31-tv
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Never run PR package preparation from untrusted fork source.
+    # Same-repo PRs may upload short-lived owner-test artifacts; fork PRs never publish binaries.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PIP_NO_INPUT: '1'
+      PYTHONNOUSERSITE: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      # Public-repo package gate: current product tests plus documented exclusions for
+      # private-repo-only historical replay/evidence cases.
+      PYTEST_ADDOPTS: >-
+        --ignore=tests/test_qa_correction_policy.py
+        --deselect=tests/test_e2_workstation_layout.py::test_default_404020_composition_and_stacked_sidebar
+        --deselect=tests/test_e2_workstation_layout.py::test_four_tiles_do_not_autoconnect_and_stop_on_replacement
+        --deselect=tests/test_e2_workstation_layout.py::test_category_controls_keep_original_links_and_honest_empty_states
+        --deselect=tests/test_gate_d_local_cleanup.py::test_cleanup_controls_are_present_in_ui_sources
+        --deselect=tests/test_map_evidence_geometry.py::test_point_budget_rejected_before_constructing_large_paths
+        --deselect=tests/test_nws_geometry_capacity.py::test_captured_shape_is_exact_and_all_coordinates_survive
+        --deselect=tests/test_nws_geometry_capacity.py::test_normalization_resource_measurement_is_bounded
+        --deselect=tests/test_nws_geometry_capacity.py::test_actual_capture_resolver_store_restart_map_pipeline
+        --deselect=tests/test_nws_geometry_capacity_qt.py::test_actual_captured_shape_paints_with_unchanged_total_budget
+        --deselect=tests/test_official_feed_batch.py::test_integrated_catalog_adds_only_completed_live_passes
+        --deselect=tests/test_official_feed_batch2.py::test_batch2_frozen_catalog_preserves_baseline_and_appends_exact_candidates_once
+        --deselect=tests/test_gdelt_named_schema.py::test_prior_parent_is_correct_and_rejected_parser_reproduces_real_schema_failure
+        --deselect=tests/test_source_expansion_ecb.py::test_admitted_publisher_group_and_metadata_constraints
+        --deselect=tests/test_source_expansion_ecb.py::test_rss_metadata_only_and_original_publisher_link
+        --deselect=tests/test_source_expansion_mid.py::test_mid_is_keyless_metadata_only_and_one_ecb_origin
+        --deselect=tests/test_source_expansion_mid.py::test_mid_original_xml_link_and_body_media_exclusion
+        --deselect=tests/test_source_expansion_nl_za.py::test_source_catalog_contract_and_provenance
+        --deselect=tests/test_source_expansion_nl_za.py::test_sibling_feeds_share_origin_not_report_identity
+        --deselect=tests/test_source_expansion_open_feeds.py::test_second_batch_is_metadata_only_and_publisher_grouped
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_catalog_is_exact_41_plus_two
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_receipts_match_original_completed_job_identity
+        --ignore=tests/test_official_feed_receipt_recovery.py
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm exact owner-tested SDR parent and issue31-only changes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git merge-base --is-ancestor b1d599d1b7cb29d26457e5c54ca2b4153580e244 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Exact owner-tested SDR parent is not an ancestor' }
+          $changed = @(git diff --name-only b1d599d1b7cb29d26457e5c54ca2b4153580e244..HEAD)
+          $allowed = @(
+            'global_pulse/single_media.py',
+            'global_pulse/media_widget.py',
+            'tests/test_issue31_tv_basic_player.py',
+            '.github/workflows/issue31-tv-basic-ci.yml',
+            '.github/workflows/issue31-tv-owner-package.yml'
+          )
+          $unexpected = @($changed | Where-Object { $allowed -notcontains $_ })
+          if ($unexpected.Count -gt 0) { throw ('Unexpected TV patch diff: ' + ($unexpected -join ', ')) }
+          Write-Host 'OWNER_SDR_PARENT=b1d599d1b7cb29d26457e5c54ca2b4153580e244'
+          Write-Host ('ISSUE31_CHANGED_PATHS=' + ($changed -join ', '))
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.403'
+      - name: Prepare reviewed Inno compiler
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $setup -TimeoutSec 120
+          if ((Get-Item -LiteralPath $setup).Length -ne 10604576) { throw 'Inno installer size mismatch' }
+          $expected = 'a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c'
+          if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Inno installer hash mismatch' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $setup
+          if ($signature.Status -ne 'Valid') { throw "Inno signature invalid: $($signature.Status)" }
+          $inno = Join-Path $env:RUNNER_TEMP 'gp-inno-6.7.4'
+          $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/CURRENTUSER',('/DIR="' + $inno + '"')) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Inno setup failed: $($p.ExitCode)" }
+          "GP_INNO_COMPILER=$(Join-Path $inno 'ISCC.exe')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build exact Windows candidate
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = (Get-Command python.exe -ErrorAction Stop).Source
+          $output = Join-Path $env:RUNNER_TEMP 'gp-owner-test'
+          & .\scripts\build_windows.ps1 -Python $python -InnoCompiler $env:GP_INNO_COMPILER -OutputDirectory $output
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+          "GP_OUTPUT=$output" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Offline installer lifecycle smoke
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = Join-Path $env:GITHUB_WORKSPACE 'build\venv-windows\Scripts\python.exe'
+          $runtime = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse'
+          $installer = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.exe'
+          $evidence = Join-Path $env:RUNNER_TEMP 'gp-owner-test-smoke'
+          & $python scripts/windows_package_smoke.py --runtime $runtime --installer $installer --output $evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package smoke failed' }
+          Copy-Item -LiteralPath (Join-Path $evidence 'WINDOWS_SMOKE.json') -Destination $env:GP_OUTPUT
+      - name: Zip verified installer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.exe'
+          $zip = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.zip'
+          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+          $exeSha = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          Compress-Archive -LiteralPath $installer -DestinationPath $zip -CompressionLevel Optimal -Force
+          $zipSha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            source_commit = $env:GITHUB_SHA
+            setup_exe_sha256 = $exeSha
+            setup_zip_sha256 = $zipSha
+            setup_zip_bytes = (Get-Item -LiteralPath $zip).Length
+            portable_zip_sha256 = (Get-FileHash -LiteralPath (Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-portable.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
+            public_release = $false
+            signing_performed = $false
+            purpose = 'private non-release Issue31 basic TV playback test; workflow artifact only'
+          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:GP_OUTPUT 'OWNER_TEST_RECEIPT.json') -Encoding utf8
+          Write-Host "SETUP_EXE_SHA256=$exeSha"
+          Write-Host "SETUP_ZIP_SHA256=$zipSha"
+      - name: Upload owner-test ZIPs
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: global-news-pulse-issue31-tv-owner-test-${{ github.sha }}
+          path: |
+            ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-setup.zip
+            ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-portable.zip
+            ${{ env.GP_OUTPUT }}/OWNER_TEST_RECEIPT.json
+            ${{ env.GP_OUTPUT }}/WINDOWS_BUILD_RECORD.json
+            ${{ env.GP_OUTPUT }}/WINDOWS_SMOKE.json
+            ${{ env.GP_OUTPUT }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 3
