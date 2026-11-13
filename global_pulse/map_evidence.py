@@ -337,13 +337,8 @@ def explicit_text_country(event):
     return next(iter(matches.values())) if len(matches) == 1 else ""
 
 
-def incident_country(event):
-    """Return one attributable country or unknown; never a publisher fallback.
-
-    Existing explicit record.country fields are retained, but newly parsed
-    publisher-scope fields and known legacy catalog defaults are not incidents.
-    No headline inference or coordinates are manufactured by this function.
-    """
+def structured_incident_country(event):
+    """Return country supported by structured record fields only."""
     reports = event.get("reports")
     if not isinstance(reports, list) or not reports:
         return _compact_country(event)
@@ -374,9 +369,18 @@ def incident_country(event):
         countries[_country_identity(country)] = country
     if len(countries) == 1:
         return next(iter(countries.values()))
-    if len(countries) > 1:
-        return ""
-    return explicit_text_country(event)
+    return ""
+
+
+def incident_country(event):
+    """Return one attributable country or unknown; never a publisher fallback.
+
+    Structured provider/record geography wins. When it is absent, exactly one
+    explicit country named in eligible source title/summary text may support a
+    country-level map boundary. No point coordinates are manufactured.
+    """
+    structured = structured_incident_country(event)
+    return structured or explicit_text_country(event)
 
 
 def event_areas(reports):
