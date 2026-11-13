@@ -364,8 +364,23 @@ class _MediaTile(QFrame):
                 if url.scheme() in {"about", "data", "blob"}:
                     return
                 host = url.host().lower()
-                allowed = ("youtube-nocookie.com", "youtube.com", "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com")
-                info.block(url.scheme() != "https" or url.port(443) != 443 or not any(host == x or host.endswith("." + x) for x in allowed))
+                # Embedded YouTube players load their API, media, thumbnails and
+                # provider-served ads across separate Google-owned domains.
+                # The old five-domain gate blocked required YouTube API calls,
+                # leaving a player shell that could never start video.
+                # Restrict to explicit provider families AFTER user consent;
+                # main-frame navigation remains locked to /embed/ below.
+                allowed = (
+                    "youtube-nocookie.com", "youtube.com", "youtubei.googleapis.com",
+                    "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com",
+                    "googleapis.com", "google.com", "googleusercontent.com",
+                    "gvt1.com", "gvt2.com", "doubleclick.net",
+                    "googlesyndication.com", "googleadservices.com",
+                )
+                info.block(
+                    url.scheme() != "https" or url.port(443) != 443
+                    or not any(host == x or host.endswith("." + x) for x in allowed)
+                )
 
         class Page(QWebEnginePage):
             def createWindow(self, _):
