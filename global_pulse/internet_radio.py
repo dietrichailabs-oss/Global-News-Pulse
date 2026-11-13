@@ -142,6 +142,14 @@ class AudioSession(QObject):
     def _watch(self):
         if not self.active:
             return
+        # The default output can disappear *after* valid MP3 frames played.
+        # Decoding may pause on hot-unplug, so the next _buffer callback is not
+        # guaranteed to arrive and cannot be our only loss-of-device check.
+        # Once playback has begun, the bounded watchdog must terminate the
+        # owned media connection instead of leaving a false PLAYING state.
+        if self.frames > 0 and not self._has_audio_output():
+            self.fail("System audio output disconnected; radio stream was stopped.")
+            return
         age = time.monotonic() - (self.last_frame or self.started)
         if age >= 30:
             self.fail("No decoded audio arrived within 30 seconds; the connection was stopped.")

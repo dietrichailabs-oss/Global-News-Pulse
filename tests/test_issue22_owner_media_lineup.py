@@ -268,3 +268,66 @@ def test_decoded_radio_buffer_with_available_output_can_mark_playing(app, monkey
     finally:
         session.deleteLater()
         app.processEvents()
+
+
+def test_radio_watchdog_disconnects_after_audio_device_hot_unplug(app, monkeypatch):
+    """Once playback was real, losing the output must stop even without new buffers."""
+    import time
+
+    class Output:
+        def __init__(self): self.muted = False
+        def setMuted(self, value): self.muted = value
+
+    class Player:
+        def __init__(self): self.stopped = self.cleared = False
+        def stop(self): self.stopped = True
+        def setSource(self, url): self.cleared = url.isEmpty()
+
+    session = AudioSession("wnyc_fm")
+    seen = []
+    session.changed.connect(lambda state, detail: seen.append((state, detail)))
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: False))
+    try:
+        session.active = True
+        session.state = "PLAYING"
+        session.frames = 256
+        session.buffers = 1
+        session.last_frame = time.monotonic()
+        session.output = Output()
+        session.player = Player()
+        # There is no new _buffer signal after hot-unplug. The watchdog alone
+        # must shut down the player and clear its network stream.
+        session._watch()
+        assert session.state == "ERROR"
+        assert session.closed and not session.active
+        assert session.output.muted and session.player.stopped and session.player.cleared
+        assert [s for s, _ in seen] == ["ERROR"]
+        assert "disconnected" in seen[0][1]
+        session._watch()  # late timer callback cannot restart it
+        assert len(seen) == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
+
+
+def test_radio_watchdog_keeps_recent_audio_when_output_remains_available(app, monkeypatch):
+    """Hot-unplug detection must not terminate valid fresh decoded playback."""
+    import time
+
+    session = AudioSession("wnyc_fm")
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: True))
+    try:
+        session.active = True
+        session.state = "PLAYING"
+        session.frames = 256
+        session.buffers = 1
+        session.last_frame = time.monotonic()
+        session._watch()
+        assert session.active and not session.closed
+        assert session.state == "PLAYING"
+        assert session.buffers == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
