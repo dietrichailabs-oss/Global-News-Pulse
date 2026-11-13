@@ -80,6 +80,10 @@ class Controller(QObject):
             self._model_dialog = None
             self._store_closed = False
             self._shutdown_complete = False
+            # A failed Exit Completely retries only components whose teardown
+            # did not succeed. Already closed native workers may be unsafe to
+            # touch again after process and QObject deletion.
+            self._shutdown_steps_complete = set()
             self._translation_keys = {}
             self._translation_pending = set()
             self.translator = Translator(self.data_dir)
@@ -673,6 +677,8 @@ class Controller(QObject):
             ("headline translator", self._headlines.close),
             ("translation worker", self._workers.close),
         ):
+            if name in self._shutdown_steps_complete:
+                continue
             try:
                 action()
             except Exception as error:
@@ -680,6 +686,11 @@ class Controller(QObject):
                     "Unable to finish %s shutdown", name
                 )
                 errors.append((name, error))
+            else:
+                # Mark success only after the underlying native stop returns.
+                # Do not retry an already completed cleanup just because a
+                # different worker or SQLite refused shutdown this attempt.
+                self._shutdown_steps_complete.add(name)
         self._translation_pending.clear()
         self._translation_keys.clear()
         self._model_jobs.clear()

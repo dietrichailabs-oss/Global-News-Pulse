@@ -367,3 +367,78 @@ def test_shutdown_can_retry_sqlite_close_without_false_success(tmp_path, monkeyp
     assert controller._shutdown_complete
     assert calls == ["SQLite", "SQLite"]
     app.processEvents()
+
+
+def test_shutdown_retry_does_not_repeat_completed_worker_and_scheduler_stops(tmp_path, monkeypatch):
+    """After GDELT refusal, only the refused native worker is retried."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    attempts = {"gdelt": 0, "translator": 0, "scheduler": 0}
+    gdelt_close = controller._gdelt.close
+    translation_close = controller._workers.close
+    scheduler_stop = controller.scheduler.stop
+
+    def gdelt_refuses_once():
+        attempts["gdelt"] += 1
+        if attempts["gdelt"] == 1:
+            raise RuntimeError("injected live GDELT worker refused to stop")
+        gdelt_close()
+
+    def close_translation_once():
+        attempts["translator"] += 1
+        if attempts["translator"] > 1:
+            raise RuntimeError("already destroyed translation QProcess")
+        translation_close()
+
+    def stop_scheduler_once():
+        attempts["scheduler"] += 1
+        if attempts["scheduler"] > 1:
+            raise RuntimeError("scheduler already destroyed")
+        scheduler_stop()
+
+    monkeypatch.setattr(controller._gdelt, "close", gdelt_refuses_once)
+    monkeypatch.setattr(controller._workers, "close", close_translation_once)
+    monkeypatch.setattr(controller.scheduler, "stop", stop_scheduler_once)
+    with pytest.raises(RuntimeError, match="GDELT worker"):
+        controller.close()
+    assert controller._store_closed
+    assert not controller._shutdown_complete
+    assert attempts == {"gdelt": 1, "translator": 1, "scheduler": 1}
+    controller.close()
+    assert controller._shutdown_complete
+    assert attempts == {"gdelt": 2, "translator": 1, "scheduler": 1}
+    app.processEvents()
+
+
+def test_shutdown_sqlite_retry_does_not_reclose_destroyed_translation_process(tmp_path, monkeypatch):
+    """A transient SQLite close failure must not re-close a reaped QProcess."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    worker_close = controller._workers.close
+    store_close = controller.store.close
+    attempts = {"worker": 0, "store": 0}
+
+    def worker_must_close_once():
+        attempts["worker"] += 1
+        if attempts["worker"] > 1:
+            raise RuntimeError("already reaped native translation process")
+        worker_close()
+
+    def store_refuses_once():
+        attempts["store"] += 1
+        if attempts["store"] == 1:
+            raise RuntimeError("SQLite checkpoint transient refusal")
+        store_close()
+
+    monkeypatch.setattr(controller._workers, "close", worker_must_close_once)
+    monkeypatch.setattr(controller.store, "close", store_refuses_once)
+    with pytest.raises(RuntimeError, match="SQLite archive"):
+        controller.close()
+    assert controller._shutdown_steps_complete.issuperset(
+        {"GDELT worker", "translation worker", "source scheduler"}
+    )
+    assert not controller._shutdown_complete
+    controller.close()
+    assert controller._shutdown_complete
+    assert attempts == {"worker": 1, "store": 2}
+    app.processEvents()
