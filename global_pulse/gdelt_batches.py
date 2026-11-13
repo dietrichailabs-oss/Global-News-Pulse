@@ -21,6 +21,7 @@ from uuid import uuid4
 
 
 MANIFEST_URL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+MASTER_LIST_URL = "https://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
 HOST = "data.gdeltproject.org"
 MAX_MANIFEST_BYTES = 8192
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
@@ -99,13 +100,13 @@ def parse_manifest(raw: str | bytes) -> dict[str, GdeltBatch]:
         size = int(size_text)
         if size < 1:
             raise GdeltBatchError("Invalid GDELT advertised archive size")
-        # The HTTPS manifest currently publishes HTTP archive URLs. Preserve
-        # that exact reviewed provider transport instead of rewriting it to an
-        # HTTPS URL that may not exist. Archive bytes are still bounded and
-        # must match the HTTPS-manifest advertised size + MD5 before import.
+        # GDELT's HTTPS manifest may still print historical http:// archive
+        # links. Constrain host/path and request the equivalent HTTPS object;
+        # HTTP currently redirects to HTTPS and redirects are intentionally
+        # never followed by the collector.
         entries[kind] = GdeltBatch(
             filename, kind, match.group("stamp"),
-            f"{parsed.scheme}://{HOST}{parsed.path}", size, checksum.lower()
+            f"https://{HOST}{parsed.path}", size, checksum.lower()
         )
     if not entries or set(entries) - set(KINDS):
         raise GdeltBatchError("No supported GDELT manifest entries")
