@@ -486,8 +486,10 @@ class WorldMap(QWidget):
                 pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(center, radius+3, radius+3)
-            if verification == "official":
-                painter.drawRect(QRectF(center.x()-radius-3, center.y()-radius-3, 2*radius+6, 2*radius+6))
+            # Verification is already conveyed by the circular ring:
+            # official=solid, developing=dashed, unverified=dotted.
+            # The old extra rectangle around official rings looked like a
+            # square box around the owner's requested circular map markers.
             if selected:
                 painter.setPen(QPen(QColor("#f1e5ff"), 1.7))
                 painter.drawEllipse(center, radius+7, radius+7)
