@@ -152,7 +152,8 @@ class Television(_MediaTile):
 
     def watch(self):
         import os
-        video=youtube_id(self._current().get("url",""))
+        item=self._current()
+        video=youtube_id(item.get("url",""))
         if not video:
             self.note.setText("Select a verified channel or add a specific supported video.");return
         consent=QMessageBox.question(self,"Connect to YouTube?",

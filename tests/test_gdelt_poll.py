@@ -52,7 +52,8 @@ def test_manifest_to_local_sqlite_without_any_article_download(tmp_path):
         assert (result["status"], result["downloaded"], result["added"]) == ("complete", True, 1)
         assert cache.status()["cached_rows"] == 1
         assert len(calls) == 2
-        assert all(url.startswith("https://data.gdeltproject.org/gdeltv2/") for url in calls)
+        assert calls[0] == "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+        assert calls[1].startswith("https://data.gdeltproject.org/gdeltv2/")
         assert not any("example.org" in url for url in calls)
 
 
@@ -124,7 +125,7 @@ def test_oversized_advertised_archive_is_never_requested(tmp_path):
         assert cache.status()["latest_batch"]["status"] == "error"
 
 
-def test_archive_http_429_recorded_not_followed_or_retried(tmp_path):
+def test_archive_http_429_honors_retry_after_without_same_turn_repeat(tmp_path):
     calls = []
     raw = archive_for(STAMP)
 
@@ -138,8 +139,75 @@ def test_archive_http_429_recorded_not_followed_or_retried(tmp_path):
         result = poll_latest_export(cache, client=client)
         assert result["status"] == "error"
         assert result["error"] == "GDELT endpoint returned HTTP 429"
+        assert result["retry_after_seconds"] == 3600
         assert cache.status()["latest_batch"]["error"] == result["error"]
         assert len(calls) == 2
+
+
+def test_transient_archive_404_retries_same_published_url_then_imports(tmp_path,monkeypatch):
+    raw=archive_for(STAMP)
+    calls=[]
+    archive_attempt={"count":0}
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep",lambda _seconds:None)
+
+    def handler(request):
+        calls.append(str(request.url))
+        if str(request.url).endswith(".txt"):
+            return httpx.Response(200,content=manifest_for(STAMP,raw))
+        archive_attempt["count"]+=1
+        if archive_attempt["count"]<3:
+            return httpx.Response(404)
+        return httpx.Response(200,content=raw)
+
+    with GdeltBatchCache(tmp_path/"db") as cache, make_client(handler) as client:
+        result=poll_latest_export(cache,client=client)
+        assert result["status"]=="complete"
+        assert result["added"]==1
+        assert archive_attempt["count"]==3
+        assert len(set(calls[1:]))==1
+
+
+def test_latest_404_recovers_from_bounded_master_tail_with_independent_digest(tmp_path,monkeypatch):
+    previous="20261111074500"
+    latest=STAMP
+    latest_raw=archive_for(latest)
+    previous_raw=archive_for(previous)
+    latest_manifest=manifest_for(latest,latest_raw)
+    previous_line=manifest_for(previous,previous_raw).decode("ascii").strip()
+    tail=("partial-old-line\n"+previous_line+"\n").encode("ascii")
+    calls=[]
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep",lambda _seconds:None)
+
+    def handler(request):
+        url=str(request.url)
+        calls.append((url,request.headers.get("range")))
+        if url.endswith("lastupdate.txt"):
+            return httpx.Response(200,content=latest_manifest)
+        if url.endswith(f"{latest}.export.CSV.zip"):
+            return httpx.Response(404)
+        if url.endswith("masterfilelist.txt"):
+            start=100000
+            end=start+len(tail)-1
+            return httpx.Response(
+                206,content=tail,
+                headers={"Content-Range":f"bytes {start}-{end}/9999999",
+                         "Content-Length":str(len(tail))}
+            )
+        if url.endswith(f"{previous}.export.CSV.zip"):
+            return httpx.Response(200,content=previous_raw)
+        raise AssertionError(url)
+
+    with GdeltBatchCache(tmp_path/"db") as cache, make_client(handler) as client:
+        result=poll_latest_export(cache,client=client)
+        assert result["status"]=="complete"
+        assert result["replication_pending"] is True
+        assert result["recovered_from_master_list"] is True
+        assert result["listed_batch_timestamp"]==latest
+        assert result["batch_timestamp"]==previous
+        assert result["added"]==1
+        assert cache.status()["cached_rows"]==1
+        master=[call for call in calls if call[0].endswith("masterfilelist.txt")]
+        assert master==[("https://data.gdeltproject.org/gdeltv2/masterfilelist.txt","bytes=-65536")]
 
 
 def test_redirect_to_nonapproved_domain_not_followed(tmp_path):
