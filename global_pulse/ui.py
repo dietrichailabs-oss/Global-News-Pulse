@@ -1079,10 +1079,13 @@ class MainWindow(SituationActions, QMainWindow):
     def closeEvent(self,event):
         if self._force_close or getattr(self.controller,"_closed",False):
             event.accept();return
-        self.save_layout()
         if self._close_handler and not self._force_close:
+            # Bootstrap owns the close-to-tray policy and deferred layout save.
+            # Synchronous SQLite writes here used to block the X click and
+            # duplicate another six writes in bootstrap's handler.
             event.ignore();self._close_handler()
         else:
+            self.save_layout()
             if hasattr(self.media,"shutdown"):self.media.shutdown()
             event.accept()
 
