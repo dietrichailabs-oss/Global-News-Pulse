@@ -15,6 +15,7 @@ def catalog():
 def test_fed_source_catalog_and_same_publisher_origin():
     c=catalog()
     assert c["federal_reserve_press"]["enabled"]
+    assert c["federal_reserve_press"]["publisher_origin_id"]==ORIGIN
     assert {c[s]["publisher_origin_id"] for s in IDS}=={ORIGIN}
     for identity in IDS:
         s=c[identity]
@@ -65,5 +66,5 @@ def test_fed_nonpublisher_article_urls_are_rejected():
 
 def test_fed_topical_feeds_never_count_as_another_independent_source():
     c=catalog()
-    assert all(c[x]["publisher_origin_id"]==c["federal_reserve_press"]["id"] for x in IDS)
+    assert all(c[x]["publisher_origin_id"]==c["federal_reserve_press"]["publisher_origin_id"] for x in IDS)
     assert len(set([c[x]["publisher_origin_id"] for x in IDS]+[c["federal_reserve_press"]["id"]]))==1
