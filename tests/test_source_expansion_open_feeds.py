@@ -9,16 +9,14 @@ def _catalog():
 def test_admitted_expansion_sources_are_enabled_metadata_only_and_grouped():
     c=_catalog()
     uk={"fcdo","ukhsa","hm_treasury","cabinet_office","uk_mod","uk_home_office","uk_desnz","uk_dft","uk_dhsc","uk_defra","uk_dsit"}
-    canada={"health_canada_news"}
     ecdc={"ecdc_news"}
     independent={"rba_media","eurostat_news","bank_canada_press","eu_council_press"}
-    for identity in (uk-{"fcdo"})|canada|ecdc|independent:
+    for identity in (uk-{"fcdo"})|ecdc|independent:
         assert c[identity]["enabled"] is True
         assert c[identity]["metadata_only"] is True
         assert c[identity]["access_status"]=="reviewed_public"
     assert c["fcdo"]["enabled"] is True
     assert {c[x]["publisher_origin_id"] for x in uk}=={"uk_government"}
-    assert {c[x]["publisher_origin_id"] for x in canada}=={"canada_gov"}
     assert {c[x]["publisher_origin_id"] for x in ecdc}=={"ecdc"}
     assert c["bank_canada_press"]["publisher_origin_id"]=="bank_canada"
     assert c["eu_council_press"]["publisher_origin_id"]=="eu_council"
@@ -29,7 +27,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
         "voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine",
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
         "phac_public_health","phac_travel_health","ecdc_cdtr",
-        "eia_today","eia_press","occ_news","occ_bulletins","doe_hgeo",
+        "eia_today","eia_press","occ_news","occ_bulletins","doe_hgeo","health_canada_news",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
@@ -118,3 +116,31 @@ def test_ons_feed_is_open_government_statistics_source():
     assert row["metadata_only"] is True
     assert row["category"]=="Economy"
     assert "releasecalendar" in row["url"]
+
+
+def test_statcan_open_licence_family_is_grouped_and_metadata_only():
+    c=_catalog()
+    ids={
+        "statcan_agriculture","statcan_business","statcan_crime","statcan_digital",
+        "statcan_economic_accounts","statcan_energy","statcan_environment",
+        "statcan_government","statcan_health","statcan_housing","statcan_income",
+        "statcan_trade","statcan_labour","statcan_manufacturing",
+        "statcan_population","statcan_prices","statcan_transport","statcan_travel",
+    }
+    for identity in ids:
+        row=c[identity]
+        assert row["enabled"] is True
+        assert row["metadata_only"] is True
+        assert row["access_status"]=="reviewed_public"
+        assert row["publisher_origin_id"]=="statcan"
+        assert row["license_url"].endswith("/open-licence")
+        assert row["url"].startswith("https://www150.statcan.gc.ca/n1/rss/dai-quo/")
+    assert c["statcan_health"]["category"]=="Health"
+    assert c["statcan_energy"]["category"]=="Infrastructure"
+    assert c["statcan_government"]["category"]=="Government"
+    assert c["statcan_prices"]["category"]=="Economy"
+
+def test_default_canada_crown_feed_is_not_assumed_commercially_cleared():
+    c=_catalog()
+    assert c["health_canada_news"]["enabled"] is False
+    assert c["health_canada_news"]["status"]=="disabled"
