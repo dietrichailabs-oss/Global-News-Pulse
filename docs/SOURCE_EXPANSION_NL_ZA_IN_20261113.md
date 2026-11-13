@@ -35,3 +35,21 @@ Probe reports **zero** metadata leakage, media copying, missing publisher dates/
 - Post-admission workflow `.github/workflows/source-expansion-nl-za-admission.yml` must independently pass **both** focused parser/origin tests and all six real checked-out catalog fetches. Engineering verification is not independent legal/QA approval.
 
 No application runtime feature, remediation fix, release artifact or install package changed.
+
+
+## Verified post-admission CI (2026-11-13 06:03 UTC)
+
+[Strict post-admission run **43375918529 — SUCCESS**](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43375918529), from exact integration commit [`7a1547cbf3bb`](https://github.com/dietrichailabs-oss/Global-News-Pulse/commit/7a1547cbf3bb8d83598b0bd7a6693cb389633a09), tested the **checked-out enabled catalog**, not the standalone exploratory dictionaries. Locked dependency installation succeeded. **16/16 focused origin/parser tests PASSED** (4 new source-specific and 12 existing group-identity checks). All **six enabled publisher-direct Collector checks PASSED** with HTTP 200 and zero invalid attribution, body/summary/media, host, HTTPS, original-link, date or origin issues:
+
+| Enabled source ID | Parsed | Recent non-future 30d | Latest publisher UTC |
+|---|---:|---:|---|
+| `nl_cbs_news` | 50 | 36 | 2026-11-13 06:30 (future-dated at 06:03 test time; not counted as a recent past release) |
+| `nl_cbs_economy` | 50 | 21 | 2026-11-12 06:30 |
+| `nl_cbs_health` | 50 | 2 | 2026-11-13 06:30 (future-dated at 06:03 test time) |
+| `nl_cbs_energy` | 50 | 2 | 2026-11-10 06:30 |
+| `za_sanews_news` | 10 | 10 | 2026-11-12 16:38 |
+| `za_sanews_features` | 10 | 6 | 2026-11-03 09:36 |
+
+[The broader established-source live audit **43375918494 — SUCCESS**](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43375918494) also completed from this commit. Its historical/seasonal feed exceptions remain distinct from these strict six-source gates and must never certify old reports as current.
+
+Catalog is now **155 configurations, 122 enabled**; this batch contributes **six feeds across two publisher-origin families**. Independent QA, rights/display signoff, and owner-remediation PR #6 remain explicit holds. No release or merge.
