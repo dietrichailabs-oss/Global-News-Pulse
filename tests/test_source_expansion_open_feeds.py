@@ -28,6 +28,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
     rejected={
         "voa_africa","voa_middle_east","voa_iran","voa_europe","voa_ukraine",
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
+        "phac_public_health","phac_travel_health","ecdc_cdtr",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
