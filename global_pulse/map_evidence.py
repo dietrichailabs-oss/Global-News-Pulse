@@ -259,6 +259,84 @@ def _country_identity(value):
     }.get(key, key)
 
 
+def _word_text(value):
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+@lru_cache(maxsize=1)
+def _country_text_phrases():
+    """Return longest-first explicit country phrases from the bundled map.
+
+    This is a conservative country-level evidence helper, not a geocoder.
+    Publisher/source geography is intentionally excluded and no coordinates are
+    manufactured. Short abbreviations such as US/UK are not accepted from text.
+    """
+    path = Path(__file__).with_name("resources") / "world_countries.geojson"
+    values = {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for feature in data.get("features", []):
+            props = feature.get("properties") or {}
+            name = str(props.get("name") or "").strip()
+            phrase = _word_text(name)
+            if name and len(phrase) >= 4:
+                values[phrase] = name
+    except (OSError, ValueError, TypeError):
+        return ()
+    aliases = {
+        "united states": "United States of America",
+        "united states of america": "United States of America",
+        "czech republic": "Czechia",
+        "turkiye": "Turkey",
+        "ivory coast": "Côte d'Ivoire",
+        "democratic republic of the congo": "Dem. Rep. Congo",
+        "dr congo": "Dem. Rep. Congo",
+        "republic of the congo": "Congo",
+        "south sudan": "South Sudan",
+    }
+    values.update(aliases)
+    return tuple(sorted(values.items(), key=lambda item: (-len(item[0]), item[0])))
+
+
+def explicit_text_country(event):
+    """Return exactly one country explicitly named in eligible source text.
+
+    Longest phrases claim their spans first, preventing South Sudan from also
+    matching Sudan. Separate non-overlapping country names remain ambiguous.
+    """
+    reports = event.get("reports")
+    records = reports if isinstance(reports, list) and reports else [event]
+    matches = {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("future_dated"):
+            continue
+        if str(record.get("evidence_status", "active")).casefold() not in {"", "active"}:
+            continue
+        text = _word_text(" ".join(str(record.get(key, "") or "")
+                                  for key in ("title", "summary", "recap")))
+        if not text:
+            continue
+        padded = " " + text + " "
+        claimed = []
+        for phrase, country in _country_text_phrases():
+            token = " " + phrase + " "
+            cursor = 0
+            while True:
+                index = padded.find(token, cursor)
+                if index < 0:
+                    break
+                start, end = index + 1, index + 1 + len(phrase)
+                if not any(start < right and left < end for left, right in claimed):
+                    claimed.append((start, end))
+                    matches[_country_identity(country)] = country
+                    if len(matches) > 1:
+                        return ""
+                cursor = index + 1
+    return next(iter(matches.values())) if len(matches) == 1 else ""
+
+
 def incident_country(event):
     """Return one attributable country or unknown; never a publisher fallback.
 
@@ -294,7 +372,11 @@ def incident_country(event):
             # Format and country-name aliases must not bypass this exclusion.
             continue
         countries[_country_identity(country)] = country
-    return next(iter(countries.values())) if len(countries) == 1 else ""
+    if len(countries) == 1:
+        return next(iter(countries.values()))
+    if len(countries) > 1:
+        return ""
+    return explicit_text_country(event)
 
 
 def event_areas(reports):
