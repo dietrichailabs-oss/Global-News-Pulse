@@ -1,0 +1,72 @@
+name: Independent QA - PR17 Transient Source Recheck
+
+on:
+  push:
+    branches: [qa/pr17-r2-independent-20261113]
+    paths:
+      - .github/workflows/qa-pr17-transient-recheck.yml
+      - qa/PR17_TRANSIENT_RECHECK_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm reviewed product head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor a09d759a91fec42c3944a3953ea5105c9fe55249 HEAD
+      - name: One unchanged retry of transient failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from global_pulse.sources import Collector,load_catalog
+          c={x["id"]:x for x in load_catalog()}
+          failures=[]
+          for identity in ("gdelt_world_press","wb_unemployment"):
+              result=Collector(c[identity]).collect()
+              state=result["state"]
+              row={
+                "source_id":identity,
+                "status":state.get("status"),
+                "http_status":state.get("http_status"),
+                "reports":len(result.get("reports",[])),
+                "observations":len(result.get("observations",[])),
+                "latest_publication":state.get("latest_publication",""),
+                "error":state.get("error",""),
+              }
+              print("QA_TRANSIENT_RECHECK",json.dumps(row,sort_keys=True),flush=True)
+              if identity=="gdelt_world_press":
+                  if state.get("status") not in {"available","stale"} or not result.get("reports"):
+                      failures.append(identity)
+              else:
+                  if state.get("status")!="available" or not result.get("observations"):
+                      failures.append(identity)
+              time.sleep(1)
+          if failures:
+              raise SystemExit("transient recheck failed: "+",".join(failures))
+          PY
