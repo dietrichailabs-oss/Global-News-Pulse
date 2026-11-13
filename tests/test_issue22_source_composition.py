@@ -77,6 +77,15 @@ def test_sanews_family_preserves_unknown_legacy_trust_and_one_configured_publish
     assert expanded["origin_id"] == "sanews"
 
 
+def test_india_pib_http403_quarantine_cannot_silently_reenable():
+    catalog = {entry["id"]: entry for entry in load_catalog()}
+    row = catalog["india_pib"]
+    assert row["enabled"] is False
+    assert row["status"] == "disabled"
+    assert "403" in row.get("disabled_reason", "")
+    assert "43448330100" in row.get("limitation", "")
+
+
 def test_metadata_only_embedded_media_is_rejected_at_parser_and_store_boundaries():
     source = next(row for row in load_catalog() if row["id"] == "fed_monetary")
     rss = (b"<rss><channel><item><guid>f1</guid>"
