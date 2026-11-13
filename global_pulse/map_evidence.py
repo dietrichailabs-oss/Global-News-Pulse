@@ -126,7 +126,7 @@ def valid_nws_zone(value):
 def normalize_map_fields(raw):
     basis = raw.get("country_basis")
     result = {"country_basis": basis if isinstance(basis, str) and basis in COUNTRY_BASES else "unresolved"}
-    if isinstance(raw.get("area_status"), str) and raw["area_status"] in {"invalid_or_unsupported_geometry", "zone_geometry_not_resolved", "no_provider_geometry"}:
+    if isinstance(raw.get("area_status"), str) and raw["area_status"] in {"invalid_or_unsupported_geometry", "zone_geometry_not_resolved", "no_provider_geometry", "invalid_zone_references"}:
         result["area_status"] = raw["area_status"]
     if "area_geometry" in raw:
         try:
@@ -135,11 +135,20 @@ def normalize_map_fields(raw):
         except ValueError:
             result["area_status"] = "invalid_or_unsupported_geometry"
     zones = raw.get("affected_zones", [])
-    if isinstance(zones, list):
-        result["affected_zones"] = list(dict.fromkeys(z for z in zones[:MAX_ZONE_REFS] if valid_nws_zone(z)))
-    else:
-        result["affected_zones"] = []
-    if "area_geometry" not in result and result["affected_zones"]:
+    if zones is None:
+        zones = []
+    # An invalid neighbor or a 129th reference is not a license to silently
+    # map the first valid subset and call its area complete. Retain an honest
+    # unresolved state until the publisher supplies a bounded complete list.
+    complete_refs = (isinstance(zones, list) and len(zones) <= MAX_ZONE_REFS
+                     and all(valid_nws_zone(zone) for zone in zones))
+    result["affected_zones"] = list(dict.fromkeys(zones)) if complete_refs else []
+    if not complete_refs:
+        if raw.get("area_geometry_basis") == "nws_affected_zones":
+            result.pop("area_geometry", None)
+        if "area_geometry" not in result:
+            result["area_status"] = "invalid_zone_references"
+    elif "area_geometry" not in result and result["affected_zones"]:
         result["area_status"] = "zone_geometry_not_resolved"
     # Derived zone boundaries retain their exact NWS URLs and partial status.
     if raw.get("area_geometry_basis") == "nws_affected_zones" and "area_geometry" in result:
@@ -192,6 +201,7 @@ def nws_map_fields(feature, properties):
     # Supplied valid polygons and affectedZones always win. Use raw geocodes so
     # invalid/truncated neighbors cannot silently turn into complete coverage.
     if (not result.get("area_geometry") and not result.get("affected_zones")
+            and properties.get("affectedZones") in (None, [])
             and properties.get("status") == "Actual"
             and properties.get("messageType", "Alert") in {"Alert", "Update"}):
         from .nws_ugc import ugc_zone_urls
