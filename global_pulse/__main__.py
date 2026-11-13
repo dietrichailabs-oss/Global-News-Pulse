@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSystemTrayIcon, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
 from . import __version__, BUILD_ID
 from .security import event_id, redact
@@ -85,6 +85,75 @@ def onboarding(controller, parent):
     return False
 
 
+
+class _NonDismissableStartupSplash(QSplashScreen):
+    """Keep the startup notice visible even if the user clicks repeatedly."""
+
+    def mousePressEvent(self, event):
+        # QSplashScreen normally disappears when clicked, exposing a blank
+        # desktop while the archive is still loading. Only finish() or a
+        # constructor failure should dismiss this startup state.
+        event.accept()
+
+
+def show_initialization_splash(app):
+    """Paint a truthful startup state before synchronous local archive/UI loading.
+
+    This is a visible startup safeguard, not a claim that the event loop remains
+    responsive during all legacy synchronous initialization work.
+    """
+    backdrop = QPixmap(540, 176)
+    backdrop.fill(QColor("#17161e"))
+    painter = QPainter(backdrop)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#9169d9"), 2))
+    painter.drawRoundedRect(5, 5, 530, 166, 14, 14)
+    painter.end()
+    splash = _NonDismissableStartupSplash(backdrop, Qt.WindowType.WindowStaysOnTopHint)
+    splash.setAccessibleName("Global Pulse initializing")
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Loading the local archive, source settings and offline map.\n"
+        "The dashboard will appear when initialization finishes.",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    splash.show()
+    app.processEvents()  # Ensure the notice paints before blocking startup work.
+    return splash
+
+
+
+def construct_startup_desktop(app, directory, instance, *, demo=False):
+    """Build the first dashboard without leaking the lock or Store on failure.
+
+    A failed window constructor must not strand the single-instance lock or a
+    live SQLite/worker controller. This does not claim startup responsiveness.
+    """
+    splash = None
+    controller = None
+    try:
+        splash = show_initialization_splash(app)
+        from .controller import Controller
+        from .ui import MainWindow
+        controller = Controller(directory, demo=demo)
+        window = MainWindow(controller)
+        window.setWindowIcon(pulse_icon())
+        return splash, controller, window
+    except BaseException:
+        if splash is not None:
+            splash.close()
+        if controller is not None:
+            try:
+                controller.close()
+            except Exception:
+                logging.getLogger("global_pulse").exception(
+                    "Could not fully close controller after startup construction failure"
+                )
+        instance.close()
+        raise
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["--gdelt-worker"]:
@@ -147,12 +216,19 @@ def main(argv=None):
     except RuntimeError as error:
         QMessageBox.warning(None, "Global Pulse", str(error))
         return 1
-    from .controller import Controller, in_quiet_hours
-    from .native_notifications import NativeNotifications
-    from .ui import MainWindow
-    controller = Controller(directory, demo=args.demo)
-    window = MainWindow(controller)
-    window.setWindowIcon(pulse_icon())
+    # No partially populated dashboard is clickable during startup. If Store
+    # or Window construction fails, release both the controller and instance.
+    try:
+        from .controller import in_quiet_hours
+        from .native_notifications import NativeNotifications
+        splash, controller, window = construct_startup_desktop(
+            app, directory, instance, demo=args.demo
+        )
+    except BaseException:
+        instance.close()
+        handler.close()
+        log.removeHandler(handler)
+        raise
     def native_allowed():
         return controller.monitoring and controller.get_setting("notifications_enabled", True) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
 
@@ -249,6 +325,7 @@ def main(argv=None):
 
     window.set_close_handler(close_window)
     window.show()
+    splash.finish(window)
     if args.fixture:
         controller.load_fixture(args.fixture)
     if args.snapshot_first_fixture_event:

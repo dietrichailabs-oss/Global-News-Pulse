@@ -205,3 +205,39 @@ def test_real_desktop_refresh_passes_country_evidence_separately(tmp_path, app):
         controller.close()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+def test_official_point_marker_is_a_circle_without_a_square_box(world, app):
+    """Owner request: remove the rectangle around circular official pins.
+
+    Compare the exact already-painted ocean background at four diagonal
+    corners. The old official drawRect changes those corners; the circular
+    outer ring cannot touch them. This is rendered Qt output, not a source
+    grep or a claim of real-world point-location evidence.
+    """
+    world.set_events([])
+    world.repaint()
+    baseline = world.grab().toImage()
+    point = world.point(0.0, 0.0)  # Inert test coordinate, not a claimed incident.
+    marker = {
+        "id": "synthetic-official-pin",
+        "title": "Synthetic visual marker fixture",
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "verification": "official",
+        "severity": "high",
+        "category": "Disaster",
+        "synthetic": True,
+    }
+    world.set_events([marker])
+    world.repaint()
+    app.processEvents()
+    rendered = world.grab().toImage()
+    x, y = round(point.x()), round(point.y())
+    assert rendered.pixelColor(x, y).rgba() != baseline.pixelColor(x, y).rgba()
+    for sign_x in (-1, 1):
+        for sign_y in (-1, 1):
+            for offset_x in (-1, 0, 1):
+                for offset_y in (-1, 0, 1):
+                    px = x + sign_x * 9 + offset_x
+                    py = y + sign_y * 9 + offset_y
+                    assert rendered.pixelColor(px, py).rgba() == baseline.pixelColor(px, py).rgba()
