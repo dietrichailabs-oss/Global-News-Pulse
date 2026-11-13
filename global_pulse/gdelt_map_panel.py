@@ -102,7 +102,7 @@ class GdeltMapPanel(QWidget):
         if group.get('protest'):detail.append(f"{group['protest']} protest code(s)")
         suffix=(" · "+", ".join(detail)) if detail else ""
         return (f"GDELT: {group['count']} retained coded observation(s){suffix}; "
-                "automated coding, not independently verified crises. Use GDELT records for source links.")
+                "automated coding, not verified crises or independent corroboration. Use GDELT records for source links.")
 
     def show_records(self):
         if not self.snapshot['records']:return
