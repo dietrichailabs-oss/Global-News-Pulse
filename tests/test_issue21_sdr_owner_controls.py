@@ -115,7 +115,7 @@ def test_receiver_state_is_not_green_until_load_success(app):
         panel.receiver_connected = True
         panel._sdr_state_change("CONNECTING")
         assert "CONNECTING" in panel.sdr_status.text()
-        assert "ON" not in panel.sdr_status.text()
+        assert panel.sdr_state == "CONNECTING"
         assert not panel.sdr_mute.isEnabled()
         panel._sdr_load_finished(True)
         assert "ON" in panel.sdr_status.text()
