@@ -182,3 +182,102 @@ def test_failed_store_constructor_still_releases_single_instance(tmp_path, monke
         assert second.acquire()
     finally:
         second.close()
+
+
+def test_controller_catalog_failure_releases_open_sqlite_store(tmp_path, monkeypatch):
+    """A fault after Store opens but before Controller assignment must not leak it."""
+    from global_pulse import controller as controller_module
+    from global_pulse.core import Store
+
+    app = QApplication.instance() or QApplication([])
+    closed = []
+
+    class TrackedStore(Store):
+        def close(self):
+            super().close()
+            closed.append(self)
+
+    def catalog_failure():
+        raise ValueError("injected catalog decode failure")
+
+    monkeypatch.setattr(controller_module, "Store", TrackedStore)
+    monkeypatch.setattr(controller_module, "load_catalog", catalog_failure)
+    with pytest.raises(ValueError, match="injected catalog"):
+        controller_module.Controller(tmp_path, demo=True)
+
+    assert len(closed) == 1
+    assert closed[0]._closed
+    # Reopening the same directory is a real SQLite lifecycle operation; no
+    # process exit or GC is needed to release the provisional Store.
+    with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:
+        assert reopened.stats()["events"] == 0
+    app.processEvents()
+
+
+def test_controller_late_gdelt_failure_rolls_back_workers_scheduler_and_sqlite(
+    tmp_path, monkeypatch
+):
+    """Even the final startup component may fail after workers and timers exist."""
+    from global_pulse import controller as controller_module
+    from global_pulse import gdelt_service as gdelt_module
+    from global_pulse.core import Store
+
+    app = QApplication.instance() or QApplication([])
+    calls = []
+    original_store_close = controller_module.Store.close
+    original_worker_close = controller_module.TranslationProcess.close
+    original_stop = controller_module.Scheduler.stop
+
+    def store_close(self):
+        calls.append("store")
+        return original_store_close(self)
+
+    def worker_close(self):
+        calls.append("workers")
+        return original_worker_close(self)
+
+    def scheduler_stop(self):
+        calls.append("scheduler")
+        return original_stop(self)
+
+    def fail_gdelt(*_args, **_kwargs):
+        raise RuntimeError("injected GDELT constructor failure")
+
+    monkeypatch.setattr(controller_module.Store, "close", store_close)
+    monkeypatch.setattr(controller_module.TranslationProcess, "close", worker_close)
+    monkeypatch.setattr(controller_module.Scheduler, "stop", scheduler_stop)
+    monkeypatch.setattr(gdelt_module, "GdeltService", fail_gdelt)
+    with pytest.raises(RuntimeError, match="injected GDELT constructor"):
+        controller_module.Controller(tmp_path, demo=True)
+
+    assert calls.count("workers") == 1
+    assert calls.count("scheduler") == 1
+    assert calls.count("store") == 1
+    assert calls.index("store") > calls.index("workers")
+    assert calls.index("store") > calls.index("scheduler")
+    with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:
+        assert reopened.stats()["events"] == 0
+    app.processEvents()
+
+
+def test_controller_failed_rollback_preserves_original_exception(tmp_path, monkeypatch):
+    """A secondary cleanup error is logged, not substituted for the first fault."""
+    from global_pulse import controller as controller_module
+    from global_pulse.core import Store
+
+    QApplication.instance() or QApplication([])
+    original_close = controller_module.Store.close
+
+    def close_then_error(self):
+        original_close(self)
+        raise RuntimeError("injected cleanup log-only error")
+
+    def initial_failure():
+        raise ValueError("original bad source catalog")
+
+    monkeypatch.setattr(controller_module.Store, "close", close_then_error)
+    monkeypatch.setattr(controller_module, "load_catalog", initial_failure)
+    with pytest.raises(ValueError, match="original bad source catalog"):
+        controller_module.Controller(tmp_path, demo=True)
+    with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:
+        assert reopened.stats()["events"] == 0
