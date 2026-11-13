@@ -1,0 +1,166 @@
+name: Independent QA - PR17 Full Enabled Pool Live Audit
+
+on:
+  push:
+    branches: [qa/pr17-r3-independent-20261113]
+    paths:
+      - .github/workflows/qa-pr17-full-pool-live.yml
+      - qa/PR17_FULL_POOL_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-pr17-full-pool-live
+  cancel-in-progress: true
+
+jobs:
+  full-pool:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm exact reviewed product head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 88a670fdc62c02744899e87422d738194cabc78d HEAD
+          echo "PR17_REVIEWED_HEAD=88a670fdc62c02744899e87422d738194cabc78d"
+      - name: Run bounded full enabled-pool live audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from collections import defaultdict,deque
+          from datetime import datetime,timezone
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,load_catalog
+
+          catalog=load_catalog()
+          enabled=[s for s in catalog if s.get("enabled")]
+          if len(enabled)!=127:
+              raise SystemExit(f"unexpected enabled count {len(enabled)} != 127")
+
+          denied={
+            "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
+            "nz_infrastructure","nz_national_security","nz_trade",
+            "india_pib","gdelt_world_press",
+          }
+          for identity in denied:
+              row=next(s for s in catalog if s["id"]==identity)
+              if row.get("enabled"):
+                  raise SystemExit(f"quarantined source re-enabled: {identity}")
+
+          # Round-robin publishers/hosts so high-fanout families do not burst.
+          groups=defaultdict(deque)
+          for source in enabled:
+              host=(urlsplit(source["url"]).hostname or "").lower()
+              groups[host].append(source)
+          order=[]
+          hosts=deque(sorted(groups))
+          while hosts:
+              host=hosts.popleft()
+              order.append(groups[host].popleft())
+              if groups[host]:
+                  hosts.append(host)
+
+          results=[]
+          failures=[]
+          warnings=[]
+          last_host={}
+          for index,source in enumerate(order,1):
+              host=(urlsplit(source["url"]).hostname or "").lower()
+              # Never hammer sibling feeds; no retries in this audit.
+              spacing=1.5 if len([s for s in enabled if (urlsplit(s["url"]).hostname or "").lower()==host])>=4 else 0.75
+              delta=time.monotonic()-last_host.get(host,0)
+              if delta<spacing:
+                  time.sleep(spacing-delta)
+              started=time.monotonic()
+              found=Collector(source).collect()
+              last_host[host]=time.monotonic()
+              state=found.get("state",{})
+              reports=found.get("reports",[])
+              observations=found.get("observations",[])
+              violations=[]
+              allowed={x.lower() for x in source.get("article_domains",[])}
+
+              for report in reports[:500]:
+                  report_host=(urlsplit(report.get("url") or "").hostname or "").lower()
+                  if report.get("metadata_only") and report.get("media"):
+                      violations.append("metadata_only_media")
+                  if source.get("adapter") in {"rss","atom"} and report.get("metadata_only") and report.get("summary"):
+                      violations.append("metadata_only_summary")
+                  if allowed and report_host not in allowed:
+                      violations.append("article_host")
+                  if source.get("independence")=="original":
+                      expected=source.get("publisher_origin_id") or source["id"]
+                      if report.get("origin_id")!=expected:
+                          violations.append("origin")
+
+              status=state.get("status")
+              row={
+                "index":index,"source_id":source["id"],"name":source["name"],
+                "adapter":source.get("adapter"),"host":host,
+                "publisher_origin_id":source.get("publisher_origin_id",""),
+                "status":status,"http_status":state.get("http_status"),
+                "reports":len(reports),"observations":len(observations),
+                "latest_publication":state.get("latest_publication",""),
+                "elapsed_seconds":round(time.monotonic()-started,3),
+                "violations":sorted(set(violations)),
+                "error":state.get("error",""),
+              }
+              results.append(row)
+              print("QA_FULL_POOL",json.dumps(row,sort_keys=True),flush=True)
+
+              if status not in {"available","not_modified","stale"}:
+                  failures.append(f'{source["id"]}:{status}:{state.get("http_status")}')
+              if violations:
+                  failures.append(f'{source["id"]}:provenance:{",".join(sorted(set(violations)))}')
+              if status=="stale":
+                  warnings.append(f'{source["id"]}:stale')
+              if not reports and not observations:
+                  warnings.append(f'{source["id"]}:empty')
+
+          summary={
+            "recorded_at":datetime.now(timezone.utc).isoformat(),
+            "reviewed_product_head":"88a670fdc62c02744899e87422d738194cabc78d",
+            "configured":len(catalog),"enabled":len(enabled),
+            "checked":len(results),
+            "available":sum(r["status"]=="available" for r in results),
+            "stale":sum(r["status"]=="stale" for r in results),
+            "not_modified":sum(r["status"]=="not_modified" for r in results),
+            "failures":failures,"warnings":warnings,
+            "results":results,
+          }
+          Path("qa-pr17-full-pool-live.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
+          print("QA_FULL_POOL_SUMMARY",json.dumps({k:v for k,v in summary.items() if k!="results"},sort_keys=True),flush=True)
+          if failures:
+              raise SystemExit("full-pool failures: "+";".join(failures))
+          PY
+      - name: Upload full-pool evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qa-pr17-full-pool-live-${{ github.sha }}
+          path: qa-pr17-full-pool-live.json
+          if-no-files-found: warn
+          retention-days: 1
