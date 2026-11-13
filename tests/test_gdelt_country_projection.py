@@ -81,6 +81,26 @@ def test_stale_future_or_invalid_rows_not_promoted_to_current(archive,field,valu
     assert not result['countries'] and not result['records']
 
 
+def test_provider_quarter_hour_label_may_lead_wall_clock_by_one_interval(archive):
+    stamp='20261111121500'
+    data=payload([event_row(day='20261111',date_added=stamp,country='UP')],stamp=stamp)
+    batch=batch_from_archive(data,stamp=stamp)
+    with GdeltBatchCache(archive) as cache:
+        assert cache.import_export(batch,data,now='2026-11-11T12:05:00+00:00')['status']=='complete'
+    result=read_archive(archive,NAMES,now='2026-11-11T12:05:00Z')
+    assert result['countries']['ukraine']['count']==1
+
+
+def test_provider_label_more_than_one_interval_ahead_stays_hidden(archive):
+    stamp='20261111123000'
+    data=payload([event_row(day='20261111',date_added=stamp,country='UP')],stamp=stamp)
+    batch=batch_from_archive(data,stamp=stamp)
+    with GdeltBatchCache(archive) as cache:
+        assert cache.import_export(batch,data,now='2026-11-11T12:05:00+00:00')['status']=='complete'
+    result=read_archive(archive,NAMES,now='2026-11-11T12:05:00Z')
+    assert not result['records']
+
+
 def test_noncompleted_batch_has_no_display_authority(archive):
     seed(archive,[event_row(country='UP')])
     with sqlite3.connect(archive) as c:c.execute("UPDATE gdelt_batches SET status='failed'")
