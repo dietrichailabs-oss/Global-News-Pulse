@@ -340,3 +340,32 @@ def test_map_renderer_retains_valid_offshore_zone_and_honest_partial_coverage():
     # Actual direct NWS bulletin area does not require fetched zone receipts.
     direct = report([ZONE], area_geometry=GEO)
     assert event_areas([direct])[0]['basis'] == 'provider_alert_geometry'
+
+@pytest.mark.parametrize('length_delta', [-1, 1])
+def test_nws_zone_200_length_mismatch_never_admits_partial_transfer(length_delta):
+    """Valid JSON with incorrect HTTP framing must not become official map evidence."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    claimed = len(payload) + length_delta
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(claimed)}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1
+    assert stats['lookup_failures'] == 1
+    assert stats['unresolved_alerts'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
+def test_nws_zone_matching_200_length_still_admits_valid_offshore_area():
+    """Correctly framed official zone transfers keep working with the same parser."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(len(payload))}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['resolved_alerts'] == 1
+    assert result[0]['area_zone_sources'][0]['url'] == ZONE
+    assert event_areas(result)[0]['basis'] == 'provider_affected_zone_geometry'
+    assert len(list(wrapped_polygons(result[0]['area_geometry']))) == 2
