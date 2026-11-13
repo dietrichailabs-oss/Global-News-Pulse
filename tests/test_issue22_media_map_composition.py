@@ -463,7 +463,7 @@ def test_source_status_burst_coalesces_full_map_archive_refresh(tmp_path, monkey
     monkeypatch.setattr(window.world_map, "set_events", count_map_updates)
     try:
         for _ in range(180):
-            controller.data_changed.emit()
+            controller._on_source_status("sample_source", {"status": "available"})
         assert window._collection_refresh_timer.isActive()
         assert not calls, "Collector burst must not synchronously requery/map 180 times"
 
@@ -472,11 +472,11 @@ def test_source_status_burst_coalesces_full_map_archive_refresh(tmp_path, monkey
         assert not window._collection_refresh_timer.isActive()
 
         for _ in range(20):
-            controller.data_changed.emit()
+            controller._on_source_status("sample_source", {"status": "available"})
         assert window._collection_refresh_timer.isActive()
         # User-driven filter action must see the latest archive immediately
         # and cancel the now-redundant delayed collector refresh.
-        window.refresh_data()
+        controller.data_changed.emit()  # an actual evidence/user signal is immediate
         assert len(calls) == 2
         assert not window._collection_refresh_timer.isActive()
         QTest.qWait(260)
@@ -500,9 +500,44 @@ def test_continuous_collector_events_cannot_starve_desktop_refresh(tmp_path, mon
     monkeypatch.setattr(window.world_map, "set_events", count_map_updates)
     try:
         for _ in range(6):
-            controller.data_changed.emit()
+            controller._on_source_status("sample_source", {"status": "available"})
             QTest.qWait(65)
         assert calls, "Repeated statuses must not indefinitely restart the timer"
         assert len(calls) <= 3, "Only a bounded number of full refreshes may occur"
+    finally:
+        _close(app, controller, window)
+
+
+def test_real_scheduler_thread_status_is_marshaled_to_gui_refresh(tmp_path, monkeypatch):
+    """A collector thread must never start its UI-owned QTimer itself."""
+    import threading
+    from PySide6.QtTest import QTest
+
+    app, controller, window = _desktop(tmp_path)
+    calls = []
+    original = window.world_map.set_events
+
+    def count_map_updates(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(window.world_map, "set_events", count_map_updates)
+    try:
+        worker = threading.Thread(
+            target=lambda: controller._on_source_status(
+                "sample_source", {"status": "available", "last_success": "2026-11-13T23:00:00Z"}
+            ),
+            name="test-provider-status", daemon=True
+        )
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        # No Qt event processing has occurred on the UI thread yet.
+        assert not window._collection_refresh_timer.isActive()
+        app.processEvents()
+        assert window._collection_refresh_timer.isActive()
+        QTest.qWait(300)
+        assert len(calls) == 1
+        assert controller.last_collection == "2026-11-13T23:00:00Z"
     finally:
         _close(app, controller, window)
