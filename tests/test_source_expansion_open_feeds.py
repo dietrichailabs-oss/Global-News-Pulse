@@ -28,7 +28,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
         "phac_public_health","phac_travel_health","ecdc_cdtr",
         "eia_today","eia_press","occ_news","occ_bulletins","doe_hgeo","health_canada_news",
-        "meti_english_latest",
+        "meti_english_latest","bea_news_releases",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
@@ -206,7 +206,6 @@ def test_us_public_domain_feed_candidates_are_metadata_only():
     c=_catalog()
     for identity,origin,category in (
         ("cdc_travel_notices","cdc","Health"),
-        ("bea_news_releases","bea","Economy"),
         ("fdic_site_updates","fdic","Economy"),
     ):
         row=c[identity]
