@@ -84,7 +84,10 @@ jobs:
               expected=source.get("publisher_origin_id") or source["id"]
               for report in reports[:200]:
                   host=(urlsplit(report.get("url") or "").hostname or "").lower()
-                  if report.get("metadata_only") and report.get("summary"):
+                  # Generic metadata-only RSS/Atom feeds retain no summary.
+                  # WHO DON is a dedicated adapter whose existing contract
+                  # explicitly permits a bounded publisher Summary field.
+                  if report.get("metadata_only") and report.get("summary") and source.get("adapter") != "who_don":
                       violations.append("summary")
                   if report.get("metadata_only") and report.get("media"):
                       violations.append("media")
