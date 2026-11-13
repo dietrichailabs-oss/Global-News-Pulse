@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion2",
+  "catalog_version": "2026.11.13.source-expansion3",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -2121,11 +2121,11 @@
       "limitation": "Statistical releases are dated source evidence; Global Pulse must not infer a crisis solely from a release."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -2156,14 +2156,14 @@
       "license_url": "https://www.canada.ca/en/transparency/terms.html",
       "attribution": "Public Health Agency of Canada; original link retained",
       "feed_documentation": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
-      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. No full article or media republication."
+      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. No full article or media republication. Live admission newest publication was 2026-10-14; retained as a documented archive candidate but excluded from the current-source set."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -2195,7 +2195,7 @@
       "license_url": "https://www.canada.ca/en/transparency/terms.html",
       "attribution": "Public Health Agency of Canada; original link retained",
       "feed_documentation": "https://www.canada.ca/en/public-health/corporate/stay-informed-stay-connected/public-health-updates.html",
-      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. Publisher coverage is not incident geography."
+      "limitation": "Grouped as canada_gov so Canadian federal feeds never self-corroborate. Publisher coverage is not incident geography. Live admission returned a newest publication from December 2022; excluded from current evidence."
     },
     {
       "enabled": true,
@@ -2273,11 +2273,11 @@
       "limitation": "Official central-bank statement evidence; not independent proof of downstream economic effects."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-13",
       "review_scope": "Engineering metadata/feed admission; independent QA pending",
@@ -2307,7 +2307,7 @@
       "license_url": "https://www.ecdc.europa.eu/en/ecdc-intellectual-property-notices",
       "attribution": "European Centre for Disease Prevention and Control (ECDC); CC BY 4.0 where applicable; original link retained",
       "feed_documentation": "https://www.ecdc.europa.eu/en/rss-feeds",
-      "limitation": "Same ECDC publisher identity as other ECDC feeds; sibling feeds never self-corroborate."
+      "limitation": "Same ECDC publisher identity as other ECDC feeds; sibling feeds never self-corroborate. ECDC ended the weekly CDTR series in October 2026 and now publishes daily Public Health Events; this archive feed is excluded from current evidence."
     },
     {
       "enabled": true,
