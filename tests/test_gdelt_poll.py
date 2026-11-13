@@ -294,3 +294,73 @@ def test_unresolved_gaps_survive_replay_restart_and_newer_adjacent_batches(tmp_p
             next_result = poll_latest_export(cache, client=client)
             assert next_result["status"] == "complete"
             assert next_result["gap_detected"]
+
+
+def test_latest_export_replication_lag_is_not_reported_current_after_restart(tmp_path, monkeypatch):
+    """Real manifest -> 404 -> checksum-backed older EXPORT -> durable UI state.
+
+    Retrying the same missing latest must retain 'replication pending', even
+    when the fallback was already imported. Only importing the actual latest
+    advertised export may restore CURRENT. No linked article is requested.
+    """
+    from global_pulse.gdelt_schedule import Schedule
+
+    older = "20261111074500"
+    latest = STAMP
+    older_raw, latest_raw = archive_for(older), archive_for(latest)
+    previous_line = manifest_for(older, older_raw).decode("ascii").strip()
+    tail = ("partial-first-line\n" + previous_line + "\n").encode("ascii")
+    visible = {"latest": False}
+    calls = []
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep", lambda _: None)
+
+    def handler(request):
+        url = str(request.url)
+        calls.append(url)
+        if url.endswith("lastupdate.txt"):
+            return httpx.Response(200, content=manifest_for(latest, latest_raw))
+        if url.endswith(f"{latest}.export.CSV.zip"):
+            return httpx.Response(200, content=latest_raw) if visible["latest"] else httpx.Response(404)
+        if url.endswith("masterfilelist.txt"):
+            first = 90000
+            return httpx.Response(206, content=tail,
+                headers={"Content-Range": f"bytes {first}-{first + len(tail) - 1}/9999999"})
+        if url.endswith(f"{older}.export.CSV.zip"):
+            return httpx.Response(200, content=older_raw)
+        raise AssertionError(f"Unexpected network destination: {url}")
+
+    database = tmp_path / "global-pulse.sqlite3"
+    with GdeltBatchCache(database) as cache, make_client(handler) as client:
+        schedule = Schedule(database)
+        for attempt_no in (0, 1):
+            moment = 1794409200 + attempt_no * 900
+            token = schedule.claim(now=moment, jitter=0)
+            assert token
+            result = poll_latest_export(cache, client=client)
+            assert result["replication_pending"] is True
+            assert result["listed_batch_timestamp"] == latest
+            assert result["batch_timestamp"] == older
+            assert result["status"] == ("complete" if attempt_no == 0 else "already_imported")
+            result["cached_rows"] = cache.status()["cached_rows"]
+            assert schedule.finish(token, result, now=moment)
+            persisted = Schedule(database).status()  # fresh process / restart
+            assert persisted["state"] == "replication_pending"
+            assert persisted["last_batch"] == older
+            assert persisted["last_success"] == moment
+            assert persisted["cached_rows"] == 1
+            assert persisted["gap"] == 0  # publication lag != proven missing interval
+
+        visible["latest"] = True
+        moment += 900
+        token = Schedule(database).claim(now=moment, jitter=0)
+        assert token
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "complete" and not result.get("replication_pending")
+        result["cached_rows"] = cache.status()["cached_rows"]
+        assert Schedule(database).finish(token, result, now=moment)
+        persisted = Schedule(database).status()
+        assert persisted["state"] == "current"
+        assert persisted["last_batch"] == latest
+        assert persisted["cached_rows"] == 2
+        assert not any("example.org" in url for url in calls)
+

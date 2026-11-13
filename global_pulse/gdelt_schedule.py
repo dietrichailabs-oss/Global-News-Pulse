@@ -130,7 +130,19 @@ class Schedule:
             count = count if type(count) is int and 0 <= count <= 300000 else row['cached_rows']
             gap = result.get('gap_detected')
             gap = int(gap) if type(gap) is bool else row['gap']
-            state = 'current' if success else 'busy' if busy else 'storage_paused' if result.get('storage_blocked') is True else 'suspended' if suspended else 'error'
+            # A checksum-verified older EXPORT is a successful import, not proof
+            # that the newer advertised EXPORT has replicated. Persist this
+            # distinct state across restarts instead of advertising CURRENT.
+            if success:
+                state = 'replication_pending' if result.get('replication_pending') is True else 'current'
+            elif busy:
+                state = 'busy'
+            elif result.get('storage_blocked') is True:
+                state = 'storage_paused'
+            elif suspended:
+                state = 'suspended'
+            else:
+                state = 'error'
             db.execute("UPDATE gdelt_schedule SET token=NULL,next_at=?,failures=?,suspended=?,last_success=?,"
                        "last_batch=?,cached_rows=?,gap=?,state=?,http_status=? WHERE id=1 AND token=?",
                        (next_at, failures, int(suspended), moment if success else row['last_success'],
