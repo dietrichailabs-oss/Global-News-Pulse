@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
 from global_pulse.map_evidence import incident_country
-from global_pulse.sources import Collector,load_catalog
+from global_pulse.sources import Collector,load_catalog,_child,safe_link
 from defusedxml import ElementTree as SafeET
 import httpx
 
@@ -40,6 +40,9 @@ SOURCE_IDS=[
     "statcan_government","statcan_health","statcan_housing","statcan_income",
     "statcan_trade","statcan_labour","statcan_manufacturing",
     "statcan_population","statcan_prices","statcan_transport","statcan_travel",
+    # Japan public-data batch.
+    "japan_statistics_news","jma_weather_updates","jma_eqvol_updates",
+    "japan_mod_updates","japan_mod_press","japan_mofa_safety","meti_english_latest",
 ]
 
 ALLOW_EMPTY={
@@ -99,13 +102,26 @@ def main():
                 root=SafeET.fromstring(response.content)
                 locals_=[node.tag.rsplit("}",1)[-1] for node in root.iter()]
                 first=next((node for node in root.iter() if node.tag.rsplit("}",1)[-1].lower() in {"entry","item"}),None)
+                first_link=next((x for x in list(first or []) if x.tag.rsplit("}",1)[-1].lower()=="link"),None)
+                raw_href="" if first_link is None else first_link.attrib.get("href","")
+                safe=""
+                safe_error=""
+                try:
+                    safe=safe_link(raw_href,catalog[identity]["url"],catalog[identity].get("article_domains"))
+                except Exception as exc:
+                    safe_error=type(exc).__name__+":"+str(exc)[:120]
                 print("STATCAN_FORMAT",json.dumps({
                     "source_id":identity,
                     "root":root.tag,
                     "entry_count":sum(1 for x in locals_ if x.lower()=="entry"),
                     "item_count":sum(1 for x in locals_ if x.lower()=="item"),
                     "first_children":[] if first is None else [x.tag.rsplit("}",1)[-1] for x in list(first)[:20]],
+                    "first_title":"" if first is None else _child(first,"title")[:180],
+                    "first_id":"" if first is None else _child(first,"id")[:180],
+                    "first_updated":"" if first is None else _child(first,"updated")[:80],
                     "first_link_attrs":[] if first is None else [dict(x.attrib) for x in list(first) if x.tag.rsplit("}",1)[-1].lower()=="link"][:5],
+                    "safe_link":safe,
+                    "safe_error":safe_error,
                 },sort_keys=True),flush=True)
             except Exception as exc:
                 print("STATCAN_FORMAT_ERROR",identity,type(exc).__name__,flush=True)
