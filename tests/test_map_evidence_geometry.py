@@ -74,7 +74,9 @@ def test_nws_zone_geocode_and_distinct_provider_times_retained():
         'effective': '2026-11-10T03:00:00-09:00',
     })
     assert fields['area_geometry'] == ALASKA
-    assert fields['affected_zones'] == ['https://api.weather.gov/zones/forecast/PKZ859']
+    # A valid original polygon wins, but mixed-authority affectedZones cannot
+    # be advertised as a complete zone list by silently dropping the bad URL.
+    assert fields['affected_zones'] == []
     assert fields['area_geocodes'] == {'UGC': ['PKZ859'], 'SAME': ['002001']}
     assert fields['onset_at'] == '2026-11-10T13:00:00Z'
     assert fields['ends_at'] == '2026-11-11T14:00:00Z'

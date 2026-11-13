@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import html
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,8 @@ class WorldMap(QWidget):
         self.events = []
         self.gdelt_layer = None
         self.evidence_events = []
+        self.observations = []
+        self.economic_observations = {}
         self._activity_categories = object()
         self.area_layer = WarningAreaLayer(self)
         self.selected_event = ""
@@ -139,9 +142,10 @@ class WorldMap(QWidget):
     def point(self, lon, lat):
         return self._transform().map(self.normalized(lon, lat))
 
-    def set_events(self, events, *, country_events=None):
+    def set_events(self, events, *, country_events=None, observations=None):
         self.events = list(events)[:5000]
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
+        self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
         self._activity_categories = object()
         self._refresh_country_activity()
@@ -174,12 +178,48 @@ class WorldMap(QWidget):
                 # not the country aggregate (which may contain other records).
                 # A qualifying current report must not also be counted or
                 # drawn as neutral historical country-only evidence.
-                if build_country_activity((record,), now=now).get(country):
+                # A singleton source cannot qualify for a current crisis
+                # when the full source-backed aggregate has no activity for
+                # this country. Avoid repeating the expensive temporal/source
+                # classifier for thousands of neutral archives (e.g. India).
+                # Countries with activity still require exact per-record
+                # classification: aggregate event_ids is intentionally capped.
+                if (country in self.country_activity
+                        and build_country_activity((record,), now=now).get(country)):
                     continue
                 entry = self.country_only_evidence.setdefault(country, {"count": 0, "events": []})
                 entry["count"] += 1
                 if len(entry["events"]) < 30:
                     entry["events"].append(record)
+
+            # Economic observations are dated measurements, not crisis events.
+            # Map them by provider ISO3 code when possible, then by exact
+            # country-name identity. They use a separate outline and tooltip.
+            self.economic_observations = {}
+            if key is None or "Economy" in key:
+                code_to_country = {
+                    str(c.get("code") or "").upper(): normalize_country(c["name"])
+                    for c in self._countries if c.get("code")
+                }
+                valid_countries = {normalize_country(c["name"]) for c in self._countries}
+                for observation in self.observations:
+                    code = str(observation.get("country_code") or "").upper()
+                    country = code_to_country.get(code) or normalize_country(
+                        observation.get("country_name") or observation.get("country")
+                    )
+                    if not country or country not in valid_countries:
+                        continue
+                    date = str(observation.get("observation_date") or observation.get("date") or "")
+                    if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
+                        continue
+                    entry = self.economic_observations.setdefault(
+                        country, {"count": 0, "latest": "", "indicators": set()}
+                    )
+                    entry["count"] += 1
+                    entry["latest"] = max(entry["latest"], date)
+                    indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
+                    if indicator and len(entry["indicators"]) < 8:
+                        entry["indicators"].add(indicator)
             self._activity_categories = key
 
     def coverage_summary(self):
@@ -192,15 +232,18 @@ class WorldMap(QWidget):
         areas = len(self.area_layer.visible())
         activity = sum(country in countries for country in self.country_activity)
         country_only = sum(entry["count"] for entry in self.country_only_evidence.values())
+        economic_countries = len(self.economic_observations)
+        economic_rows = sum(entry["count"] for entry in self.economic_observations.values())
         suffix = f" · {self.area_layer.omitted} area(s) omitted by geometry/budget checks" if self.area_layer.omitted else ""
         incomplete = sum(area.get("context_only") is True for _path, _event, area in self.area_layer.visible())
         if incomplete:suffix += f" · {incomplete} area(s) have incomplete warning history"
         return (f"{points} points · {areas} warning areas · {activity} countries with activity"
-                f" · {country_only} country-only records · {unlocated} unlocated" + suffix)
+                f" · {country_only} country-only records · {economic_countries} economy countries/{economic_rows} observations"
+                f" · {unlocated} unlocated" + suffix)
 
     def empty_coverage_message(self):
-        if self.country_only_evidence:
-            return "Country-only records are available for inspection; no point is inferred."
+        if self.country_only_evidence or self.economic_observations:
+            return "Country-only records or dated economic observations are available; no point or crisis is inferred."
         if self.evidence_events:
             return "Reports collected; no usable geometry or supported current country activity in this view."
         return "No reports match this map view. This does not mean there are no crises."
@@ -381,8 +424,13 @@ class WorldMap(QWidget):
             painter.drawPath(mapped_path)
             # Neutral dashed boundary means archived country-only evidence,
             # never a crisis stripe or a fabricated geographic point.
-            if normalize_country(c["name"]) in self.country_only_evidence:
+            country_key = normalize_country(c["name"])
+            if country_key in self.country_only_evidence:
                 painter.setPen(QPen(QColor("#668192"), 1, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(mapped_path)
+            if country_key in self.economic_observations:
+                painter.setPen(QPen(QColor("#58a6b8"), 1.4, Qt.PenStyle.DashDotLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPath(mapped_path)
             if self.crisis_overlay_enabled:
@@ -526,6 +574,13 @@ class WorldMap(QWidget):
                 labels.append(
                     f"{evidence['count']} country-only source record(s); click to inspect. "
                     "No incident point or current crisis inferred.")
+            economy = self.economic_observations.get(normalize_country(name))
+            if economy:
+                indicators = ", ".join(sorted(economy["indicators"])[:3])
+                labels.append(
+                    f"Economy: {economy['count']} dated observation(s); latest {economy['latest']}. "
+                    + (f"{indicators}. " if indicators else "")
+                    + "Dated measurements only; no economic crisis inferred.")
             if self.gdelt_layer is not None:
                 coded_note = self.gdelt_layer.country_text(name)
                 if coded_note: labels.append(coded_note)

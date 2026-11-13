@@ -204,3 +204,75 @@ def test_actual_mainwindow_uses_replacement_not_legacy(app,tmp_path):
         c.data_changed.emit();app.processEvents()
         assert w.media.radio._session is None
     finally:w._force_close=True;w.close();c.close();w.deleteLater();app.processEvents()
+
+def test_tv_unplayed_paused_player_cannot_reset_progress_watchdog(app, monkeypatch):
+    """A loaded embed waiting for the user's first Play is not working TV."""
+    from PySide6.QtCore import QUrl
+
+    class InertView:
+        def __init__(self):
+            self.stops = 0
+            self.blank = []
+            self.hidden = False
+
+        def stop(self):
+            self.stops += 1
+
+        def setUrl(self, url):
+            assert isinstance(url, QUrl)
+            self.blank.append(url.toString())
+
+        def hide(self):
+            self.hidden = True
+
+    clock = [100.0]
+    monkeypatch.setattr("global_pulse.single_media.time.monotonic", lambda: clock[0])
+    tv = Television()
+    view = InertView()
+    try:
+        tv.view = view
+        tv._requested = True
+        tv._progress_at = 100.0
+        tv._poll_timer.start()
+        generation = tv._generation
+        for tick in (110.0, 120.0, 135.0, 145.0):
+            clock[0] = tick
+            tv._observed(generation, {"time": 0.0, "paused": True, "ready": 4})
+            assert tv.tv_status.text().startswith("PAUSED")
+            assert tv._progress_at == 100.0
+        clock[0] = 146.0
+        tv._poll()
+        assert not tv._requested and not tv._poll_timer.isActive()
+        assert tv.tv_status.text() == "ERROR"
+        assert view.stops == 1 and view.blank == ["about:blank"] and view.hidden
+        assert "No in-app playback progress" in tv.note.text()
+        tv._observed(generation, {"time": 20.0, "paused": False, "ready": 4})
+        assert tv.tv_status.text() == "ERROR"
+    finally:
+        tv.view = None
+        tv.stop()
+        tv.deleteLater()
+
+
+def test_tv_explicit_pause_after_actual_play_preserves_resume_session(app, monkeypatch):
+    """Only actual advancing media establishes a deliberate user pause."""
+    clock = [100.0]
+    monkeypatch.setattr("global_pulse.single_media.time.monotonic", lambda: clock[0])
+    tv = Television()
+    try:
+        tv._requested = True
+        generation = tv._generation
+        tv._observed(generation, {"time": 0.0, "paused": False, "ready": 4})
+        assert not tv._ever_played
+        clock[0] = 110.0
+        tv._observed(generation, {"time": 1.0, "paused": False, "ready": 4})
+        assert tv.tv_status.text() == "PLAYING" and tv._ever_played
+        clock[0] = 150.0
+        tv._observed(generation, {"time": 1.0, "paused": True, "ready": 4})
+        assert tv.tv_status.text().startswith("PAUSED")
+        assert tv._progress_at == 150.0
+        tv.stop()
+        assert tv.tv_status.text() == "OFF"
+    finally:
+        tv.stop()
+        tv.deleteLater()
