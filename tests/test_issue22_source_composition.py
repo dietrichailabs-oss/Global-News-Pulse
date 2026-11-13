@@ -1,14 +1,18 @@
-"""One-source composition smoke: frozen 43 sources plus language and publisher identity.
+"""Current source composition smoke: 49 reviewed entries plus language/publisher identity.
 
-No network access, source admission or translation inference is performed here.
+No network access, live admission or translation inference is performed here.
 """
 from global_pulse.sources import load_catalog, make_user_feed, parse_feed
 
 
-def test_43_source_catalog_coexists_with_fail_closed_user_language():
+def test_49_source_catalog_coexists_with_fail_closed_user_language():
     catalog = load_catalog()
-    assert len(catalog) == 43
-    assert {item["id"] for item in catalog} >= {"sec_press", "federal_reserve_press"}
+    assert len(catalog) == 49
+    ids={item["id"] for item in catalog}
+    assert ids >= {"sec_press","federal_reserve_press","who","un_peace_security",
+                   "un_humanitarian_aid","un_health","un_economic_development",
+                   "un_migrants_refugees","un_affairs"}
+    assert {item.get("publisher_origin_id") for item in catalog if item["id"].startswith("un_")} >= {"un_news"}
     manual = make_user_feed("https://example.org/rss", "Custom feed", validate_dns=False)
     assert manual["language"] == "und"
     assert manual["independence"] == "unknown"
