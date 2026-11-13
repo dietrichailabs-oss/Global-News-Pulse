@@ -27,7 +27,7 @@ Counts are point-in-time parser observations, **not** a guarantee of completenes
 
 - Catalog addition: `destatis_press` and `fr_service_public_business` are enabled **only after** the live preadmission PASS, with `metadata_only=true`, `access_status=reviewed_public`, polling floor 1800 seconds, 21-day stale threshold and explicit publisher-origin IDs.
 - [Offline test suite](../tests/test_source_expansion_de_fr.py) checks no-body/no-media RSS parsing, original link/timestamp/attribution, source licensing metadata, origin segregation, and sibling origins remaining identical for the same publisher.
-- [Post-admission GitHub workflow](../.github/workflows/source-expansion-de-fr-probe.yml) validates the checked-out catalog identities and executes that suite and real `Collector` against the publisher endpoints.
+- [Post-admission GitHub workflow](../.github/workflows/source-expansion-de-fr-probe.yml) validates the checked-out catalog identities and executes that suite and real `Collector` against the publisher endpoints. [Run 43356763385](https://github.com/dietrichailabs-oss/Global-News-Pulse/actions/runs/43356763385) completed **SUCCESS**: 4 offline pytest tests passed; both catalog entries returned HTTP 200 with 10/234 parsed reports, 10/8 reports recent within 21 days, and zero no-body/media/provenance-link violations.
 - Current-source freshness must follow the publisher publication dates and report stale/empty/denied sources as unavailable, not pad the source count.
 
 ## Exclusions / limitations
