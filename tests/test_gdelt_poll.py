@@ -125,10 +125,9 @@ def test_oversized_advertised_archive_is_never_requested(tmp_path):
         assert cache.status()["latest_batch"]["status"] == "error"
 
 
-def test_archive_http_429_retries_only_same_url_then_records_error(tmp_path,monkeypatch):
+def test_archive_http_429_honors_retry_after_without_same_turn_repeat(tmp_path):
     calls = []
     raw = archive_for(STAMP)
-    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep",lambda _seconds:None)
 
     def handler(request):
         calls.append(str(request.url))
@@ -140,9 +139,9 @@ def test_archive_http_429_retries_only_same_url_then_records_error(tmp_path,monk
         result = poll_latest_export(cache, client=client)
         assert result["status"] == "error"
         assert result["error"] == "GDELT endpoint returned HTTP 429"
+        assert result["retry_after_seconds"] == 3600
         assert cache.status()["latest_batch"]["error"] == result["error"]
-        assert len(calls) == 4
-        assert len(set(calls[1:])) == 1
+        assert len(calls) == 2
 
 
 def test_transient_archive_404_retries_same_published_url_then_imports(tmp_path,monkeypatch):
