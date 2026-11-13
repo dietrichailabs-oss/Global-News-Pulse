@@ -24,8 +24,9 @@ SOURCE_IDS=[
     "sec_litigation","sec_suspensions",
     "noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook",
     "ec_trade_news","ec_energy_news","ec_environment_news",
-    "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
-    "nz_infrastructure","nz_national_security","nz_trade",
+    # The NZ Beehive family was quarantined on 2026-11-13 after a
+    # verified HTTP 403 host-wide denial; do not probe blocked siblings.
+
     # Batch 3 candidates.
     "bls_employment","bls_jolts","bls_cpi","bls_ppi",
     "bls_import_export","bls_work_stoppages",
@@ -44,6 +45,11 @@ SOURCE_IDS=[
     # U.S. public-domain/current-feed batch.
     "cdc_travel_notices","fdic_site_updates",
 ]
+
+QUARANTINED_DENIED={
+    "nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health",
+    "nz_infrastructure","nz_national_security","nz_trade",
+}
 
 ALLOW_EMPTY={
     # Documented event/release feeds can legitimately have no item today.
@@ -76,6 +82,21 @@ def main():
         "status":"PASS",
     }
     failures=[]
+    # Explicit fail-closed admission for blocked former active feeds.
+    # These records remain in the catalog only as disabled provenance;
+    # attempting each Beehive sibling would evade the 24h host circuit.
+    for identity in sorted(QUARANTINED_DENIED):
+        source=catalog[identity]
+        quarantined=not source.get("enabled") and source.get("status")=="disabled"
+        record=dict(source_id=identity,
+                    publisher_origin_id=source.get("publisher_origin_id",""),
+                    status="quarantined_access_denied" if quarantined else "INVALID_QUARANTINE",
+                    reports=0,http_status=403,
+                    error="Prior live audit 43414479879: publisher HTTP 403; deliberately not re-fetched")
+        evidence["results"].append(record)
+        print("SOURCE_QUARANTINE",json.dumps(record,sort_keys=True),flush=True)
+        if not quarantined:
+            failures.append(f"{identity}:re-enabled_after_access_denial")
     for identity in SOURCE_IDS:
         result=Collector(catalog[identity]).collect()
         state=result["state"]
