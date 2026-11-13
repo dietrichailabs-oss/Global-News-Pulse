@@ -28,6 +28,7 @@ import httpx
 from defusedxml import ElementTree as SafeET
 
 from .lifecycle import provider_id, scope_identifier
+from .language_codes import normalize_language
 from .map_evidence import nws_map_fields
 from .capacity_limits import MAX_TOTAL_SOURCES
 
@@ -241,18 +242,53 @@ def _base(source: dict, raw_id: Any, title: Any, url: Any, published: Any, retri
 
 
 def _language(text: str, fallback: str) -> str:
-    if fallback != "und":
-        return fallback
-    for pattern, language in ((r"[\u0900-\u097f]", "hi"), (r"[\u0600-\u06ff]", "ar"),
-                              (r"[\u3040-\u30ff]", "ja"), (r"[\u0400-\u04ff]", "ru")):
-        if len(re.findall(pattern, text)) > 3:
-            return language
-    try:
-        from langdetect import detect, DetectorFactory
-        DetectorFactory.seed = 0
-        return detect(text[:1000]) if len(text) > 40 else "und"
-    except Exception:
+    """Use publisher-declared BCP-47 first; fail closed on ambiguous short scripts.
+
+    Cyrillic alone cannot distinguish Ukrainian, Russian or Belarusian; Arabic
+    script alone cannot distinguish Arabic, Persian or Urdu. In particular, a
+    short unknown-language title must not silently select the wrong model.
+    Longer undeclared text may use the existing local detector conservatively.
+    """
+    declared = normalize_language(fallback)
+    if declared != "und":
+        return declared
+    if re.search(r"[\u0454\u0457\u0491]", text):
+        # Ukrainian-specific letters є, ї, ґ. A bare і is not unique to uk.
+        return "uk"
+    if len(text.strip()) < 40:
         return "und"
+    try:
+        from langdetect import detect_langs, DetectorFactory
+        DetectorFactory.seed = 0
+        ranked = detect_langs(text[:1000])
+        if ranked and ranked[0].prob >= 0.90:
+            return normalize_language(ranked[0].lang)
+    except Exception:
+        pass
+    return "und"
+
+
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+
+def _feed_language(root, node, source: dict) -> str:
+    """Item > channel > feed > catalog: only attributable language declarations.
+
+    Missing, private-use-only or malformed tags do not become English.
+    Publisher scope declares language, not incident geography or reuse rights.
+    """
+    channel = next((child for child in root if _local(child.tag) == "channel"), None)
+    for tag in (
+        node.get(_XML_LANG), _child(node, "language"),
+        channel.get(_XML_LANG) if channel is not None else None,
+        _child(channel, "language") if channel is not None else None,
+        root.get(_XML_LANG), _child(root, "language"),
+        source.get("language"),
+    ):
+        language = normalize_language(tag)
+        if language != "und":
+            return language
+    return "und"
 
 
 def _local(tag: str) -> str:
@@ -289,7 +325,6 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
         raise ValueError("Response is not an RSS, Atom or CAP feed")
     if _local(root.tag) == "alert":
         return parse_cap(root, source, retrieved)
-    language = source.get("language") or "und"
     items = [n for n in root.iter() if _local(n.tag) in {"item", "entry"}][:MAX_ITEMS]
     result = []
     for node in items:
@@ -306,7 +341,7 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
         summary = _child(node, "description", "summary")
         report["metadata_only"] = bool(source.get("metadata_only"))
         report["summary"] = "" if report["metadata_only"] else plain(summary)
-        report["language"] = _language(report["title"] + " " + report["summary"], language)
+        report["language"] = _language(report["title"] + " " + report["summary"], _feed_language(root, node, source))
         report["source_updated_at"] = iso(updated)
         report["publication_time_unknown"] = not bool(report["published_at"])
         report["summary_truncated"] = len(plain(summary, 100001)) > MAX_SUMMARY
