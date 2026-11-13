@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion16",
+  "catalog_version": "2026.11.13.source-expansion17",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5678,6 +5678,82 @@
       "id": "uk_metoffice_news",
       "name": "UK Met Office — News Releases",
       "url": "https://www.metoffice.gov.uk/feed/syndication/news-rss.xml"
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 3600,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering checked publisher-documented feeds, site rights and live metadata/provenance pre-admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "publisher_origin_id": "eu_ecb",
+      "allowed_domains": [
+        "www.ecb.europa.eu"
+      ],
+      "article_domains": [
+        "www.ecb.europa.eu",
+        "ecb.europa.eu"
+      ],
+      "country": "",
+      "region": "Europe / Global",
+      "language": "en",
+      "homepage": "https://www.ecb.europa.eu/",
+      "license": "ECB website disclaimer authorizes free use of information with accurate reproduction and ECB citation; avoid reproduction/reprint of named-author documents without permission. Only original RSS titles, source URLs, publication dates and ECB credit are retained; no summaries, bodies, images, logos or media. Do not imply ECB endorsement.",
+      "license_url": "https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html",
+      "feed_documentation": "https://www.ecb.europa.eu/home/html/rss.en.html",
+      "attribution": "European Central Bank (ECB); original direct publisher link, date and accurate headline; no endorsement",
+      "access": "Publisher-documented, public HTTPS RSS, no key/account, direct bounded Collector pre-admission passed 2026-11-13.",
+      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use eu_ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
+      "id": "ecb_press",
+      "name": "European Central Bank — Press and Public Statements",
+      "url": "https://www.ecb.europa.eu/rss/press.html",
+      "category": "Economy",
+      "official_scope": "statement"
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 3600,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering checked publisher-documented feeds, site rights and live metadata/provenance pre-admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "publisher_origin_id": "eu_ecb",
+      "allowed_domains": [
+        "www.ecb.europa.eu"
+      ],
+      "article_domains": [
+        "www.ecb.europa.eu",
+        "ecb.europa.eu"
+      ],
+      "country": "",
+      "region": "Europe / Global",
+      "language": "en",
+      "homepage": "https://www.ecb.europa.eu/",
+      "license": "ECB website disclaimer authorizes free use of information with accurate reproduction and ECB citation; avoid reproduction/reprint of named-author documents without permission. Only original RSS titles, source URLs, publication dates and ECB credit are retained; no summaries, bodies, images, logos or media. Do not imply ECB endorsement.",
+      "license_url": "https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html",
+      "feed_documentation": "https://www.ecb.europa.eu/home/html/rss.en.html",
+      "attribution": "European Central Bank (ECB); original direct publisher link, date and accurate headline; no endorsement",
+      "access": "Publisher-documented, public HTTPS RSS, no key/account, direct bounded Collector pre-admission passed 2026-11-13.",
+      "limitation": "Press/statistical entries are ECB primary statements, not independent third-party verification. Sibling ECB feeds use eu_ecb as one publisher_origin_id and cannot self-corroborate. Euro-area publisher scope must not become incident geography. Named-author publications are outside this metadata-only clearance.",
+      "id": "ecb_statpress",
+      "name": "European Central Bank — Statistical Press Releases",
+      "url": "https://www.ecb.europa.eu/rss/statpress.html",
+      "category": "Economy",
+      "official_scope": "measurement"
     }
   ]
 }
