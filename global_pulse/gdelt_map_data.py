@@ -240,7 +240,11 @@ def project(connection, country_names, *, since=None, now=None, limit=MAX_ROWS):
     if 'parser_version' in columns:
         version_clause=' AND COALESCE(b.parser_version,1)=1'
         legacy=connection.execute("SELECT COUNT(*) FROM gdelt_batches WHERE status='complete' AND kind='export' AND COALESCE(parser_version,1)!=1").fetchone()[0]
-    upper = moment.strftime('%Y%m%d%H%M%S')
+    # GDELT's quarter-hour file label / DateAdded can lead the wall clock by
+    # several minutes even after the file is downloadable. Treat at most one
+    # publication interval of label skew as current; local imported_at and
+    # event-day checks below remain strict.
+    upper = (moment + timedelta(minutes=15)).strftime('%Y%m%d%H%M%S')
     lower = start.strftime('%Y%m%d%H%M%S')
     rows = connection.execute(f'''SELECT r.global_event_id,r.batch_timestamp,r.event_day,r.date_added,
         r.event_code,r.quad_class,r.action_country_code,r.action_location,r.source_article_url,b.imported_at
@@ -282,8 +286,17 @@ def project(connection, country_names, *, since=None, now=None, limit=MAX_ROWS):
         result['records'].append(record)
         result['latest_batch']=max(result['latest_batch'],batch)
         if country:
-            group=result['countries'].setdefault(normalize_country(country),dict(name=country,count=0))
+            group=result['countries'].setdefault(
+                normalize_country(country),
+                dict(name=country,count=0,material_conflict=0,protest=0),
+            )
             group['count']+=1
+            # CAMEO QuadClass 4 is material conflict. Root code 14 is protest.
+            # These remain automated coded observations, never verified crises.
+            if quad=='4':
+                group['material_conflict']+=1
+            if code.startswith('14'):
+                group['protest']+=1
     result['state']='ready' if result['records'] else 'empty'
     result['message']=(f"{len(result['records'])} retained coded observations · {len(result['countries'])} countries · "
         f"{result['unmapped']} unlocated · {result['invalid']} invalid excluded. Not verified crises.")

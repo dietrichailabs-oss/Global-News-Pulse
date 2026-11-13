@@ -40,6 +40,19 @@ def test_explicit_fips_codes_not_iso_or_provider_coordinates(archive,code,name):
     assert not {'latitude','longitude','severity','verification','reports'} & record.keys()
 
 
+def test_coded_material_conflict_and_protest_counts_remain_explicitly_unverified(archive):
+    seed(archive,[event_row('2001',country='UP'),event_row('2002',country='IR')])
+    with sqlite3.connect(archive) as c:
+        c.execute("UPDATE gdelt_event_rows SET event_code='190',quad_class='4' WHERE global_event_id='2001'")
+        c.execute("UPDATE gdelt_event_rows SET event_code='141',quad_class='3' WHERE global_event_id='2002'")
+    result=read_archive(archive,NAMES,now=NOW)
+    assert result['countries']['ukraine']['material_conflict']==1
+    assert result['countries']['ukraine']['protest']==0
+    assert result['countries']['iran']['material_conflict']==0
+    assert result['countries']['iran']['protest']==1
+    assert all('severity' not in record and 'verification' not in record for record in result['records'])
+
+
 def test_exact_reopen_projection_does_not_mutate_source_evidence(archive):
     seed(archive,[event_row('1001',country='UP'),event_row('1002',country='IR')])
     with sqlite3.connect(archive) as connection:before='\n'.join(connection.iterdump())
@@ -66,6 +79,26 @@ def test_stale_future_or_invalid_rows_not_promoted_to_current(archive,field,valu
     with sqlite3.connect(archive) as c:c.execute('UPDATE gdelt_event_rows SET '+field+'=?',(value,))
     result=read_archive(archive,NAMES,now=NOW)
     assert not result['countries'] and not result['records']
+
+
+def test_provider_quarter_hour_label_may_lead_wall_clock_by_one_interval(archive):
+    stamp='20261111121500'
+    data=payload([event_row(day='20261111',date_added=stamp,country='UP')],stamp=stamp)
+    batch=batch_from_archive(data,stamp=stamp)
+    with GdeltBatchCache(archive) as cache:
+        assert cache.import_export(batch,data,now='2026-11-11T12:05:00+00:00')['status']=='complete'
+    result=read_archive(archive,NAMES,now='2026-11-11T12:05:00Z')
+    assert result['countries']['ukraine']['count']==1
+
+
+def test_provider_label_more_than_one_interval_ahead_stays_hidden(archive):
+    stamp='20261111123000'
+    data=payload([event_row(day='20261111',date_added=stamp,country='UP')],stamp=stamp)
+    batch=batch_from_archive(data,stamp=stamp)
+    with GdeltBatchCache(archive) as cache:
+        assert cache.import_export(batch,data,now='2026-11-11T12:05:00+00:00')['status']=='complete'
+    result=read_archive(archive,NAMES,now='2026-11-11T12:05:00Z')
+    assert not result['records']
 
 
 def test_noncompleted_batch_has_no_display_authority(archive):
