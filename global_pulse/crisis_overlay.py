@@ -23,8 +23,15 @@ UTC = timezone.utc
 
 CONFLICT_PATTERNS = (
     r"\bwar\b", r"\barmed conflict\b", r"\bfighting\b", r"\bclashes?\b",
-    r"\bairstrikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
-    r"\boffensive\b", r"\bmissile(?:s| strike)?\b", r"\bdrone strike\b",
+    r"\bair[ -]?strikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
+    r"\boffensive\b", r"\bmissile(?:s| strikes?| attacks?)?\b",
+    r"\b(?:drone|rocket|military|armed) (?:strikes?|attacks?)\b",
+    r"\b(?:launch|launched|launches|fresh|renewed|retaliatory|deadly|overnight).{0,45}\bstrikes?\b",
+    r"\bstrikes? on .{0,45}\b(?:power grid|energy infrastructure|military targets?|civilian infrastructure)\b",
+    r"\b(?:killed|injured|wounded).{0,55}\battacks?\b",
+    r"\battacks?.{0,55}\b(?:killed|injured|wounded)\b",
+    r"\b(?:armed|military|regional|cross-border) conflict\b",
+    r"\bconflict (?:in|between|with)\b",
     r"\binvasion\b", r"\bcombat\b", r"\bceasefire violation\b",
 )
 # A bare "war" in a headline is not invariably armed conflict. Keep
