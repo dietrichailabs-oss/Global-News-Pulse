@@ -7,6 +7,7 @@ returned states, including gaps and source errors.
 from __future__ import annotations
 
 from datetime import datetime
+import time
 import httpx
 from .gdelt_http import GdeltHTTPError
 
@@ -23,27 +24,40 @@ _HEADERS = {
 
 
 def _bounded_get(client: httpx.Client, url: str, limit: int) -> bytes:
-    # Caller-supplied GDELT HTTPS URLs are validated by parse_manifest; the
-    # manifest URL is a constant. Redirects are never followed.
-    with client.stream("GET", url, follow_redirects=False) as response:
-        if response.status_code != 200:
-            raise GdeltHTTPError(response.status_code, response.headers.get("retry-after"))
-        header = response.headers.get("content-length")
-        if header is not None:
-            # Reject before int(): hostile input cannot hit Python's integer
-            # conversion limit. Missing length still uses the streaming cap.
-            if not (1 <= len(header) <= 20 and header.isascii() and header.isdecimal()):
-                raise GdeltBatchError("GDELT response has invalid Content-Length")
-            if int(header) > limit:
-                raise GdeltBatchError("GDELT response exceeds size limit")
-        body = bytearray()
-        for part in response.iter_bytes(64 * 1024):
-            if len(body) + len(part) > limit:
-                raise GdeltBatchError("GDELT response exceeds size limit")
-            body.extend(part)
-        if not body:
-            raise GdeltBatchError("GDELT endpoint returned empty response")
-        return bytes(body)
+    """Fetch one reviewed GDELT URL with a tiny same-URL replication retry.
+
+    GDELT occasionally publishes the manifest entry before an edge serves the
+    corresponding archive, which can yield a short-lived 404. Retry only the
+    exact same URL and only a small transient status set; never switch to the
+    DOC search API, rotate hosts, or hide a persistent failure.
+    """
+    transient = {404, 429, 502, 503, 504}
+    for attempt in range(3):
+        with client.stream("GET", url, follow_redirects=False) as response:
+            if response.status_code != 200:
+                if response.status_code in transient and attempt < 2:
+                    raw = str(response.headers.get("retry-after") or "")
+                    delay = int(raw) if raw.isdecimal() and int(raw) <= 5 else attempt + 1
+                    time.sleep(max(1, delay))
+                    continue
+                raise GdeltHTTPError(response.status_code, response.headers.get("retry-after"))
+            header = response.headers.get("content-length")
+            if header is not None:
+                # Reject before int(): hostile input cannot hit Python's integer
+                # conversion limit. Missing length still uses the streaming cap.
+                if not (1 <= len(header) <= 20 and header.isascii() and header.isdecimal()):
+                    raise GdeltBatchError("GDELT response has invalid Content-Length")
+                if int(header) > limit:
+                    raise GdeltBatchError("GDELT response exceeds size limit")
+            body = bytearray()
+            for part in response.iter_bytes(64 * 1024):
+                if len(body) + len(part) > limit:
+                    raise GdeltBatchError("GDELT response exceeds size limit")
+                body.extend(part)
+            if not body:
+                raise GdeltBatchError("GDELT endpoint returned empty response")
+            return bytes(body)
+    raise GdeltBatchError("GDELT transient retry exhausted")
 
 
 def poll_latest_export(cache: GdeltBatchCache, *, client: httpx.Client | None = None) -> dict:
