@@ -75,6 +75,10 @@ def test_enabled_same_host_rows_do_not_split_publisher_identity():
     for row in load_catalog():
         if not row.get("enabled"):
             continue
+        # World Bank rows are observation-only adapters: parse_worldbank()
+        # does not emit report origin_id values or enter publisher corroboration.
+        if row.get("adapter") == "worldbank":
+            continue
         host=(urlsplit(row["url"]).hostname or "").lower()
         if host:
             by_host.setdefault(host,[]).append(row)
