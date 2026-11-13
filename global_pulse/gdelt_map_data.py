@@ -282,8 +282,17 @@ def project(connection, country_names, *, since=None, now=None, limit=MAX_ROWS):
         result['records'].append(record)
         result['latest_batch']=max(result['latest_batch'],batch)
         if country:
-            group=result['countries'].setdefault(normalize_country(country),dict(name=country,count=0))
+            group=result['countries'].setdefault(
+                normalize_country(country),
+                dict(name=country,count=0,material_conflict=0,protest=0),
+            )
             group['count']+=1
+            # CAMEO QuadClass 4 is material conflict. Root code 14 is protest.
+            # These remain automated coded observations, never verified crises.
+            if quad=='4':
+                group['material_conflict']+=1
+            if code.startswith('14'):
+                group['protest']+=1
     result['state']='ready' if result['records'] else 'empty'
     result['message']=(f"{len(result['records'])} retained coded observations · {len(result['countries'])} countries · "
         f"{result['unmapped']} unlocated · {result['invalid']} invalid excluded. Not verified crises.")
