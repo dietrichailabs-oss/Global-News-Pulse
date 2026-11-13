@@ -17,7 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from .map_evidence import incident_country
+from .map_evidence import incident_country, structured_incident_country
 
 UTC = timezone.utc
 
@@ -423,7 +423,7 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
         if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
             continue
 
-        structured_country = normalize_country(incident_country(event))
+        structured_country = normalize_country(structured_incident_country(event))
         text_country = _explicit_text_country(event) if not structured_country else ""
         country = structured_country or text_country
         kinds = _topical_kinds(event)
