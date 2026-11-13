@@ -236,7 +236,7 @@ class WorldMap(QWidget):
 
     def empty_coverage_message(self):
         if self.country_only_evidence or self.economic_observations:
-            return "Country-level records or dated economic observations are available; no point or crisis is inferred."
+            return "Country-only records or dated economic observations are available; no point or crisis is inferred."
         if self.evidence_events:
             return "Reports collected; no usable geometry or supported current country activity in this view."
         return "No reports match this map view. This does not mean there are no crises."
