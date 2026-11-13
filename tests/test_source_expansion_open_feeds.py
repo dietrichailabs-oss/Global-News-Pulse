@@ -28,6 +28,7 @@ def test_stale_or_unparsed_candidates_are_not_active_evidence():
         "voa_economy","voa_health","fda_outbreaks","fda_press","fda_medwatch",
         "phac_public_health","phac_travel_health","ecdc_cdtr",
         "eia_today","eia_press","occ_news","occ_bulletins","doe_hgeo","health_canada_news",
+        "meti_english_latest",
     }
     for identity in rejected:
         assert c[identity]["enabled"] is False
@@ -150,7 +151,7 @@ def test_japan_public_data_batch_is_metadata_only_and_grouped():
     c=_catalog()
     ids={
         "japan_statistics_news","jma_weather_updates","jma_eqvol_updates",
-        "japan_mod_updates","japan_mod_press","japan_mofa_safety","meti_english_latest",
+        "japan_mod_updates","japan_mod_press","japan_mofa_safety",
     }
     for identity in ids:
         row=c[identity]
@@ -163,3 +164,54 @@ def test_japan_public_data_batch_is_metadata_only_and_grouped():
     assert c["japan_statistics_news"]["publisher_origin_id"]=="japan_statistics"
     assert c["japan_mofa_safety"]["publisher_origin_id"]=="japan_mofa"
     assert c["meti_english_latest"]["publisher_origin_id"]=="meti"
+
+
+def test_statcan_nested_atom_title_and_updated_release_time_are_source_opt_in():
+    c=_catalog()
+    source=c["statcan_prices"]
+    xml=b'''<?xml version="1.0" encoding="utf-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <id>https://www.statcan.gc.ca/daily-quotidien/261112/dq261112d-eng.htm</id>
+        <title><span>Consumer Price Index</span>, October 2026</title>
+        <link href="https://www.statcan.gc.ca/daily-quotidien/261112/dq261112d-eng.htm"/>
+        <updated>2026-11-12T08:30:00-05:00</updated>
+        <summary>Statistics Canada release summary.</summary>
+      </entry>
+    </feed>'''
+    rows=parse_feed(xml,source,STAMP)
+    assert len(rows)==1
+    assert rows[0]["title"]=="Consumer Price Index , October 2026"
+    assert rows[0]["published_at"]=="2026-11-12T13:30:00Z"
+    assert rows[0]["source_updated_at"]=="2026-11-12T13:30:00Z"
+    assert rows[0]["summary"]==""
+    assert rows[0]["origin_id"]=="statcan"
+
+def test_nested_atom_title_fallback_is_not_global():
+    c=_catalog()
+    source=dict(c["ukhsa"])
+    assert not source.get("nested_feed_text")
+    xml=b'''<?xml version="1.0" encoding="utf-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <id>tag:example</id>
+        <title><span>Nested title</span></title>
+        <link href="https://www.gov.uk/government/news/example"/>
+        <updated>2026-11-12T20:00:00Z</updated>
+      </entry>
+    </feed>'''
+    assert parse_feed(xml,source,STAMP)==[]
+
+def test_us_public_domain_feed_candidates_are_metadata_only():
+    c=_catalog()
+    for identity,origin,category in (
+        ("cdc_travel_notices","cdc","Health"),
+        ("bea_news_releases","bea","Economy"),
+        ("fdic_site_updates","fdic","Economy"),
+    ):
+        row=c[identity]
+        assert row["enabled"] is True
+        assert row["metadata_only"] is True
+        assert row["publisher_origin_id"]==origin
+        assert row["category"]==category
+        assert row["access_status"]=="reviewed_public"
