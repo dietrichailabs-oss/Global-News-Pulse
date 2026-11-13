@@ -1,0 +1,138 @@
+name: Independent QA - PR7 Source Expansion
+
+on:
+  push:
+    branches: [qa/source-expansion-pr7-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-source-expansion-pr7
+  cancel-in-progress: true
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm QA branch ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 8e0d026164c240b8eabefb028d60da67d2bb234a HEAD
+          echo "PR7_REVIEWED_HEAD=8e0d026164c240b8eabefb028d60da67d2bb234a"
+          git diff --name-only 8e0d026164c240b8eabefb028d60da67d2bb234a..HEAD
+      - name: Run complete offline regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q
+
+  independent-live-sample:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Bounded publisher-direct QA sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, time
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector, load_catalog
+
+          ids = [
+              "statcan_prices",
+              "jma_eqvol_updates",
+              "cdc_travel_notices",
+              "destatis_press",
+              "eea_press_releases",
+              "ecb_press",
+              "br_bcb_press",
+              "br_camara_all",
+              "fed_monetary",
+              "uk_mod",
+              "norway_ssb_latest",
+              "ema_news_releases",
+          ]
+          catalog = {row["id"]: row for row in load_catalog()}
+          failures = []
+          results = []
+          for identity in ids:
+              source = catalog[identity]
+              found = Collector(source).collect()
+              state = found["state"]
+              reports = found.get("reports", [])
+              bad = []
+              allowed = {h.lower() for h in source.get("article_domains", [])}
+              expected_origin = source.get("publisher_origin_id") or source["id"]
+              for report in reports[:200]:
+                  host = (urlsplit(report.get("url") or "").hostname or "").lower()
+                  if report.get("summary"):
+                      bad.append("summary")
+                  if report.get("media"):
+                      bad.append("media")
+                  if report.get("origin_id") != expected_origin:
+                      bad.append("origin")
+                  if not host or (allowed and host not in allowed):
+                      bad.append("article_host")
+              row = {
+                  "source_id": identity,
+                  "status": state.get("status"),
+                  "http_status": state.get("http_status"),
+                  "reports": len(reports),
+                  "latest_publication": state.get("latest_publication", ""),
+                  "violations": sorted(set(bad)),
+              }
+              results.append(row)
+              print("QA_LIVE", json.dumps(row, sort_keys=True), flush=True)
+              if state.get("status") not in {"available", "not_modified", "stale"}:
+                  failures.append(identity + ":status")
+              if state.get("http_status") not in {200, 304}:
+                  failures.append(identity + ":http")
+              if not reports:
+                  failures.append(identity + ":empty")
+              if bad:
+                  failures.append(identity + ":provenance")
+              time.sleep(1.0)
+          print("QA_LIVE_SUMMARY", json.dumps(results, sort_keys=True))
+          if failures:
+              raise SystemExit("QA live failures: " + ",".join(failures))
+          PY
