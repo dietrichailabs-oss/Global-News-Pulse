@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion20",
+  "catalog_version": "2026.11.13.source-expansion21",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5985,6 +5985,117 @@
       "feed_documentation": "https://obr.uk/",
       "attribution": "UK Office for Budget Responsibility (OBR); original headline, direct URL, date; information licensed under the Open Government Licence; no endorsement",
       "limitation": "Official OBR commentary/release announcements are evidence of a publisher statement, not a second independent confirmation of downstream economic claims. Publisher country does not establish incident location. Treat future OBR sibling feeds as one uk_obr family. Standard publisher-owned RSS route is independently live-validated; OBR site does not document a standalone RSS directory. Rare release schedules may trigger source freshness timeouts."
+    },
+    {
+      "id": "br_camara_all",
+      "name": "Agência Câmara — Latest Legislative News",
+      "url": "https://www.camara.leg.br/noticias/rss/ultimas-noticias",
+      "homepage": "https://www.camara.leg.br/noticias/",
+      "adapter": "rss",
+      "category": "Government",
+      "region": "South America",
+      "country": "Brazil",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.camara.leg.br"
+      ],
+      "article_domains": [
+        "www.camara.leg.br"
+      ],
+      "access": "Publisher-documented direct public HTTPS RSS, no account, key or relay; pre-admission actual Collector run 43413911891 on 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering: official RSS directory and published attributed syndication permission; original links and source-only headline/time; live Collector admission passed; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "pt",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "br_camara",
+      "license": "Agência Câmara expressly permits free reuse of its journalism with Agência Câmara credit, including automated RSS headlines and original links. Retain exact publisher RSS headline, publication date, direct Câmara URL and source credit only; no description, bodies, images, audio, videos, logos, third-party material or implied endorsement.",
+      "license_url": "https://infograficos.camara.leg.br/manual-de-comunicacao/agencia-camara/",
+      "feed_documentation": "https://www.camara.leg.br/noticias/rss",
+      "attribution": "Agência Câmara de Notícias — Câmara dos Deputados (Brazil); original headline, publication date and direct publisher link; no endorsement",
+      "limitation": "Publisher-origin is br_camara for all three topic feeds; topic siblings and overlapping stories never independently corroborate one another. The institution covers legislative debates, proposals and statements; such headlines do not imply measures became law. Brazil identifies publisher jurisdiction, never incident location. Publisher may update published times for corrected stories. Unrelated third-party photos and text excluded; independent rights/display and freshness QA needed."
+    },
+    {
+      "id": "br_camara_health",
+      "name": "Agência Câmara — Health Legislative News",
+      "url": "https://www.camara.leg.br/noticias/rss/dinamico/SAUDE",
+      "homepage": "https://www.camara.leg.br/noticias/",
+      "adapter": "rss",
+      "category": "Health",
+      "region": "South America",
+      "country": "Brazil",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.camara.leg.br"
+      ],
+      "article_domains": [
+        "www.camara.leg.br"
+      ],
+      "access": "Publisher-documented direct public HTTPS RSS, no account, key or relay; pre-admission actual Collector run 43413911891 on 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering: official RSS directory and published attributed syndication permission; original links and source-only headline/time; live Collector admission passed; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "pt",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "br_camara",
+      "license": "Agência Câmara expressly permits free reuse of its journalism with Agência Câmara credit, including automated RSS headlines and original links. Retain exact publisher RSS headline, publication date, direct Câmara URL and source credit only; no description, bodies, images, audio, videos, logos, third-party material or implied endorsement.",
+      "license_url": "https://infograficos.camara.leg.br/manual-de-comunicacao/agencia-camara/",
+      "feed_documentation": "https://www.camara.leg.br/noticias/rss",
+      "attribution": "Agência Câmara de Notícias — Câmara dos Deputados (Brazil); original headline, publication date and direct publisher link; no endorsement",
+      "limitation": "Publisher-origin is br_camara for all three topic feeds; topic siblings and overlapping stories never independently corroborate one another. The institution covers legislative debates, proposals and statements; such headlines do not imply measures became law. Brazil identifies publisher jurisdiction, never incident location. Publisher may update published times for corrected stories. Unrelated third-party photos and text excluded; independent rights/display and freshness QA needed."
+    },
+    {
+      "id": "br_camara_economy",
+      "name": "Agência Câmara — Economic Legislative News",
+      "url": "https://www.camara.leg.br/noticias/rss/dinamico/ECONOMIA",
+      "homepage": "https://www.camara.leg.br/noticias/",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "South America",
+      "country": "Brazil",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.camara.leg.br"
+      ],
+      "article_domains": [
+        "www.camara.leg.br"
+      ],
+      "access": "Publisher-documented direct public HTTPS RSS, no account, key or relay; pre-admission actual Collector run 43413911891 on 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering: official RSS directory and published attributed syndication permission; original links and source-only headline/time; live Collector admission passed; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "pt",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "br_camara",
+      "license": "Agência Câmara expressly permits free reuse of its journalism with Agência Câmara credit, including automated RSS headlines and original links. Retain exact publisher RSS headline, publication date, direct Câmara URL and source credit only; no description, bodies, images, audio, videos, logos, third-party material or implied endorsement.",
+      "license_url": "https://infograficos.camara.leg.br/manual-de-comunicacao/agencia-camara/",
+      "feed_documentation": "https://www.camara.leg.br/noticias/rss",
+      "attribution": "Agência Câmara de Notícias — Câmara dos Deputados (Brazil); original headline, publication date and direct publisher link; no endorsement",
+      "limitation": "Publisher-origin is br_camara for all three topic feeds; topic siblings and overlapping stories never independently corroborate one another. The institution covers legislative debates, proposals and statements; such headlines do not imply measures became law. Brazil identifies publisher jurisdiction, never incident location. Publisher may update published times for corrected stories. Unrelated third-party photos and text excluded; independent rights/display and freshness QA needed."
     }
   ]
 }
