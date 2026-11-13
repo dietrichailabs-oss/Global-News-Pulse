@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion21",
+  "catalog_version": "2026.11.13.source-expansion22",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -2915,14 +2915,14 @@
       "limitation": "Same European Commission publisher identity as other Commission topical feeds; no self-corroboration."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -2949,17 +2949,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -2986,17 +2986,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -3023,17 +3023,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -3060,17 +3060,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -3097,17 +3097,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -3134,17 +3134,17 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
-      "enabled": true,
+      "enabled": false,
       "min_interval": 900,
       "access": "Publisher-documented public RSS/Atom feed; no account or API key",
       "access_status": "reviewed_public",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
-      "review_date": "2026-11-12",
-      "review_scope": "Engineering metadata/feed admission; live validation required before merge",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata/feed admission; live validation required before merge; QUARANTINED: live audit 43414479879 observed repeated host HTTP 403; independent re-admission required; no denial bypass or repeated sibling polling",
       "retention_days": 90,
       "stale_after_days": 21,
       "metadata_only": true,
@@ -3171,7 +3171,7 @@
       "license_url": "https://www.beehive.govt.nz/copyright",
       "attribution": "New Zealand Government / Beehive.govt.nz; original link retained",
       "feed_documentation": "https://www.beehive.govt.nz/feeds",
-      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds."
+      "limitation": "Same New Zealand Government publisher family as other Beehive topical feeds. Source-expansion live audit 43414479879 (2026-11-13) returned HTTP 403 for all seven www.beehive.govt.nz siblings. Quarantined and disabled as a publisher host access denial. Do not re-enable until rights/technical owner review and independent publisher-direct live read succeeds after the provider's minimum 24-hour deny hold; no alternate identities, relay, or bypass."
     },
     {
       "enabled": true,
