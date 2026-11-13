@@ -3,12 +3,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QPushButton
 from global_pulse.single_media import Television
 from global_pulse.media_widget import youtube_id
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app():
     return QApplication.instance() or QApplication([])
 
@@ -29,6 +30,7 @@ def test_fixed_test_video_can_be_selected_without_autoplay(app, monkeypatch):
     finally:
         tv.stop()
         tv.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
 
@@ -47,6 +49,7 @@ def test_no_green_or_playing_on_load_success_without_video_progress(app):
     finally:
         tv.stop()
         tv.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
 
@@ -70,6 +73,7 @@ def test_initial_paused_video_does_not_rearm_deadline(app, monkeypatch):
     finally:
         tv.stop()
         tv.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
 
