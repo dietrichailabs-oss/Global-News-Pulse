@@ -32,14 +32,15 @@ def _bounded_get(client: httpx.Client, url: str, limit: int) -> bytes:
     exact same URL and only a small transient status set; never switch to the
     DOC search API, rotate hosts, or hide a persistent failure.
     """
-    transient = {404, 429, 502, 503, 504}
+    # Same-turn retries are deliberately limited to GDELT's observed
+    # publication-lag 404. Rate limits and 5xx responses return immediately to
+    # the durable scheduler so Retry-After/backoff is honored rather than
+    # hammering the provider.
     for attempt in range(3):
         with client.stream("GET", url, follow_redirects=False) as response:
             if response.status_code != 200:
-                if response.status_code in transient and attempt < 2:
-                    raw = str(response.headers.get("retry-after") or "")
-                    delay = int(raw) if raw.isdecimal() and int(raw) <= 5 else attempt + 1
-                    time.sleep(max(1, delay))
+                if response.status_code == 404 and attempt < 2:
+                    time.sleep(attempt + 1)
                     continue
                 raise GdeltHTTPError(response.status_code, response.headers.get("retry-after"))
             header = response.headers.get("content-length")
