@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion22",
+  "catalog_version": "2026.11.13.source-expansion23",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -6096,6 +6096,80 @@
       "feed_documentation": "https://www.camara.leg.br/noticias/rss",
       "attribution": "Agência Câmara de Notícias — Câmara dos Deputados (Brazil); original headline, publication date and direct publisher link; no endorsement",
       "limitation": "Publisher-origin is br_camara for all three topic feeds; topic siblings and overlapping stories never independently corroborate one another. The institution covers legislative debates, proposals and statements; such headlines do not imply measures became law. Brazil identifies publisher jurisdiction, never incident location. Publisher may update published times for corrected stories. Unrelated third-party photos and text excluded; independent rights/display and freshness QA needed."
+    },
+    {
+      "id": "fed_enforcement",
+      "name": "Federal Reserve Board — Enforcement Actions",
+      "url": "https://www.federalreserve.gov/feeds/press_enforcement.xml",
+      "category": "Government",
+      "homepage": "https://www.federalreserve.gov/newsevents/pressreleases.htm",
+      "adapter": "rss",
+      "region": "North America",
+      "country": "United States",
+      "language": "en",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.federalreserve.gov"
+      ],
+      "article_domains": [
+        "www.federalreserve.gov"
+      ],
+      "access": "Publisher-documented first-party public RSS; no account or API key; direct Collector pre-admission run 43423791348 (2026-11-13)",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering: documented official feed and copyright; direct publisher Collector 200/parse/recent/original-link rights/provenance admitted; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "federal_reserve_press",
+      "license": "Unless marked otherwise, Board website content is public domain; cite Federal Reserve Board; exclude third-party photos/graphics/trademarks. Retain publisher headline, date, original link, fixed attribution only, no body, summary, media, seals or implied endorsement.",
+      "license_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "feed_documentation": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "attribution": "Board of Governors of the Federal Reserve System — Enforcement Actions; original publisher link, date; no endorsement",
+      "limitation": "Sibling topical feed duplicates announcements from already-enabled federal_reserve_press all-press RSS; both must share publisher_origin_id=federal_reserve_press and can never corroborate that publisher independently. Original Board statements do not establish third-party event facts. Publisher country is not incident location. No third-party media."
+    },
+    {
+      "id": "fed_monetary",
+      "name": "Federal Reserve Board — Monetary Policy Press Releases",
+      "url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+      "category": "Economy",
+      "homepage": "https://www.federalreserve.gov/newsevents/pressreleases.htm",
+      "adapter": "rss",
+      "region": "North America",
+      "country": "United States",
+      "language": "en",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.federalreserve.gov"
+      ],
+      "article_domains": [
+        "www.federalreserve.gov"
+      ],
+      "access": "Publisher-documented first-party public RSS; no account or API key; direct Collector pre-admission run 43423791348 (2026-11-13)",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering: documented official feed and copyright; direct publisher Collector 200/parse/recent/original-link rights/provenance admitted; independent QA pending",
+      "retention_days": 90,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "federal_reserve_press",
+      "license": "Unless marked otherwise, Board website content is public domain; cite Federal Reserve Board; exclude third-party photos/graphics/trademarks. Retain publisher headline, date, original link, fixed attribution only, no body, summary, media, seals or implied endorsement.",
+      "license_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "feed_documentation": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "attribution": "Board of Governors of the Federal Reserve System — Monetary Policy; original publisher link, date; no endorsement",
+      "limitation": "Sibling topical feed duplicates announcements from already-enabled federal_reserve_press all-press RSS; both must share publisher_origin_id=federal_reserve_press and can never corroborate that publisher independently. Original Board statements do not establish third-party event facts. Publisher country is not incident location. No third-party media."
     }
   ]
 }
