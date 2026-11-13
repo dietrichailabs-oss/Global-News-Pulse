@@ -5,6 +5,9 @@ on:
     branches: [eng/issue31-tv-basic-playback-proof-20261113]
     paths:
       - '.github/workflows/issue31-tv-owner-package.yml'
+      - 'global_pulse/single_media.py'
+      - 'global_pulse/media_widget.py'
+      - 'tests/test_issue31_tv_basic_player.py'
   workflow_dispatch:
 
 permissions:
