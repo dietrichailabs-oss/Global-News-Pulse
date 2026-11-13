@@ -82,6 +82,11 @@ jobs:
                  publisher_origin_id=origin,independence="original",category=cat,region=region,
                  country=country,language=lang,attribution=name,official=True,
                  retention_days=180,stale_after_days=30)
+              # BCB's official Atom feeds omit 'published' and deliver dated entries via
+              # 'updated'. This explicit source-scoped review treats it as the BCB
+              # feed release/update time, not independently proven first publication.
+              if sid.startswith("br_bcb_"):
+                  s["updated_is_publication_time"]=True
               try:
                   d=Collector(s).collect(); st=d["state"]; reports=d["reports"]
                   recent=[r for r in reports if r.get("published_at") and 0<=now-timestamp(r["published_at"])<=30*86400]
