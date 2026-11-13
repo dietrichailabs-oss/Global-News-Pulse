@@ -331,7 +331,7 @@
       "category": "Government",
       "region": "Asia",
       "country": "India",
-      "enabled": true,
+      "enabled": false,
       "min_interval": 600,
       "allowed_domains": [
         "www.pib.gov.in",
@@ -342,18 +342,19 @@
       "license": "PIB permits accurate reproduction with prominent source acknowledgement; third-party content excluded.",
       "license_url": "https://www.pib.gov.in/content/186_2_Copyright-Policy.aspx?lang=1&reg=5",
       "attribution": "Press Information Bureau India",
-      "status": "not_checked",
+      "status": "disabled",
       "authentication": "None",
       "review_date": "2026-11-08",
       "retention_days": 365,
       "language": "und",
       "official": true,
       "independence": "original",
-      "limitation": "Feed has Hindi content and omits publication timestamps; entries are undated, not asserted to be breaking news. Translation needs a supported installed model.",
+      "limitation": "Feed has Hindi content and omits publication timestamps; entries are undated, not asserted to be breaking news. Translation needs a supported installed model. Independent full-pool QA run 43448330100 returned publisher HTTP 403 on 2026-11-13; source is quarantined and must not be re-enabled until a later publisher-direct admission succeeds without bypass.",
       "article_domains": [
         "www.pib.gov.in",
         "pib.gov.in"
-      ]
+      ],
+      "disabled_reason": "Independent full-pool QA run 43448330100 returned HTTP 403 on 2026-11-13; quarantined without retry or access-identity bypass."
     },
     {
       "id": "wb_inflation",
