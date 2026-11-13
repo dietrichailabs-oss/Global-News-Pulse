@@ -86,6 +86,16 @@ def test_india_pib_http403_quarantine_cannot_silently_reenable():
     assert "43448330100" in row.get("limitation", "")
 
 
+def test_repeated_timeout_gdelt_source_is_quarantined_fail_closed():
+    catalog = {entry["id"]: entry for entry in load_catalog()}
+    row = catalog["gdelt_world_press"]
+    assert row["enabled"] is False
+    assert row["status"] == "disabled"
+    assert "43448330100" in row.get("disabled_reason", "")
+    assert "43448945600" in row.get("disabled_reason", "")
+    assert "43448926428" in row.get("disabled_reason", "")
+
+
 def test_metadata_only_embedded_media_is_rejected_at_parser_and_store_boundaries():
     source = next(row for row in load_catalog() if row["id"] == "fed_monetary")
     rss = (b"<rss><channel><item><guid>f1</guid>"
