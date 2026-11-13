@@ -265,7 +265,7 @@ def test_controller_failed_rollback_preserves_original_exception(tmp_path, monke
     from global_pulse import controller as controller_module
     from global_pulse.core import Store
 
-    QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
     original_close = controller_module.Store.close
 
     def close_then_error(self):
@@ -279,5 +279,10 @@ def test_controller_failed_rollback_preserves_original_exception(tmp_path, monke
     monkeypatch.setattr(controller_module, "load_catalog", initial_failure)
     with pytest.raises(ValueError, match="original bad source catalog"):
         controller_module.Controller(tmp_path, demo=True)
-    with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:
+    reopened = Store(tmp_path / "synthetic.sqlite3", mode="synthetic")
+    try:
         assert reopened.stats()["events"] == 0
+    finally:
+        # The injected close exception is for failure-path observation only.
+        original_close(reopened)
+    app.processEvents()
