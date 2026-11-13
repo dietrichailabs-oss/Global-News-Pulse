@@ -240,7 +240,11 @@ def project(connection, country_names, *, since=None, now=None, limit=MAX_ROWS):
     if 'parser_version' in columns:
         version_clause=' AND COALESCE(b.parser_version,1)=1'
         legacy=connection.execute("SELECT COUNT(*) FROM gdelt_batches WHERE status='complete' AND kind='export' AND COALESCE(parser_version,1)!=1").fetchone()[0]
-    upper = moment.strftime('%Y%m%d%H%M%S')
+    # GDELT's quarter-hour file label / DateAdded can lead the wall clock by
+    # several minutes even after the file is downloadable. Treat at most one
+    # publication interval of label skew as current; local imported_at and
+    # event-day checks below remain strict.
+    upper = (moment + timedelta(minutes=15)).strftime('%Y%m%d%H%M%S')
     lower = start.strftime('%Y%m%d%H%M%S')
     rows = connection.execute(f'''SELECT r.global_event_id,r.batch_timestamp,r.event_day,r.date_added,
         r.event_code,r.quad_class,r.action_country_code,r.action_location,r.source_article_url,b.imported_at
