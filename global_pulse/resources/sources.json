@@ -206,7 +206,8 @@
       "category": "Economy",
       "region": "Europe",
       "country": "Euro area",
-      "enabled": true,
+      "enabled": false,
+      "disabled_reason": "Duplicate exact feed URL; ecb_press is the sole active poller. Retain the historic source ID and publisher origin.",
       "min_interval": 600,
       "allowed_domains": [
         "www.ecb.europa.eu"
@@ -223,6 +224,7 @@
       "language": "en",
       "official": true,
       "independence": "original",
+      "publisher_origin_id": "ecb",
       "article_domains": [
         "www.ecb.europa.eu"
       ]
@@ -649,7 +651,7 @@
       "article_domains": [
         "www.who.int"
       ],
-      "publisher_origin_id": "who"
+      "publisher_origin_id": "who_don"
     },
     {
       "id": "sec",
@@ -1113,7 +1115,7 @@
       "article_domains": [
         "afro.who.int"
       ],
-      "publisher_origin_id": "who"
+      "publisher_origin_id": "who_don"
     },
     {
       "id": "bls_latest",
@@ -5694,7 +5696,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "www.ecb.europa.eu"
       ],
@@ -5732,7 +5734,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "www.ecb.europa.eu"
       ],
@@ -5770,7 +5772,7 @@
       "metadata_only": true,
       "official": true,
       "independence": "original",
-      "publisher_origin_id": "eu_ecb",
+      "publisher_origin_id": "ecb",
       "allowed_domains": [
         "mid.ecb.europa.eu"
       ],
