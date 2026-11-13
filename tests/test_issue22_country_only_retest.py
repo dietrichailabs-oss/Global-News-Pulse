@@ -90,3 +90,35 @@ def test_more_than_twenty_current_reports_do_not_leak_into_neutral_archive(world
     assert len(world.country_activity_for("Ukraine")["event_ids"]) == 20
     assert world.country_evidence_for("Ukraine")["count"] == 1
     assert world.country_evidence_for("Ukraine")["events"][0]["id"] == "historical"
+
+def test_many_neutral_india_records_keep_counts_without_singleton_crisis_work(world, monkeypatch):
+    """Country-only evidence stays discoverable without N redundant classifiers.
+
+    This checks a bounded computational path, not the owner's physical India
+    modal or desktop startup performance. Valid crisis-bearing countries still
+    use the exact individual source classifier in the other tests above.
+    """
+    import global_pulse.map_widget as map_widget
+
+    original = map_widget.build_country_activity
+    called_sizes = []
+
+    def observed(events, **kwargs):
+        records = list(events)
+        called_sizes.append(len(records))
+        return original(records, **kwargs)
+
+    monkeypatch.setattr(map_widget, "build_country_activity", observed)
+    now = datetime.now(timezone.utc).isoformat()
+    reports = [record(f"india-{i}", title="Routine public health bulletin",
+                      category="Health", published=now) for i in range(350)]
+    for item in reports:
+        item["country"] = "India"
+        item["reports"][0]["country"] = "India"
+    world.set_events([], country_events=reports)
+    assert called_sizes == [350]
+    assert world.country_activity_for("India") == {}
+    neutral = world.country_evidence_for("India")
+    assert neutral["count"] == 350
+    assert len(neutral["events"]) == 30
+    assert "350 country-only records" in world.coverage_summary()
