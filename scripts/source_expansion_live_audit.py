@@ -4,9 +4,12 @@ No article bodies, images, audio, or video are downloaded by Global Pulse.
 The admitted feeds are metadata-only RSS/Atom sources.
 """
 from __future__ import annotations
-import argparse,json
+import argparse,json,sys
 from datetime import datetime,timezone
 from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 
 from global_pulse.map_evidence import incident_country
 from global_pulse.sources import Collector,load_catalog
