@@ -358,6 +358,21 @@ def test_nws_zone_200_length_mismatch_never_admits_partial_transfer(length_delta
     assert event_areas(result) == []
 
 
+
+@pytest.mark.parametrize('bad_length', ['not-a-number', '-42', '1, 2'])
+def test_nws_zone_malformed_http_length_cannot_become_official_zone_evidence(bad_length):
+    """Ambiguous/invalid framing is not accepted as a complete publisher polygon."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': bad_length}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['lookup_failures'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
 def test_nws_zone_matching_200_length_still_admits_valid_offshore_area():
     """Correctly framed official zone transfers keep working with the same parser."""
     payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
