@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion19",
+  "catalog_version": "2026.11.13.source-expansion20",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5947,6 +5947,44 @@
       "url": "https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/focus",
       "category": "Economy",
       "official_scope": "measurement"
+    },
+    {
+      "id": "uk_obr_news",
+      "name": "United Kingdom — Office for Budget Responsibility Updates",
+      "url": "https://obr.uk/feed/",
+      "homepage": "https://obr.uk/",
+      "adapter": "rss",
+      "category": "Economy",
+      "region": "Europe",
+      "country": "United Kingdom",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "obr.uk"
+      ],
+      "article_domains": [
+        "obr.uk",
+        "www.obr.uk"
+      ],
+      "access": "Direct publisher-owned public HTTPS RSS endpoint; no key or account; pre-admission GitHub Actions 43408103840 on 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering first-party direct RSS collector, published Open Government Licence and headline-only provenance; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "uk_obr",
+      "license": "OBR site copyright permits reuse free of charge in any format or medium under the Open Government Licence, excluding logos. Retain only official RSS headline, publication date, direct original URL, attribution and licence; no summary, article bodies, HTML, images, audio, logos or third-party media; no implied endorsement.",
+      "license_url": "https://obr.uk/legal-pages/copyright/",
+      "feed_documentation": "https://obr.uk/",
+      "attribution": "UK Office for Budget Responsibility (OBR); original headline, direct URL, date; information licensed under the Open Government Licence; no endorsement",
+      "limitation": "Official OBR commentary/release announcements are evidence of a publisher statement, not a second independent confirmation of downstream economic claims. Publisher country does not establish incident location. Treat future OBR sibling feeds as one uk_obr family. Standard publisher-owned RSS route is independently live-validated; OBR site does not document a standalone RSS directory. Rare release schedules may trigger source freshness timeouts."
     }
   ]
 }
