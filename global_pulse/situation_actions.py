@@ -50,13 +50,6 @@ class SituationActions:
             self.status_label.setText("Could not change the star. The event may no longer be archived or the archive is unavailable.")
             return False
         self._sync_situation_star({"id": self._selected_id})
-        # A deliberate user Star/Unstar is not collector status chatter.
-        # Update the visible feed marker and Situation Room immediately;
-        # the coalesced background archive/map redraw must not delay this
-        # persisted user action or leave an obsolete saved row clickable.
-        self._populate_feed()
-        if self.pages.currentIndex() == 1:
-            self._refresh_saved_situations()
         self.status_label.setText(
             "Starred in Situations. It will stay saved after restart."
             if result["saved"] else
