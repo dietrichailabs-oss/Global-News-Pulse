@@ -1,0 +1,90 @@
+name: Source Expansion - Norway SSB and EEA Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-no-eea-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  direct-publisher-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe unadmitted official feeds without modifying catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector, timestamp
+
+          ssb = dict(adapter="rss", enabled=True, metadata_only=True, access_status="reviewed_public",
+              independence="original", official=True, min_interval=1800, stale_after_days=30,
+              retention_days=180, language="en", region="Europe", country="Norway",
+              publisher_origin_id="norway_ssb", allowed_domains=["www.ssb.no"],
+              article_domains=["www.ssb.no", "ssb.no"],
+              attribution="Statistics Norway (SSB), CC BY 4.0; original link, publisher date; no endorsement")
+          eea = dict(adapter="rss", enabled=True, metadata_only=True, access_status="reviewed_public",
+              independence="original", official=True, min_interval=1800, stale_after_days=30,
+              retention_days=180, language="en", region="Europe", country="",
+              publisher_origin_id="eu_eea", allowed_domains=["www.eea.europa.eu"],
+              article_domains=["www.eea.europa.eu", "eea.europa.eu"],
+              attribution="European Environment Agency (EEA), CC BY; original link, publisher date; no endorsement")
+          rows = [
+              (ssb, "ssb_latest_probe", "https://www.ssb.no/en/rss/", "Economy"),
+              (ssb, "ssb_labour_probe", "https://www.ssb.no/en/rss/arbeid-og-lonn", "Economy"),
+              (ssb, "ssb_energy_probe", "https://www.ssb.no/en/rss/energi-og-industri", "Infrastructure"),
+              (eea, "eea_press_probe", "https://www.eea.europa.eu/en/newsroom/rss-feeds/eeas-press-releases-rss/rss.xml", "Environment"),
+              (eea, "eea_publications_probe", "https://www.eea.europa.eu/en/newsroom/rss-feeds/publications-rss/rss.xml", "Environment"),
+          ]
+          now = datetime.now(timezone.utc).timestamp()
+          passes = []
+          for base, identity, url, category in rows:
+              source = dict(base, id=identity, name=identity, url=url, category=category)
+              try:
+                  collected = Collector(source).collect()
+                  state = collected["state"]; reports = collected.get("reports", [])
+                  recent = [r for r in reports if r.get("published_at")
+                        and 0 <= now - timestamp(r["published_at"]) <= 30*86400]
+                  invalid = [r for r in reports if r.get("summary") or r.get("media")
+                        or not r.get("title") or not r.get("published_at") or not r.get("attribution")
+                        or r.get("origin_id") != source["publisher_origin_id"]
+                        or r.get("country_basis") != "publisher_coverage"
+                        or urlsplit(r.get("url", "")).scheme != "https"
+                        or urlsplit(r.get("url", "")).hostname not in source["article_domains"]]
+                  passed = bool(state.get("status") == "available" and state.get("http_status") == 200
+                        and reports and recent and not invalid)
+                  row = dict(id=identity, url=url, pass_pre_admission=passed,
+                        status=state.get("status"), http_status=state.get("http_status"),
+                        reports=len(reports), recent_30d=len(recent), latest=state.get("latest_publication"),
+                        violations=len(invalid), error=state.get("error") or "")
+                  if passed: passes.append(identity)
+              except Exception as e:
+                  row = dict(id=identity, url=url, pass_pre_admission=False,
+                       error=f"{type(e).__name__}: {str(e)[:150]}")
+              print("PRE_ADMISSION_PROBE", json.dumps(row, sort_keys=True), flush=True)
+          print("PROBE_SUMMARY", json.dumps(dict(passed=passes, tested=len(rows),
+                note="Probe-only. No catalog edit. Independent QA and separate post-admission needed.")), flush=True)
+          PY
