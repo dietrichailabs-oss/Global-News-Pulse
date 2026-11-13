@@ -17,14 +17,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from .map_evidence import incident_country
+from .map_evidence import incident_country, structured_incident_country
 
 UTC = timezone.utc
 
 CONFLICT_PATTERNS = (
     r"\bwar\b", r"\barmed conflict\b", r"\bfighting\b", r"\bclashes?\b",
-    r"\bairstrikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
-    r"\boffensive\b", r"\bmissile(?:s| strike)?\b", r"\bdrone strike\b",
+    r"\bair[ -]?strikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
+    r"\boffensive\b", r"\bmissile(?:s| strikes?| attacks?)?\b",
+    r"\b(?:drone|rocket|military|armed) (?:strikes?|attacks?)\b",
+    r"\b(?:launch|launched|launches|fresh|renewed|retaliatory|deadly|overnight).{0,45}\bstrikes?\b",
+    r"\bstrikes? on .{0,45}\b(?:power grid|energy infrastructure|military targets?|civilian infrastructure)\b",
+    r"\b(?:killed|injured|wounded).{0,55}\battacks?\b",
+    r"\battacks?.{0,55}\b(?:killed|injured|wounded)\b",
+    r"\b(?:armed|military|regional|cross-border) conflict\b",
+    r"\bconflict (?:in|between|with)\b",
     r"\binvasion\b", r"\bcombat\b", r"\bceasefire violation\b",
 )
 # A bare "war" in a headline is not invariably armed conflict. Keep
@@ -423,7 +430,7 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
         if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
             continue
 
-        structured_country = normalize_country(incident_country(event))
+        structured_country = normalize_country(structured_incident_country(event))
         text_country = _explicit_text_country(event) if not structured_country else ""
         country = structured_country or text_country
         kinds = _topical_kinds(event)
