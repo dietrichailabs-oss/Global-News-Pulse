@@ -86,7 +86,8 @@ def test_second_batch_is_metadata_only_and_publisher_grouped():
         "who":{"who","who_afro_emergencies"},
         "bls":{"bls_latest","bls_employment","bls_jolts","bls_cpi","bls_ppi","bls_import_export","bls_work_stoppages"},
     }
-    new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies","bls_latest"}
+    denied_nz=groups["nz_government"]
+    new_ids=set().union(*groups.values())-{"sec_press","nws","swpc","who","who_afro_emergencies","bls_latest"}-denied_nz
     for identity in new_ids:
         row=c[identity]
         assert row["enabled"] is True
@@ -95,6 +96,12 @@ def test_second_batch_is_metadata_only_and_publisher_grouped():
         assert row["url"].startswith("https://")
     for origin,identities in groups.items():
         assert {c[x]["publisher_origin_id"] for x in identities}=={origin}
+    # Access-denied publisher siblings remain visible in the catalog for audit
+    # but must not be silently re-enabled by a later source-expansion commit.
+    for identity in denied_nz:
+        assert c[identity]["enabled"] is False
+        assert c[identity]["status"]=="disabled"
+        assert c[identity]["publisher_origin_id"]=="nz_government"
 
 def test_second_batch_spans_economy_health_government_disaster_and_infrastructure():
     c=_catalog()
