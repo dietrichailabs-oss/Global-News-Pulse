@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication,QMessageBox
 
-from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel
+from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel,AudioSession
 from global_pulse.single_media import Television,MediaPanel
 from global_pulse.sources import load_media_catalog
 from global_pulse.camera_context import camera_catalog
@@ -206,3 +206,65 @@ def test_news_refresh_does_not_start_radio_tv_or_camera(app):
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_decoded_radio_buffer_without_system_output_fails_closed(app, monkeypatch):
+    """A headless decoder is not truthful audible PLAYING."""
+    class Buffer:
+        def isValid(self): return True
+        def frameCount(self): return 512
+
+    class Output:
+        def __init__(self): self.muted = False
+        def setMuted(self, value): self.muted = value
+
+    class Player:
+        def __init__(self): self.stopped = False; self.cleared = False
+        def stop(self): self.stopped = True
+        def setSource(self, url): self.cleared = url.isEmpty()
+
+    session = AudioSession("wnyc_fm")
+    events = []
+    session.changed.connect(lambda state, detail: events.append((state, detail)))
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: False))
+    try:
+        session.active = True
+        session.state = "CONNECTING"
+        session.output = Output()
+        session.player = Player()
+        session._buffer(Buffer())
+        assert session.state == "ERROR"
+        assert [state for state, _ in events] == ["ERROR"]
+        assert "audio-output" in events[0][1]
+        assert session.closed and not session.active
+        assert session.output.muted and session.player.stopped and session.player.cleared
+        assert session.buffers == 0 and session.frames == 0
+        # A delayed decoder signal cannot reactivate a released session.
+        session._buffer(Buffer())
+        assert len(events) == 1
+    finally:
+        session.stop()
+        session.deleteLater()
+        app.processEvents()
+
+
+def test_decoded_radio_buffer_with_available_output_can_mark_playing(app, monkeypatch):
+    """Positive decoder path keeps the existing real-frame liveness contract."""
+    class Buffer:
+        def isValid(self): return True
+        def frameCount(self): return 256
+
+    session = AudioSession("wnyc_fm")
+    monkeypatch.setattr(AudioSession, "_has_audio_output", staticmethod(lambda: True))
+    try:
+        session.active = True
+        session.state = "CONNECTING"
+        session._buffer(Buffer())
+        assert session.state == "PLAYING"
+        assert session.buffers == 1 and session.frames == 256
+        assert session.last_frame > 0
+        session.stop()
+        assert session.state == "OFF"
+    finally:
+        session.deleteLater()
+        app.processEvents()

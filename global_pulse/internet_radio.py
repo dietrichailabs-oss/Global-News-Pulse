@@ -99,18 +99,29 @@ class AudioSession(QObject):
         if self.output:
             self.output.setMuted(value is True)
 
+    @staticmethod
+    def _has_audio_output():
+        """A decoded buffer alone does not prove the host can play audio."""
+        from PySide6.QtMultimedia import QMediaDevices
+        try:
+            return not QMediaDevices.defaultAudioOutput().isNull()
+        except (RuntimeError, OSError):
+            return False
+
     def _buffer(self, buffer):
         if not self.active or not buffer.isValid() or buffer.frameCount() <= 0:
+            return
+        # On headless/missing-device hosts QMediaPlayer can still decode MP3
+        # into buffers. Never call that audible PLAYING or leave an unowned
+        # silent network stream running; the user can retry after attaching an
+        # output device.
+        if not self._has_audio_output():
+            self.fail("No system audio-output device is available; radio disconnected.")
             return
         self.frames += buffer.frameCount()
         self.buffers += 1
         self.last_frame = time.monotonic()
-        # These are decoded frames, not merely an HTTP/page-load callback.
-        from PySide6.QtMultimedia import QMediaDevices
-        detail = "Direct Internet audio · broadcaster terms apply"
-        if QMediaDevices.defaultAudioOutput().isNull():
-            detail = "Audio is decoding, but no system audio-output device is available"
-        self._emit("PLAYING", detail)
+        self._emit("PLAYING", "Direct Internet audio · broadcaster terms apply")
 
     def _status(self, status):
         if not self.active:
