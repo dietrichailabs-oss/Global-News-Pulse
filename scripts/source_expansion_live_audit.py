@@ -18,7 +18,7 @@ from global_pulse.sources import Collector,load_catalog
 SOURCE_IDS=[
     # Batch 1, already admitted.
     "ukhsa","hm_treasury","cabinet_office","rba_media","eurostat_news",
-    "health_canada_news","bank_canada_press","ecdc_news","eu_council_press",
+    "bank_canada_press","ecdc_news","eu_council_press",
     # Batch 2 candidates.
     "nass_news","nass_reports","nass_asb","nass_census",
     "sec_litigation","sec_suspensions",
@@ -32,6 +32,12 @@ SOURCE_IDS=[
     # Batch 4 candidates.
     "uk_mod","uk_home_office","uk_desnz","uk_dft","uk_dhsc","uk_defra","uk_dsit",
     "ons_releases",
+    # Statistics Canada Open Licence batch.
+    "statcan_agriculture","statcan_business","statcan_crime","statcan_digital",
+    "statcan_economic_accounts","statcan_energy","statcan_environment",
+    "statcan_government","statcan_health","statcan_housing","statcan_income",
+    "statcan_trade","statcan_labour","statcan_manufacturing",
+    "statcan_population","statcan_prices","statcan_transport","statcan_travel",
 ]
 
 ALLOW_EMPTY={
