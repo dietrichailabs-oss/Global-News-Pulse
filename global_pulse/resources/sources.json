@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion13",
+  "catalog_version": "2026.11.13.source-expansion14",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -5296,6 +5296,82 @@
       "name": "European Environment Agency — Publications",
       "url": "https://www.eea.europa.eu/en/newsroom/rss-feeds/publications-rss/rss.xml",
       "category": "News"
+    },
+    {
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Europe / Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.ema.europa.eu"
+      ],
+      "article_domains": [
+        "www.ema.europa.eu",
+        "ema.europa.eu"
+      ],
+      "access": "EMA's documented public RSS; direct producer HTTPS; no account, key or relay; live pre-enablement Collector PASS 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata-only publisher rights/direct live admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "eu_ema",
+      "license": "EMA-owned website materials may be reproduced for commercial/non-commercial purposes with explicit EMA attribution. Third-party photos/content and EMA logos excluded. Original EMA links must not imply endorsement or appear alongside advertising; Global Pulse retains headlines, original URLs, dates and attribution only, with no full-article or media copies.",
+      "license_url": "https://www.ema.europa.eu/en/about-us/about-website/legal-notice",
+      "feed_documentation": "https://www.ema.europa.eu/en/news-events/rss-feeds",
+      "attribution": "European Medicines Agency (EMA); original source link and publication date retained; no endorsement implied",
+      "homepage": "https://www.ema.europa.eu/en/news-events/rss-feeds",
+      "limitation": "EMA updates are regulator statements, not patient advice or independent clinical evidence. Sibling EMA feeds share eu_ema. Linked EMA pages must not be presented alongside advertising or as endorsement; independent QA to verify compliance.",
+      "id": "ema_news_releases",
+      "name": "European Medicines Agency — News and Press Releases",
+      "url": "https://www.ema.europa.eu/en/news.xml"
+    },
+    {
+      "adapter": "rss",
+      "category": "Health",
+      "region": "Europe / Global",
+      "country": "",
+      "enabled": true,
+      "min_interval": 3600,
+      "allowed_domains": [
+        "www.ema.europa.eu"
+      ],
+      "article_domains": [
+        "www.ema.europa.eu",
+        "ema.europa.eu"
+      ],
+      "access": "EMA's documented public RSS; direct producer HTTPS; no account, key or relay; live pre-enablement Collector PASS 2026-11-13",
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering metadata-only publisher rights/direct live admission; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "language": "en",
+      "official": true,
+      "official_scope": "statement",
+      "independence": "original",
+      "publisher_origin_id": "eu_ema",
+      "license": "EMA-owned website materials may be reproduced for commercial/non-commercial purposes with explicit EMA attribution. Third-party photos/content and EMA logos excluded. Original EMA links must not imply endorsement or appear alongside advertising; Global Pulse retains headlines, original URLs, dates and attribution only, with no full-article or media copies.",
+      "license_url": "https://www.ema.europa.eu/en/about-us/about-website/legal-notice",
+      "feed_documentation": "https://www.ema.europa.eu/en/news-events/rss-feeds",
+      "attribution": "European Medicines Agency (EMA); original source link and publication date retained; no endorsement implied",
+      "homepage": "https://www.ema.europa.eu/en/news-events/rss-feeds",
+      "limitation": "EMA updates are regulator statements, not patient advice or independent clinical evidence. Sibling EMA feeds share eu_ema. Linked EMA pages must not be presented alongside advertising or as endorsement; independent QA to verify compliance. Broad document updates must not be treated as urgent clinical events.",
+      "id": "ema_whats_new",
+      "name": "European Medicines Agency — What's New",
+      "url": "https://www.ema.europa.eu/en/whats-new.xml"
     }
   ]
 }
