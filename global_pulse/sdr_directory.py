@@ -54,7 +54,7 @@ def public_receiver_url(value):
         except UnicodeError as exc:
             raise ValueError("Invalid host") from exc
         if not re.fullmatch(
-            r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{1,62}",
+            r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}",
             ascii_host,
         ):
             raise ValueError("Public DNS name required")
@@ -144,7 +144,7 @@ def parse_directory(provider, content):
         if info["url"] in seen:
             continue
         seen.add(info["url"])
-        label = re.sub(r"\\s+", " ", str(title or "")).strip()[:110]
+        label = re.sub(r"\s+", " ", str(title or "")).strip()[:110]
         info.update({"name": label or info["host"], "provider": provider})
         results.append(info)
         if len(results) >= MAX_RECEIVERS:
