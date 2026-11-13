@@ -52,7 +52,8 @@ def test_manifest_to_local_sqlite_without_any_article_download(tmp_path):
         assert (result["status"], result["downloaded"], result["added"]) == ("complete", True, 1)
         assert cache.status()["cached_rows"] == 1
         assert len(calls) == 2
-        assert all(url.startswith("https://data.gdeltproject.org/gdeltv2/") for url in calls)
+        assert calls[0] == "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+        assert calls[1].startswith("http://data.gdeltproject.org/gdeltv2/")
         assert not any("example.org" in url for url in calls)
 
 
