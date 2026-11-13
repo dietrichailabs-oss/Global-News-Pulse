@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.12.source-expansion11",
+  "catalog_version": "2026.11.12.source-expansion12",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -4992,6 +4992,120 @@
       "attribution": "Service Public — Direction de l'information légale et administrative (DILA), France; original link retained",
       "feed_documentation": "https://entreprendre.service-public.gouv.fr/P10008",
       "limitation": "Public administrative and business updates, not independent evidence of an event. All DILA/Service Public sibling feeds must share publisher_origin_id=fr_dila."
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 1800,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering publisher rights + pre-enablement live Collector/provenance check passed; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "language": "fr",
+      "region": "Europe",
+      "country": "France",
+      "publisher_origin_id": "fr_economie",
+      "allowed_domains": [
+        "www.economie.gouv.fr"
+      ],
+      "article_domains": [
+        "www.economie.gouv.fr",
+        "economie.gouv.fr"
+      ],
+      "access": "Official France economy ministry RSS, free to webmasters, no account/API key",
+      "license": "Economie.gouv.fr syndicated feeds are offered free to readers/webmasters with visible source attribution; unless third-party rights noted, site text falls under Etalab Licence Ouverte 2.0 with original source and update date. Global Pulse stores headline, publisher, date and original link only, no feed excerpt/media.",
+      "license_url": "https://www.economie.gouv.fr/mentions-legales",
+      "feed_documentation": "https://www.economie.gouv.fr/rss",
+      "attribution": "Ministères économiques et financiers (France) — economie.gouv.fr; original article and date retained",
+      "official_scope": "statement",
+      "id": "fr_economie_portal",
+      "name": "France Ministry of Economy — Current News",
+      "url": "https://www.economie.gouv.fr/rss/toutesactualites",
+      "homepage": "https://www.economie.gouv.fr/rss",
+      "category": "Economy",
+      "limitation": "Portal aggregates French ministry-related reports. Sibling ministry feeds reuse fr_economie origin and cannot self-corroborate. Economic press statements are not economic measurements."
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 1800,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering publisher rights + pre-enablement live Collector/provenance check passed; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "language": "fr",
+      "region": "Europe",
+      "country": "France",
+      "publisher_origin_id": "fr_economie",
+      "allowed_domains": [
+        "www.economie.gouv.fr"
+      ],
+      "article_domains": [
+        "www.economie.gouv.fr",
+        "economie.gouv.fr"
+      ],
+      "access": "Official France economy ministry RSS, free to webmasters, no account/API key",
+      "license": "Economie.gouv.fr syndicated feeds are offered free to readers/webmasters with visible source attribution; unless third-party rights noted, site text falls under Etalab Licence Ouverte 2.0 with original source and update date. Global Pulse stores headline, publisher, date and original link only, no feed excerpt/media.",
+      "license_url": "https://www.economie.gouv.fr/mentions-legales",
+      "feed_documentation": "https://www.economie.gouv.fr/rss",
+      "attribution": "Ministères économiques et financiers (France) — economie.gouv.fr; original article and date retained",
+      "official_scope": "statement",
+      "id": "fr_economie_daj",
+      "name": "France Ministry of Economy — Legal Affairs Updates",
+      "url": "https://www.economie.gouv.fr/daj/rss",
+      "homepage": "https://www.economie.gouv.fr/tous-les-fils-d-infos",
+      "category": "Government",
+      "limitation": "French ministry legal affairs notices. Shares fr_economie publisher origin with parent feed; potential duplicated stories do not increase independent-source count."
+    },
+    {
+      "adapter": "rss",
+      "enabled": true,
+      "min_interval": 1800,
+      "access_status": "reviewed_public",
+      "status": "not_checked",
+      "authentication": "None",
+      "review_date": "2026-11-13",
+      "review_scope": "Engineering publisher rights + pre-enablement live Collector/provenance check passed; independent QA pending",
+      "retention_days": 180,
+      "stale_after_days": 30,
+      "metadata_only": true,
+      "official": true,
+      "independence": "original",
+      "language": "en",
+      "region": "Africa",
+      "country": "South Africa",
+      "publisher_origin_id": "statssa",
+      "allowed_domains": [
+        "www.statssa.gov.za"
+      ],
+      "article_domains": [
+        "www.statssa.gov.za",
+        "statssa.gov.za"
+      ],
+      "access": "Publisher-direct WordPress RSS linked by South African Government's public feed list; HTTPS Collector success without account/key",
+      "license": "Statistics South Africa's official statistical release says users may apply agency information as desired when acknowledging Stats SA as the base-data source and distinguishing their own analysis. This integration uses metadata headlines and original links only; does not reproduce full news articles, photos or attachments. Any broader content reuse requires separate rights approval.",
+      "license_url": "https://www.statssa.gov.za/publications/P62421/P62421September2025.pdf",
+      "feed_documentation": "https://www.gov.za/subscribe-mailing-lists",
+      "attribution": "Statistics South Africa (Stats SA); original site link and publisher date retained; no agency endorsement",
+      "official_scope": "measurement",
+      "id": "za_statssa_news",
+      "name": "Statistics South Africa — News and Statistical Releases",
+      "url": "https://www.statssa.gov.za/?feed=rss2",
+      "homepage": "https://www.statssa.gov.za/",
+      "category": "Economy",
+      "limitation": "Publisher's news includes commentary and statistics. Treat statements separately from underlying measures and avoid inferred crisis claims; site-wide article reuse not approved."
     }
   ]
 }
