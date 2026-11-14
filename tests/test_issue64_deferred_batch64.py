@@ -54,6 +54,10 @@ def test_batch64_defers_only_unknown_and_notifies_without_per_item_paint(monkeyp
             assert preview["state"] == "detecting"
         assert len(engine.deferred) == 130
         assert not calls and not notifications and not worker.jobs
+        # Stop only the REAL timer for this deterministic manual-drain unit test;
+        # PR71 separately measures the unmodified native timer through Qt.
+        # Otherwise processEvents() may drain an extra item on a slow host.
+        engine.deferred_timer.stop()
         # Direct bounded drain makes signal-batch semantics deterministic;
         # separate PR71 tests exercise the ACTUAL 1ms Qt timer and desktop.
         for _ in range(63):
