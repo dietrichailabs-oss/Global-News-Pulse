@@ -251,6 +251,7 @@ jobs:
           #include <cstdint>
           #include <cstdio>
           #include <string>
+          #include <dbghelp.h>
           static std::string owner_module(DWORD pid, const void* address) {
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
             if (snap == INVALID_HANDLE_VALUE) return "unresolved";
@@ -272,6 +273,40 @@ jobs:
             }
             CloseHandle(snap);
             return answer;
+          }
+          // Inspect the native exception thread, not the debugger's own stack.
+          // Report module basenames only; no instruction addresses, dump bytes,
+          // symbol servers, memory, user paths, or command-line arguments.
+          static void sanitized_exception_stack(HANDLE process, DWORD pid, DWORD tid) {
+            HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, tid);
+            if (!thread) { puts("NATIVE_PROBE_STACK_STATUS=thread_unavailable"); return; }
+            CONTEXT context{};
+            context.ContextFlags = CONTEXT_FULL;
+            if (!GetThreadContext(thread, &context)) {
+              puts("NATIVE_PROBE_STACK_STATUS=context_unavailable");
+              CloseHandle(thread); return;
+            }
+          #if defined(_M_X64) || defined(__x86_64__)
+            STACKFRAME64 frame{};
+            frame.AddrPC.Offset = context.Rip;
+            frame.AddrPC.Mode = AddrModeFlat;
+            frame.AddrFrame.Offset = context.Rbp;
+            frame.AddrFrame.Mode = AddrModeFlat;
+            frame.AddrStack.Offset = context.Rsp;
+            frame.AddrStack.Mode = AddrModeFlat;
+            for (unsigned i = 0; i < 24 && frame.AddrPC.Offset; ++i) {
+              const auto pc = static_cast<uintptr_t>(frame.AddrPC.Offset);
+              std::string module = owner_module(pid, reinterpret_cast<const void*>(pc));
+              printf("NATIVE_PROBE_STACK_FRAME=%02u MODULE=%s\n", i, module.c_str());
+              if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread, &frame,
+                               &context, nullptr, SymFunctionTableAccess64,
+                               SymGetModuleBase64, nullptr)) break;
+            }
+          #else
+            puts("NATIVE_PROBE_STACK_STATUS=unsupported_architecture");
+          #endif
+            CloseHandle(thread);
+            fflush(stdout);
           }
           int main(int argc, char** argv) {
             if (argc < 3) return 2;
@@ -295,6 +330,9 @@ jobs:
               printf("NATIVE_PROBE_LAUNCH_ERROR=%lu\n", GetLastError());
               return 2;
             }
+            // Load only installed native symbol metadata; no remote symbol lookup.
+            bool symReady = SymInitialize(child.hProcess, nullptr, TRUE) != FALSE;
+            printf("NATIVE_PROBE_SYM_INIT=%u\n", symReady ? 1U : 0U);
             bool exited = false;
             DWORD childExit = STILL_ACTIVE;
             DWORD startTime = GetTickCount();
@@ -316,6 +354,9 @@ jobs:
                   printf("NATIVE_PROBE_EXCEPTION=0x%08lX CHANCE=%u MODULE=%s\n",
                          code, exc.dwFirstChance ? 1U : 2U, module.c_str());
                   fflush(stdout);
+                  if (!exc.dwFirstChance) {
+                    sanitized_exception_stack(child.hProcess, evt.dwProcessId, evt.dwThreadId);
+                  }
                 }
               } else if (evt.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
                 if (evt.u.CreateProcessInfo.hFile) CloseHandle(evt.u.CreateProcessInfo.hFile);
@@ -336,13 +377,14 @@ jobs:
               GetExitCodeProcess(child.hProcess, &childExit);
             }
             printf("NATIVE_PROBE_EXIT=0x%08lX COMPLETED=%u\n", childExit, exited ? 1U : 0U);
+            if (symReady) SymCleanup(child.hProcess);
             CloseHandle(child.hThread);
             CloseHandle(child.hProcess);
             return (exited && childExit == 0) ? 0 : 3;
           }
           '@
               Set-Content -LiteralPath native-exception-probe.cpp -Value $probeSource -Encoding utf8
-              & $compiler.Source -std=c++17 -O2 -Wall -Wextra -o native-exception-probe.exe native-exception-probe.cpp
+              & $compiler.Source -std=c++17 -O2 -Wall -Wextra -o native-exception-probe.exe native-exception-probe.cpp -ldbghelp
               $compileExit = $LASTEXITCODE
               $nativeProbeCompileStatus = $compileExit
               Write-Host "LOCAL_NATIVE_DEBUGGER_COMPILE_EXIT=$compileExit"
@@ -351,15 +393,21 @@ jobs:
                 $probeArgs = @($resolvedPython, '-X', 'faulthandler', '-m', 'pytest', '-q', '--tb=short') + @($evenA)
                 # One finite, source-unchanged replay only. The debugger can
                 # change crash timing; even exit zero is NOT a packaging pass.
-                & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
-                  $line = [string]$_
-                  if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR)=') {
-                    $nativeProbeTokens += $line
-                    Write-Host $line
+                # Finite, isolated monitored replays: stop on first nonzero
+                # process exit; all test source/selection remains unchanged.
+                for ($monitoredAttempt = 1; $monitoredAttempt -le 4; $monitoredAttempt++) {
+                  Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
+                  & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
+                    $line = [string]$_
+                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT)=') {
+                      $nativeProbeTokens += "ATTEMPT=$monitoredAttempt $line"
+                      Write-Host $line
+                    }
                   }
+                  $nativeProbeStatus = $LASTEXITCODE
+                  Write-Host "MONITORED_NATIVE_REPLAY=$monitoredAttempt EXIT=$nativeProbeStatus"
+                  if ($nativeProbeStatus -ne 0) { break }
                 }
-                $nativeProbeStatus = $LASTEXITCODE
-                Write-Host "NATIVE_DEBUGGER_PROCESS_EXIT=$nativeProbeStatus"
               } else {
                 Write-Host 'Native exception monitor compiler failed; no module inference.'
               }
