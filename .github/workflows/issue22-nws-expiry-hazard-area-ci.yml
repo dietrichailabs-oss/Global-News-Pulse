@@ -1,0 +1,69 @@
+name: Issue22 NWS Bulletin Expiry vs Hazard End Area CI
+
+on:
+  push:
+    branches: [eng/issue22-nws-expiry-hazard-area-evidence-20261114]
+  pull_request:
+    branches: [eng/issue22-gdelt-http200-frame-reintegration-20261114]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-nws-expiry-hazard-area
+  cancel-in-progress: true
+
+jobs:
+  preserve-official-area:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Guard frozen PR52 ancestry and only three changed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor b2ef4de8a8a1aed003dbec1cff109648a82332b7 HEAD
+          git diff --name-only b2ef4de8a8a1aed003dbec1cff109648a82332b7..HEAD | python -c "import sys; expected={'global_pulse/nws_zone_resolver.py','tests/test_nws_zone_resolution.py','.github/workflows/issue22-nws-expiry-hazard-area-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Compile
+        shell: bash
+        run: python -m compileall -q global_pulse
+      - name: NWS collector SQLite lifecycle and current-vs-expired map regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Preserve the existing documented unrelated map point-budget exclusion from the full owner package contract.
+          python -m pytest -q --tb=short --deselect=tests/test_map_evidence_geometry.py::test_point_budget_rejected_before_constructing_large_paths tests/test_nws_zone_resolution.py tests/test_map_evidence_geometry.py tests/test_issue22_active_semantics.py
+      - name: Clean tracked tree
+        if: always()
+        shell: bash
+        run: git diff --exit-code

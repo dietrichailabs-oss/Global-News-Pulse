@@ -152,6 +152,52 @@ def test_actual_collector_store_reopen_and_map_provenance(tmp_path):
     finally:store.close()
 
 
+
+def test_expired_bulletin_with_future_hazard_end_retains_official_area_without_reactivation(tmp_path):
+    # The bulletin expires at 08:30, while the publisher explicitly dates the
+    # hazard end at 14:00. Keep the sourced area in archived evidence without
+    # promoting the expired CAP notice to a current map alert.
+    source=next(s for s in load_catalog() if s['id']=='nws')
+    payload={'features':[{'id':'https://api.weather.gov/alerts/expired-bulletin-fixture',
+        'geometry':None,'properties':{
+        'id':'https://api.weather.gov/alerts/expired-bulletin-fixture',
+        'status':'Actual','messageType':'Alert',
+        'headline':'Synthetic Alaska offshore hazardous spray warning',
+        'event':'Heavy Freezing Spray Warning','severity':'Severe',
+        'sent':'2026-11-11T08:00:00Z','expires':'2026-11-11T08:30:00Z',
+        'ends':'2026-11-11T14:00:00Z','description':'Synthetic offline only',
+        'areaDesc':'Alaska offshore test area','affectedZones':[ZONE]}}]}
+    def handler(req):
+        return httpx.Response(200,json=zone_payload() if '/zones/' in str(req.url) else payload,request=req)
+    factory,calls=transport(handler)
+    area_resolver,_=resolver()
+    collected=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=area_resolver).collect()
+    assert collected['state']['status']=='available' and len(calls)==2
+    reports=collected['reports']
+    assert len(reports)==1
+    assert reports[0]['expires_at']=='2026-11-11T08:30:00Z'
+    assert reports[0]['ends_at']=='2026-11-11T14:00:00Z'
+    assert reports[0]['area_geometry_basis']=='nws_affected_zones'
+    assert reports[0].get('latitude') is None and reports[0].get('longitude') is None
+    path=tmp_path/'expired_offshore.sqlite3'
+    store=Store(path,mode='live')
+    try: store.ingest(reports,now='2026-11-11T09:00:00Z')
+    finally: store.close()
+    store=Store(path,mode='live')
+    try:
+        events=store.list_events()  # Historical archive; map evidence may filter an expired notice.
+        assert len(events)==1
+        restored=events[0]['reports'][0]
+        assert restored['evidence_status']=='expired'
+        assert restored['ends_at']=='2026-11-11T14:00:00Z'
+        assert restored['expires_at']=='2026-11-11T08:30:00Z'
+        assert restored['area_geometry_basis']=='nws_affected_zones'
+        assert restored['area_zone_sources'][0]['url']==ZONE
+        assert len(list(wrapped_polygons(restored['area_geometry'])))==2
+        assert event_areas([restored])==[]  # Historical geometry is not a live alert.
+    finally:store.close()
+
+
 def test_pending_geometry_does_not_get_stuck_behind_304():
     source=next(s for s in load_catalog() if s['id']=='nws')
     factory,calls=transport(lambda req:httpx.Response(200,json={'features':[]},request=req))
