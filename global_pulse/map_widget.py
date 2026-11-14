@@ -546,9 +546,12 @@ class WorldMap(QWidget):
 
     def visible_clusters(self):
         groups = defaultdict(list)
+        selected_categories = (None if self.categories is None else
+                               {_map_category(c) for c in self.categories})
         for event in self.events:
-            if not self.has_location(event) or (self.categories is not None and
-                    _map_category(event.get("category")) not in {_map_category(c) for c in self.categories}):
+            if (not self.has_location(event) or
+                    (selected_categories is not None and
+                     _map_category(event.get("category")) not in selected_categories)):
                 continue
             p = self.point(event["longitude"], event["latitude"])
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
