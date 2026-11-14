@@ -206,8 +206,8 @@ class Television(_MediaTile):
             self.tv_status.setText("ERROR · YouTube page could not load")
             self.note.setText("In-app YouTube page load failed · try Open on YouTube")
         else:
-            self.tv_status.setText("PLAYER LOADED · press Play")
-            self.note.setText("Page loaded, playback not yet verified · click Play in video")
+            self.tv_status.setText("PAGE LOADED · video NOT verified")
+            self.note.setText("YouTube web page loaded; that does not prove the video is available. Click Play inside the video.")
 
     def _populate_channels(self):
         self.media=[]
@@ -277,16 +277,29 @@ class Television(_MediaTile):
         # A lost JavaScript reply must not disable the independent deadline.
         if self._poll_pending:return
         self._poll_pending=True;generation=self._generation
-        script="""(()=>{const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error:!!v.error}:{missing:true};})()"""
+        # YouTube can successfully load its embed shell while reporting
+        # "Video unavailable" for a rotated/ended livestream. Read only the
+        # provider's displayed error element, never arbitrary page content.
+        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap, .ytp-error, .ytp-error-message');if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250)};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error:!!v.error}:{missing:true};})()"""
         self.view.page().runJavaScript(script,lambda value,g=generation:self._observed(g,value))
 
     def _observed(self,generation,value):
         if generation!=self._generation or not self._requested:return
         self._poll_pending=False
+        if isinstance(value,dict) and value.get("provider_error"):
+            # A displayed provider error is stronger evidence than loadFinished.
+            # Never treat a dead live-video recording as a playing channel.
+            message=str(value["provider_error"])[:200]
+            self.stop()
+            self.tv_status.setText("UNAVAILABLE · YouTube video/embedding")
+            self.note.setText(
+                message + " · Open on YouTube for the current video, or try another exact test ID."
+            )
+            return
         if not isinstance(value,dict) or value.get("missing"):
             self.tv_status.setText(
-                "PLAYER LOADED · waiting for video" if self._player_loaded
-                else "PLAYER LOADING"
+                "PAGE LOADED · no video confirmed" if self._player_loaded
+                else "PAGE LOADING"
             )
             return
         if value.get("error"):
