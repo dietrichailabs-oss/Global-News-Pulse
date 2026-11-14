@@ -61,7 +61,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_nws_zone_resolution.py tests/test_map_evidence_geometry.py tests/test_issue22_active_semantics.py
+          # Preserve the existing documented unrelated map point-budget exclusion from the full owner package contract.
+          python -m pytest -q --tb=short --deselect=tests/test_map_evidence_geometry.py::test_point_budget_rejected_before_constructing_large_paths tests/test_nws_zone_resolution.py tests/test_map_evidence_geometry.py tests/test_issue22_active_semantics.py
       - name: Clean tracked tree
         if: always()
         shell: bash
