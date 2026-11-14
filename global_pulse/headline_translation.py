@@ -11,6 +11,7 @@ import json
 from uuid import uuid4
 from PySide6.QtCore import QObject, QTimer, Signal
 from .translation import language_of
+from .language_codes import normalize_language
 
 
 class HeadlineTranslations(QObject):
@@ -99,6 +100,10 @@ class HeadlineTranslations(QObject):
         title = str(event.get("title") or "Untitled event")
         result = {"title": title, "original": title, "state": "original", "label": "Original headline"}
         if self.closed or self.enabled() is not True:
+            if self.deferred:
+                self.deferred_timer.stop()
+                self.deferred.clear()
+                self.deferred_completed = 0
             return result
         # Never apply an unrelated report's language to the derived event title.
         report = next((r for r in event.get("reports", []) if isinstance(r, dict)
@@ -111,7 +116,13 @@ class HeadlineTranslations(QObject):
             return result
         declared = report.get("language", "")
         key = (title, str(declared))
-        if defer_language and key not in self.language_cache:
+        # A publisher-declared language does not need expensive statistical
+        # inference: route it immediately so established worker/consent and
+        # missing-model behavior stays responsive and unchanged. Only unknown
+        # declarations are deferred past first paint.
+        normalized = normalize_language(declared)
+        unknown_declaration = not normalized or normalized in {"und", "unknown", "auto"}
+        if defer_language and unknown_declaration and key not in self.language_cache:
             self.deferred[key] = None
             self.deferred.move_to_end(key)
             while len(self.deferred) > self.MAX_DEFERRED:
@@ -197,6 +208,9 @@ class HeadlineTranslations(QObject):
         return True
 
     def cancel_pending(self):
+        self.deferred_timer.stop()
+        self.deferred.clear()
+        self.deferred_completed = 0
         identities = list(self.pending)
         self.pending.clear()
         self.keys.clear()
