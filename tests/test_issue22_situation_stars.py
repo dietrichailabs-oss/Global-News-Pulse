@@ -261,3 +261,50 @@ def test_empty_brief_clears_the_bound_target(desktop):
     assert not window.save_button.isEnabled()
     assert window.save_button.property('event_id')==''
     assert window.save_button.text()=='☆ Star'
+
+
+def test_star_and_fast_tab_switch_never_rebuilds_map(desktop,app,monkeypatch):
+    """A bookmark is not news ingestion; rapid navigation must not load map."""
+    window,controller,ids=desktop
+    emitted=[]
+    controller.data_changed.connect(lambda:emitted.append("full-data"))
+    def reject_map_rebuild(*_args,**_kwargs):
+        raise AssertionError("Star/tab switch must not reconstruct map evidence")
+    monkeypatch.setattr(window.world_map,"set_events",reject_map_rebuild)
+    # Multiple rapid clicks/transitions used to synchronously invoke
+    # refresh_data -> three event queries and full map country reclassification.
+    for attempt in range(12):
+        window.open_page(0)
+        window.save_button.click()
+        window.open_page(1)
+        window.open_page(0)
+        expected=bool(attempt%2==0)
+        assert controller.store.situation_state(ids[0])["saved"] is expected
+        matches=[window.feed_list.item(i).data(Qt.ItemDataRole.UserRole)
+                 for i in range(window.feed_list.count())
+                 if window.feed_list.item(i).data(Qt.ItemDataRole.UserRole).get("id")==ids[0]]
+        assert matches and matches[0]["_situation_starred"] is expected
+    app.processEvents()
+    assert emitted==[]
+    assert not controller.store.saved_situation_ids()
+    assert window.save_button.text()=="☆ Star"
+
+
+def test_bookmark_signal_changes_selected_row_without_full_refresh(desktop,app,monkeypatch):
+    window,controller,ids=desktop
+    identity=ids[1]
+    def reject_map_rebuild(*_args,**_kwargs):
+        raise AssertionError("Bookmark-only signal refreshed geographic evidence")
+    monkeypatch.setattr(window.world_map,"set_events",reject_map_rebuild)
+    controller.set_situation_saved(identity,True)
+    row=next(window.feed_list.item(i).data(Qt.ItemDataRole.UserRole)
+             for i in range(window.feed_list.count())
+             if window.feed_list.item(i).data(Qt.ItemDataRole.UserRole)["id"]==identity)
+    assert row["_situation_starred"] is True
+    window.open_page(1)
+    assert any(window.situation_list.item(i).data(Qt.ItemDataRole.UserRole)==identity
+               for i in range(window.situation_list.count()))
+    controller.set_situation_saved(identity,False)
+    app.processEvents()
+    assert not controller.store.saved_situation_ids()
+    assert window.situation_list.count()==0
