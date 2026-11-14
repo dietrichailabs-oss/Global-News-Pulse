@@ -778,7 +778,7 @@ class MainWindow(SituationActions, QMainWindow):
         selected_item=None
         for e in events:
             e=dict(e,_situation_starred=str(e.get("id","")) in saved_ids)
-            view=self.controller.headline_view(e) if hasattr(self.controller,"headline_view") else {"title":str(e.get("title","Untitled event")),"original":str(e.get("title","")),"label":"Original headline"}
+            view=self.controller.headline_view(e, defer_language=True) if hasattr(self.controller,"headline_view") else {"title":str(e.get("title","Untitled event")),"original":str(e.get("title","")),"label":"Original headline"}
             e=dict(e,_display_title=view["title"],_translation_label=view["label"])
             item=QListWidgetItem(view["title"]);item.setData(Qt.ItemDataRole.UserRole,e);item.setToolTip("<div style='white-space:pre-wrap'>"+esc(view["label"]+"\nOriginal: "+view["original"]+"\n"+str(e.get("recap","")))+"</div>");self.feed_list.addItem(item)
             if str(e.get("id"))==self._selected_id:selected_item=item
