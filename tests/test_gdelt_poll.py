@@ -294,3 +294,42 @@ def test_unresolved_gaps_survive_replay_restart_and_newer_adjacent_batches(tmp_p
             next_result = poll_latest_export(cache, client=client)
             assert next_result["status"] == "complete"
             assert next_result["gap_detected"]
+
+
+def test_master_tail_range_body_mismatch_cannot_admit_older_fallback(tmp_path, monkeypatch):
+    """A 206 with complete-looking lines but wrong byte count is not official evidence.
+
+    Truncated and overlong responses both fail before the older checksum-
+    advertised fallback is requested or any SQLite event is imported.
+    """
+    earlier = "20261111074500"
+    earlier_raw, latest_raw = archive_for(earlier), archive_for(STAMP)
+    official_line = manifest_for(earlier, earlier_raw)
+    tail = b"fragmented-prefix\n" + official_line
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep", lambda _: None)
+
+    for offset in (-7, 7):
+        calls = []
+
+        def handler(request):
+            url = str(request.url)
+            calls.append(url)
+            if url.endswith("lastupdate.txt"):
+                return httpx.Response(200, content=manifest_for(STAMP, latest_raw))
+            if url.endswith(f"{STAMP}.export.CSV.zip"):
+                return httpx.Response(404)
+            if url.endswith("masterfilelist.txt"):
+                claimed_bytes = len(tail) + offset
+                start = 123456
+                return httpx.Response(206, content=tail, headers={
+                    "Content-Range": f"bytes {start}-{start + claimed_bytes - 1}/9999999",
+                })
+            raise AssertionError(f"Unexpected older archive download: {url}")
+
+        with GdeltBatchCache(tmp_path / f"cache-{offset}.sqlite3") as cache, make_client(handler) as client:
+            result = poll_latest_export(cache, client=client)
+            assert result["status"] == "error" and not result["downloaded"]
+            assert result["error"] == "GDELT master-list Content-Range body length mismatch"
+            assert cache.status()["cached_rows"] == 0
+            assert len([url for url in calls if url.endswith("masterfilelist.txt")]) == 1
+            assert not any(url.endswith(f"{earlier}.export.CSV.zip") for url in calls)
