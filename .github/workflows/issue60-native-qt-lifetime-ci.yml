@@ -72,14 +72,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'source installation failed' }
           python -m pip check
           if ($LASTEXITCODE -ne 0) { throw 'dependency check failed' }
-      - name: Complete UNSPLIT native Windows Qt suite including test-session cleanup
+      - name: Repeat COMPLETE UNSPLIT native Windows Qt suite in three fresh Python processes
         run: |
           $ErrorActionPreference='Stop'
-          python -X faulthandler -m pytest -q -s --tb=short
-          $code=$LASTEXITCODE
-          Write-Host "FULL_NATIVE_PYTEST_EXIT=$code"
-          if ($code -ne 0) { throw "Native Qt test process failed: $code" }
-          Write-Host 'FULL_NATIVE_QT_SUITE_EXIT_ZERO=true (NOT installer or Windows11 owner approval)'
+          for ($attempt=1; $attempt -le 3; $attempt++) {
+            Write-Host "BEGIN_FULL_NATIVE_REPLAY=$attempt"
+            python -X faulthandler -m pytest -q -s --tb=short
+            $code=$LASTEXITCODE
+            Write-Host "FULL_NATIVE_PYTEST_REPLAY=$attempt EXIT=$code"
+            if ($code -ne 0) { throw "Native Qt full-suite replay $attempt failed: $code" }
+          }
+          Write-Host 'THREE_COMPLETE_NATIVE_QT_SUITE_EXITS_ZERO=true (NOT installer or Windows11 owner approval)'
       - name: No tracked source edits
         if: always()
         run: git diff --exit-code
