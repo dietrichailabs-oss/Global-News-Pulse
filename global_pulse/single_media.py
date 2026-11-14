@@ -55,8 +55,12 @@ class Television(_MediaTile):
         test_clip=QPushButton("Test TV player")
         test_clip.setAccessibleName("Try one official Blender Creative Commons test video inside Pulse")
         test_clip.clicked.connect(self.test_tv_player)
+        owner_clip=QPushButton("Test your video")
+        owner_clip.setAccessibleName("Test owner-provided YouTube video b0ZhJhN_Sn8 in Pulse")
+        owner_clip.clicked.connect(self.test_owner_video)
         add.addWidget(self.video_url,1);add.addWidget(save)
-        add.addWidget(test_clip);self.layout_.addLayout(add)
+        add.addWidget(test_clip);add.addWidget(owner_clip)
+        self.layout_.addLayout(add)
         self._saved=[]
         self._builtins=[]
         self._test_candidates=[]
@@ -168,6 +172,28 @@ class Television(_MediaTile):
                 self.watch()
                 return True
         self.tv_status.setText("ERROR · test video not found")
+        return False
+
+    def test_owner_video(self):
+        """Opt-in owner-supplied exact YouTube video ID; availability unverified.
+
+        Not a reviewed 24/7 news channel or evidence of a playable embed.
+        Official player and user-consent path remain unchanged.
+        """
+        test_url="https://www.youtube.com/watch?v=b0ZhJhN_Sn8"
+        self.video_url.setText(test_url)
+        if not self.add_video():
+            self.tv_status.setText("ERROR · cannot select owner test video")
+            return False
+        for index in range(self.selector.count()):
+            item=self.selector.itemData(index) or {}
+            if youtube_id(item.get("url",""))=="b0ZhJhN_Sn8":
+                self.selector.setCurrentIndex(index)
+                self.tv_status.setText("OWNER TEST READY · video availability unverified")
+                self.note.setText("Your supplied YouTube video · in-app playback requires consent and Play")
+                self.watch()
+                return True
+        self.tv_status.setText("ERROR · owner test video missing")
         return False
 
     def _tv_load_finished(self, ok):
