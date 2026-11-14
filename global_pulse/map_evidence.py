@@ -168,6 +168,12 @@ def normalize_map_fields(raw):
             result["area_geometry_basis"] = "nws_affected_zones"
             result["area_zone_sources"] = sources
             result["area_status"] = "provider_zone_geometry" if len(sources) == len(result["affected_zones"]) else "partial_provider_zones"
+        else:
+            # A derived zone polygon with no matching, dated NWS-zone receipt is
+            # not direct alert geometry. Keep references for a future retry.
+            result.pop("area_geometry", None)
+            result["area_status"] = ("zone_geometry_not_resolved" if complete_refs
+                                     else "invalid_zone_references")
     geocodes = raw.get("area_geocodes", {})
     result["area_geocodes"] = {}
     if isinstance(geocodes, dict):
@@ -403,15 +409,20 @@ def event_areas(reports):
             continue
         if report.get("evidence_status", "active") != "active" or not report.get("area_geometry"):
             continue
+        zone_based = report.get("area_geometry_basis") == "nws_affected_zones"
+        # Recheck legacy/untrusted stored zone composites at final render:
+        # direct callers can bypass Store and raw records can predate normalization.
+        checked = normalize_map_fields(report) if zone_based else report
+        if zone_based and not checked.get("area_geometry"):
+            continue
         try:
-            geometry = normalize_geometry(report["area_geometry"])
+            geometry = normalize_geometry(checked["area_geometry"])
         except ValueError:
             continue
-        zone_based = report.get("area_geometry_basis") == "nws_affected_zones"
         zone_note = ""
         if zone_based:
-            done = len(report.get("area_zone_sources", []))
-            total = len(report.get("affected_zones", []))
+            done = len(checked.get("area_zone_sources", []))
+            total = len(checked.get("affected_zones", []))
             zone_note = f" — NWS affected-zone boundaries: {done}/{total} zones"
             if report.get("area_zone_reference_basis") == "provider_ugc":
                 zone_note += " (source UGC references)"
