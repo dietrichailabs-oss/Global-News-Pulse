@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
 )
 
-from .map_widget import WorldMap
+from .map_widget import WorldMap, CATEGORY_COLORS
 from .situation_actions import SituationActions
 from .theme import STYLE, SEVERITY
 
@@ -391,8 +391,24 @@ class MainWindow(SituationActions, QMainWindow):
         for key,title in (("critical","Critical"),("high","High"),("moderate","Moderate"),("informational","Info"),("unassessed","Unassessed")):
             w=label(f"● {title}");w.setStyleSheet(f"color:{SEVERITY[key]};font-size:10px;");legend.addWidget(w)
         legend.addStretch()
-        w=label("◌ Unverified   ◔ Developing   ○ Corroborated   □ Official source","Muted");w.setToolTip("Importance uses color. Evidence uses ring patterns. Official means an attributed statement or measurement, not blanket confirmation of underlying claims.");legend.addWidget(w)
+        w=label("◌ Unverified   ◔ Developing   ◎ Official","Muted")
+        w.setToolTip("Incident-pin color is importance; circular ring pattern is source status. Official is an attributed source, not independent corroboration.")
+        legend.addWidget(w)
         self.map_panel.layout.addLayout(legend)
+        country_legend=QHBoxLayout()
+        country_legend.setSpacing(8)
+        for kind in ("Government","Economy","Health","Humanitarian","Infrastructure","News"):
+            dot=label(f"● {kind}", "Muted")
+            dot.setStyleSheet(
+                f"color:{CATEGORY_COLORS[kind]};font-size:9px;"
+            )
+            dot.setToolTip(
+                "Country-colored circular badge: source reporting/observations "
+                "attributed to the country, NOT a precise incident coordinate."
+            )
+            country_legend.addWidget(dot)
+        country_legend.addStretch()
+        self.map_panel.layout.addLayout(country_legend)
         crisis_legend=QHBoxLayout();crisis_legend.setSpacing(8)
         for text,color in (("//// Conflict / war","#d84a52"),("//// Protest / unrest","#e3bd4d"),("==== Migration / displacement","#9a6748")):
             item=label(text);item.setStyleSheet(f"color:{color};font-size:9px;");crisis_legend.addWidget(item)
