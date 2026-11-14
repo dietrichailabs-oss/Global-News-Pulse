@@ -74,7 +74,7 @@ def test_health_filter_keeps_lowercase_country_ring_and_uppercase_real_point(wor
     assert world.country_category_evidence_for("United States of America")["count"] == 2
     assert len(world.visible_clusters()) == 1
     assert "1 points" in world.coverage_summary()
-    assert "3 reports assessed" in world.coverage_summary()
+    assert "0 unlocated" in world.coverage_summary()
 
 
 def test_lowercase_saved_filter_name_matches_canonical_ring_and_dialog(world, app):
