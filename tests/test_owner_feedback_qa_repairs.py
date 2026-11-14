@@ -223,6 +223,8 @@ def bind_production_shutdown(window, controller):
                notifier=SimpleNamespace(stop=lambda: observations.append("notifier stopped")),
                instance=SimpleNamespace(close=lambda: observations.append("instance closed")),
                tray=SimpleNamespace(hide=lambda: observations.append("tray hidden")),
+               tray_refresh_timer=SimpleNamespace(stop=lambda: observations.append("tray timer stopped")),
+               menu=SimpleNamespace(hide=lambda: observations.append("tray menu hidden")),
                app=SimpleNamespace(quit=lambda: observations.append("app quit")))
     exec(compile(wrapper, str(path), "exec"), env)
     return env["bind"](), observations
@@ -252,6 +254,9 @@ def test_cam003_actual_exit_body_preserves_consent_and_aborts_requests(desktop, 
     assert camera.reply is reply and camera.timer.isActive()
     callback, observed = bind_production_shutdown(window, controller)
     callback()
+    # These are real dependencies of the production shutdown body after the
+    # Issue76 tray coalescing fix, not mocked away exit or crash assertions.
+    assert observed[:2] == ["tray timer stopped", "tray menu hidden"]
     assert reply.aborted and camera.reply is None and not camera.timer.isActive()
     assert not camera.deadline.isActive()
     assert controller._store_closed and observed[-1] == "app quit"
