@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QPoint
 from PySide6.QtGui import QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QListWidget
 
 from global_pulse.map_widget import WorldMap, CATEGORY_COLORS
 from global_pulse.__main__ import show_initializing
@@ -146,6 +146,47 @@ def test_observation_only_economy_badge_opens_dated_data_not_empty_country_dialo
     app.processEvents()
     assert selected == ["United States of America"]
     assert map_widget.country_dialog is None
+
+
+def test_current_official_conflict_has_country_category_circle_without_neutral_double_count(map_widget, app):
+    """Fresh official source evidence must not disappear from the Conflict layer."""
+    row = _record("current-conflict", "Armed clashes and shelling reported", "Conflict",
+                  country="Ukraine")
+    row["reports"][0]["official"] = True
+    map_widget.set_events([], country_events=[row])
+    _render(map_widget)
+    assert map_widget.country_activity_for("Ukraine").get("conflict") == 1
+    assert map_widget.country_evidence_for("Ukraine") == {}
+    assert "0 country-only records" in map_widget.coverage_summary()
+    hits = [hit for hit in map_widget._country_badge_hits
+            if hit[2] == "Ukraine" and hit[3] == "Conflict"]
+    assert len(hits) == 1
+    assert map_widget.visible_clusters() == []
+    point = QPoint(round(hits[0][0].x()), round(hits[0][0].y()))
+    QTest.mouseClick(map_widget, Qt.MouseButton.LeftButton, pos=point)
+    app.processEvents()
+    dialog = map_widget.country_dialog
+    assert dialog is not None
+    assert "Country-attributed" in dialog.windowTitle()
+    listing = dialog.findChild(QListWidget, "country_evidence_results")
+    assert listing is not None and listing.count() == 1
+    assert "Armed clashes" in listing.item(0).text()
+
+
+def test_real_incident_point_and_country_category_circle_remain_distinct(map_widget):
+    """An actual provider coordinate is a point; a separate ring is a country summary."""
+    row = _record("provider-point", "Official conflict report", "Conflict",
+                  country="Ukraine")
+    row["reports"][0]["official"] = True
+    row["latitude"], row["longitude"] = 49.0, 32.0
+    map_widget.set_events([row], country_events=[row])
+    _render(map_widget)
+    assert len(map_widget.visible_clusters()) == 1
+    assert any(hit[2] == "Ukraine" and hit[3] == "Conflict"
+               for hit in map_widget._country_badge_hits)
+    assert map_widget.country_evidence_for("Ukraine") == {}
+    assert map_widget.country_category_evidence_for("Ukraine")["count"] == 1
+
 
 def test_official_pin_is_double_circular_ring_never_square_frame():
     method=inspect.getsource(WorldMap.paintEvent)
