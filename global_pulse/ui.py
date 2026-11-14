@@ -313,9 +313,19 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # A burst of status-only callbacks (one per collector) can overwhelm
+        # a normal interactive session. Coalesce them on the GUI event loop.
+        self._collection_refresh_timer=QTimer(self)
+        self._collection_refresh_timer.setSingleShot(True)
+        self._collection_refresh_timer.setInterval(200)
+        self._collection_refresh_timer.timeout.connect(self.refresh_data)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        if hasattr(controller, "source_status_changed"):
+            controller.source_status_changed.connect(self._schedule_collected_refresh)
+        if hasattr(controller, "situation_changed"):
+            controller.situation_changed.connect(self._situation_state_changed)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -559,13 +569,45 @@ class MainWindow(SituationActions, QMainWindow):
         table.setAlternatingRowColors(True);table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents);table.horizontalHeader().setStretchLastSection(True)
 
     def open_page(self,index):
+        previous=self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
         for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
+        # Clicking the already-visible tab must not repeat potentially costly
+        # SQLite loads and HTML rendering. This often happens while users
+        # navigate rapidly between the monitor and the Star/Situations pane.
+        if previous==index:
+            return
         if index==1:self._populate_situations()
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
         elif index==5:self._generate_brief()
+
+    def _situation_state_changed(self, event_id, saved):
+        """Update a bookmark without re-querying/repainting the world map.
+
+        The archive's events and provenance are unchanged. Only the starred
+        marker on matching feed entries and (when visible) Situations view need
+        to change; all other expensive views remain untouched.
+        """
+        identity=str(event_id or "")
+        if not identity:
+            return
+        if hasattr(self,"feed_list"):
+            for index in range(self.feed_list.count()):
+                item=self.feed_list.item(index)
+                event=item.data(Qt.ItemDataRole.UserRole)
+                if not isinstance(event,dict) or str(event.get("id") or "")!=identity:
+                    continue
+                row=dict(event,_situation_starred=bool(saved))
+                item.setData(Qt.ItemDataRole.UserRole,row)
+                self.feed_list.viewport().update(self.feed_list.visualItemRect(item))
+                break
+        if self._selected_id==identity:
+            self._sync_situation_star({"id":identity})
+        if self.pages.currentIndex()==1:
+            # Situations query is bounded by user's own bookmarks, not map size.
+            self._populate_situations()
 
     def events_filters(self):
         self._history_at=None
@@ -587,8 +629,17 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    def _schedule_collected_refresh(self):
+        """Merge status-only updates while preserving actual evidence refresh."""
+        if not self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.start()
+
     def refresh_data(self,*args):
         if self._refreshing:return
+        # An evidence/user-triggered refresh already includes latest status;
+        # cancel its redundant queued status-only repaint.
+        if self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
             filters=self.events_filters()
@@ -977,16 +1028,30 @@ class MainWindow(SituationActions, QMainWindow):
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
 
     def _search_full_archive(self, phrase):
-        """Search locally across all source headlines, without inferred coordinates."""
+        """Search all local headlines with one refresh and no invented geography."""
         phrase=str(phrase or "").strip()[:200]
         if not phrase:
             return
         self.open_page(0)
-        self.search.setText(phrase)
-        # All-history search finds aviation and government stories omitted
-        # from country attribution, never fakes an incident location.
-        if self.time_range.currentIndex()!=3:
-            self.time_range.setCurrentIndex(3)
+        # Change the full-archive search dimensions atomically: the normal
+        # search timer and each combo callback would otherwise rebuild map
+        # evidence several times on one country-dialog click.
+        self.search_timer.stop()
+        for control, value in (
+            (self.search, phrase),
+            (self.category, 0),
+            (self.region, 0),
+            (self.time_range, 3),
+            (self.history_slider, 1000),
+        ):
+            blocked=control.blockSignals(True)
+            try:
+                if control is self.search:
+                    control.setText(value)
+                else:
+                    control.setCurrentIndex(value) if hasattr(control,"setCurrentIndex") else control.setValue(value)
+            finally:
+                control.blockSignals(blocked)
         self.refresh_data()
         self.status_label.setText(
             f"Full archive search: {phrase}. Results have no implied country coordinates."
