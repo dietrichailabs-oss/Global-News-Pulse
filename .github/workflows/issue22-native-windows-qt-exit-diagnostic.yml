@@ -85,22 +85,35 @@ jobs:
           for ($i = 0; $i -lt $files.Count; $i++) {
             if (($i % 2) -eq 0) { $even += $files[$i] } else { $odd += $files[$i] }
           }
+          # Prior attempt 3: 804/804 tests in the even 58-module cohort passed,
+          # then the native process crashed at interpreter exit (0xC0000005).
+          # Odd 58-module cohort exited 0. Split only the implicated even cohort
+          # to distinguish a smaller teardown trigger from cross-module interaction.
+          $evenA = @()
+          $evenB = @()
+          for ($i = 0; $i -lt $even.Count; $i++) {
+            if (($i % 2) -eq 0) { $evenA += $even[$i] } else { $evenB += $even[$i] }
+          }
+          if (($evenA.Count + $evenB.Count) -ne $even.Count -or $evenA.Count -eq 0 -or $evenB.Count -eq 0) {
+            throw 'Incorrect disjoint even-cohort partition'
+          }
           $results = @()
-          foreach ($group in @(@{ Name='even'; Files=$even }, @{ Name='odd'; Files=$odd })) {
+          foreach ($group in @(@{ Name='even-a'; Files=$evenA }, @{ Name='even-b'; Files=$evenB })) {
             Write-Host "BEGIN_NATIVE_WINDOWS_GROUP=$($group.Name) MODULE_COUNT=$($group.Files.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+            Write-Host "GROUP_FILES=$($group.Files -join ';')"
             & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-$($group.Name).xml" @($group.Files)
             $code = $LASTEXITCODE
             Write-Host "NATIVE_WINDOWS_GROUP=$($group.Name) RAW_PROCESS_EXIT=$code"
             $results += [pscustomobject]@{ group=$group.Name; module_count=$group.Files.Count; native_exit=$code }
           }
           if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -eq 0) {
-            Write-Host 'Both module partitions exited 0; testing original full-suite ordering under real Windows Qt backend.'
-            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-full.xml
+            Write-Host 'Both 29-module subcohorts exited zero; verifying 58-module even cohort interaction under original order.'
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-even-combined.xml @($even)
             $code = $LASTEXITCODE
-            Write-Host "NATIVE_WINDOWS_GROUP=full RAW_PROCESS_EXIT=$code"
-            $results += [pscustomobject]@{ group='full'; module_count=$files.Count; native_exit=$code }
+            Write-Host "NATIVE_WINDOWS_GROUP=even-combined RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{ group='even-combined'; module_count=$even.Count; native_exit=$code }
           } else {
-            Write-Host 'A partition has reproduced the failure. Full re-run suppressed to avoid redundant CPU time.'
+            Write-Host 'A smaller cohort reproduced a failure; skip larger replay to preserve diagnostic isolation.'
           }
           $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
           $results | Format-Table | Out-String | Write-Host
