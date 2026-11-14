@@ -44,20 +44,28 @@ def _bounded_get(client: httpx.Client, url: str, limit: int) -> bytes:
                     continue
                 raise GdeltHTTPError(response.status_code, response.headers.get("retry-after"))
             header = response.headers.get("content-length")
+            declared_bytes = None
             if header is not None:
                 # Reject before int(): hostile input cannot hit Python's integer
                 # conversion limit. Missing length still uses the streaming cap.
                 if not (1 <= len(header) <= 20 and header.isascii() and header.isdecimal()):
                     raise GdeltBatchError("GDELT response has invalid Content-Length")
-                if int(header) > limit:
+                declared_bytes = int(header)
+                if declared_bytes > limit:
                     raise GdeltBatchError("GDELT response exceeds size limit")
             body = bytearray()
             for part in response.iter_bytes(64 * 1024):
                 if len(body) + len(part) > limit:
                     raise GdeltBatchError("GDELT response exceeds size limit")
+                # Preserve accepted PR23 declared/received byte agreement before
+                # accepting any official manifest or archive as evidence.
+                if declared_bytes is not None and len(body) + len(part) > declared_bytes:
+                    raise GdeltBatchError("GDELT response Content-Length body length mismatch")
                 body.extend(part)
             if not body:
                 raise GdeltBatchError("GDELT endpoint returned empty response")
+            if declared_bytes is not None and len(body) != declared_bytes:
+                raise GdeltBatchError("GDELT response Content-Length body length mismatch")
             return bytes(body)
     raise GdeltBatchError("GDELT transient retry exhausted")
 
@@ -95,6 +103,13 @@ def _master_tail(client: httpx.Client) -> bytes:
         # A complete-looking EXPORT line is not proof of a complete HTTP 206 range.
         if len(body) != end - start + 1:
             raise GdeltBatchError("GDELT master-list Content-Range body length mismatch")
+        # The 206 tail's separate Content-Length must also agree with the
+        # actual bounded body, even when Content-Range itself is complete.
+        declared = response.headers.get("content-length")
+        if declared is not None:
+            if not (1 <= len(declared) <= 20 and declared.isascii() and declared.isdecimal()
+                    and int(declared) == len(body)):
+                raise GdeltBatchError("GDELT master-list Content-Length body length mismatch")
         # Unless this range starts at byte zero, its first line can be partial.
         if start:
             split = body.find(b"\n")
