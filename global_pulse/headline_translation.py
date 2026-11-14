@@ -18,6 +18,9 @@ class HeadlineTranslations(QObject):
     PREFIX = "auto-headline:"
     MAX_PENDING = 2
     MAX_CACHE = 512
+    # Per-window bounded routing results. The original/title and declared
+    # source language form the key; no model, source evidence or HTML is cached.
+    MAX_LANGUAGE_CACHE = 1024
 
     def __init__(self, translator, worker, enabled, parent=None):
         super().__init__(parent)
@@ -25,6 +28,7 @@ class HeadlineTranslations(QObject):
         self.worker = worker
         self.enabled = enabled
         self.cache = OrderedDict()
+        self.language_cache = OrderedDict()
         self.pending = {}
         self.keys = set()
         self.closed = False
@@ -41,6 +45,24 @@ class HeadlineTranslations(QObject):
     def _identity(item):
         return (item.get("key"), item.get("sha256"))
 
+    def _headline_language(self, title, declared):
+        """Avoid repeatedly detecting unchanged source headline text in Qt.
+
+        Detection is deterministic for the same title and declared language;
+        model installation, translation worker outcomes and consent are checked
+        *after* this lookup on each view. Unknown is never rewritten as English.
+        No title/evidence is persisted or sent to a provider.
+        """
+        key = (title, str(declared))
+        if key in self.language_cache:
+            code = self.language_cache.pop(key)
+        else:
+            code = language_of(title, declared)
+        self.language_cache[key] = code
+        while len(self.language_cache) > self.MAX_LANGUAGE_CACHE:
+            self.language_cache.popitem(last=False)
+        return code
+
     def view(self, event):
         title = str(event.get("title") or "Untitled event")
         result = {"title": title, "original": title, "state": "original", "label": "Original headline"}
@@ -55,7 +77,7 @@ class HeadlineTranslations(QObject):
         if report is None:
             result["label"] = "Original · headline language unconfirmed"
             return result
-        code = language_of(title, report.get("language", ""))
+        code = self._headline_language(title, report.get("language", ""))
         if code == "en":
             result["label"] = "Original English headline"
             return result
@@ -142,3 +164,4 @@ class HeadlineTranslations(QObject):
         self.notify.stop()
         self.cancel_pending()
         self.cache.clear()
+        self.language_cache.clear()
