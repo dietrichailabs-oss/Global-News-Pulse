@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QPoint
 from PySide6.QtGui import QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QListWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QListWidget, QLabel
 
 from global_pulse.map_widget import WorldMap, CATEGORY_COLORS
 from global_pulse.__main__ import show_initializing
@@ -208,3 +208,60 @@ def test_initializing_notice_survives_clicks_before_window_ready(app):
         splash.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+def test_category_circle_opens_matching_sources_not_first_thirty_weather(map_widget, app):
+    """A Health ring amid 42 disaster records must show Health first, not storms."""
+    rows = [_record(f"storm-{i}", f"Storm number {i}", "Disaster")
+            for i in range(42)]
+    rows.append(_record("hospital", "Hospital services notice", "Health"))
+    map_widget.set_events([], country_events=rows)
+    _render(map_widget)
+
+    health = [hit for hit in map_widget._country_badge_hits
+              if hit[2] == "United States of America" and hit[3] == "Health"]
+    assert len(health) == 1
+    point = QPoint(round(health[0][0].x()), round(health[0][0].y()))
+    QTest.mouseClick(map_widget, Qt.MouseButton.LeftButton, pos=point)
+    app.processEvents()
+
+    dialog = map_widget.country_dialog
+    assert dialog is not None
+    combo = dialog.findChild(QComboBox, "country_evidence_categories")
+    listing = dialog.findChild(QListWidget, "country_evidence_results")
+    search = dialog.findChild(QLineEdit, "country_evidence_search")
+    count = dialog.findChild(QLabel, "country_evidence_count")
+    assert combo and listing and search and count
+    assert combo.currentData() == "Health"
+    assert listing.count() == 1
+    assert "Hospital services notice" in listing.item(0).text()
+    assert "43 total" in count.text()
+
+    # Explicitly choosing All must restore broad country search, including
+    # a title past the initial 30 visible weather entries.
+    combo.setCurrentIndex(0)
+    app.processEvents()
+    assert listing.count() == 30
+    assert "Showing 30 of 43" in count.text()
+    search.setText("Storm number 41")
+    app.processEvents()
+    assert listing.count() == 1
+    assert "Storm number 41" in listing.item(0).text()
+
+
+def test_normalized_category_ring_drills_into_original_lowercase_source(map_widget, app):
+    """A source category alias in lower case must remain discoverable."""
+    row = _record("lowercase-health", "Clinic capacity statement", "health")
+    map_widget.set_events([], country_events=[row])
+    _render(map_widget)
+    hit = next(hit for hit in map_widget._country_badge_hits
+               if hit[3] == "Health")
+    QTest.mouseClick(map_widget, Qt.MouseButton.LeftButton,
+                     pos=QPoint(round(hit[0].x()), round(hit[0].y())))
+    app.processEvents()
+    dialog = map_widget.country_dialog
+    combo = dialog.findChild(QComboBox, "country_evidence_categories")
+    listing = dialog.findChild(QListWidget, "country_evidence_results")
+    assert combo.currentData() == "Health"
+    assert listing.count() == 1
+    assert "Clinic capacity statement" in listing.item(0).text()

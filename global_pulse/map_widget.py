@@ -312,7 +312,7 @@ class WorldMap(QWidget):
                 continue
         return max(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "source publication undated"
 
-    def show_country_evidence(self, name, *, include_current=False):
+    def show_country_evidence(self, name, *, include_current=False, initial_category=None):
         """Searchable attributed archive; never infer an incident's location.
 
         Exactly 30 results are rendered at once, but searches cover the entire
@@ -353,10 +353,17 @@ class WorldMap(QWidget):
         categories = QComboBox(dialog)
         categories.setObjectName("country_evidence_categories")
         categories.addItem("All source categories", "")
-        kinds = sorted({str(event.get("category") or "Uncategorized")
+        kinds = sorted({str(event.get("category") or "Uncategorized").strip().title()
                         for event in entry["events"]})
         for value in kinds:
             categories.addItem(value, value)
+        # Country category rings represent a selected category. Open its
+        # evidence rather than silently defaulting to unrelated weather/news.
+        # Direct country selections without a category retain "All".
+        if initial_category:
+            index = categories.findData(str(initial_category).strip().title())
+            if index >= 0:
+                categories.setCurrentIndex(index)
         layout.addWidget(categories)
 
         listing = QListWidget(dialog)
@@ -386,7 +393,7 @@ class WorldMap(QWidget):
             terms = search.text().casefold().split()
             category = categories.currentData() or ""
             matches = [(record, value) for record, value in searchable
-                       if (not category or str(record.get("category") or "Uncategorized") == category)
+                       if (not category or str(record.get("category") or "Uncategorized").strip().title() == category)
                        and all(term in value for term in terms)]
             listing.clear()
             for event, _ in matches[:30]:
@@ -824,7 +831,7 @@ class WorldMap(QWidget):
                         not evidence.get("categories", {}).get("Economy")):
                     self.economic_country_requested.emit(country)
                 elif evidence:
-                    self.show_country_evidence(country, include_current=True)
+                    self.show_country_evidence(country, include_current=True, initial_category=category)
                 return
         area_hit = self.area_layer.hit(pos)
         if area_hit:
