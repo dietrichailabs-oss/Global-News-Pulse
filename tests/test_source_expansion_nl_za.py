@@ -15,7 +15,7 @@ def test_source_catalog_contract_and_provenance():
     catalog = rows()
     assert len(catalog) >= 155
     assert {catalog[i]["publisher_origin_id"] for i in IDS_CBS} == {"nl_cbs"}
-    assert {catalog[i]["publisher_origin_id"] for i in IDS_SA} == {"za_sanews"}
+    assert {catalog[i]["publisher_origin_id"] for i in IDS_SA} == {"sanews"}
     assert not any(sid.startswith("in_pib_") for sid in catalog)
     for sid in IDS:
         r = catalog[sid]
@@ -33,7 +33,7 @@ def test_sibling_feeds_share_origin_not_report_identity():
     catalog = rows()
     for siblings, original_url, origin in (
         (IDS_CBS, "https://www.cbs.nl/en-gb/news/2026/46/example", "nl_cbs"),
-        (IDS_SA, "https://www.sanews.gov.za/south-africa/news/example", "za_sanews"),
+        (IDS_SA, "https://www.sanews.gov.za/south-africa/news/example", "sanews"),
     ):
         rss = (f'<rss><channel><item><guid>same-news-id</guid><title>Source release</title>'
                f'<link>{original_url}</link><pubDate>Thu, 12 Nov 2026 12:00:00 GMT</pubDate>'
