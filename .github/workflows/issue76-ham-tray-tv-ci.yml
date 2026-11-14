@@ -47,12 +47,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Confirm frozen PR74 parent and nine-path scope
+      - name: Confirm frozen PR74 parent and ten-path scope
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 303b75aaa11e9c5c7f04d859bec0306957a718dd HEAD
-          git diff --name-only 303b75aaa11e9c5c7f04d859bec0306957a718dd..HEAD | python -c "import sys; expected={'global_pulse/internet_radio.py','global_pulse/single_media.py','global_pulse/resources/media_catalog.json','global_pulse/__main__.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue31_tv_basic_player.py','tests/test_issue76_ham_tv_tray_tabs.py','.github/workflows/issue76-ham-tray-tv-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 303b75aaa11e9c5c7f04d859bec0306957a718dd..HEAD | python -c "import sys; expected={'global_pulse/internet_radio.py','global_pulse/single_media.py','global_pulse/media_widget.py','global_pulse/resources/media_catalog.json','global_pulse/__main__.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue31_tv_basic_player.py','tests/test_issue76_ham_tv_tray_tabs.py','.github/workflows/issue76-ham-tray-tv-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Match native Windows Qt layout and font backend
         if: runner.os == 'Windows'
         shell: bash
