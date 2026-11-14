@@ -6,8 +6,11 @@ on:
     paths:
       - '.github/workflows/issue37-responsive-owner-package.yml'
       - 'global_pulse/single_media.py'
-      - 'global_pulse/media_widget.py'
-      - 'tests/test_issue31_tv_basic_player.py'
+      - 'global_pulse/map_widget.py'
+      - 'global_pulse/ui.py'
+      - 'global_pulse/controller.py'
+      - 'tests/test_issue37_country_owner_video.py'
+      - 'tests/test_issue22_situation_stars.py'
   workflow_dispatch:
 
 permissions:
