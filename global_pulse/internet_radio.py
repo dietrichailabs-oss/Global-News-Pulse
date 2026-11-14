@@ -191,6 +191,7 @@ class RadioPanel(QWidget):
         self.receiver_profile = None
         self.receiver_interceptor = None
         self.receiver_host = ""
+        self.receiver_origin = None
         self.receiver_connected = False
         self.sdr_state = "OFF"
         self.sdr_directory_cache = {}
@@ -798,7 +799,9 @@ class RadioPanel(QWidget):
                 if not self._load_receiver_url(url,host,require_consent=True):
                     return False
             else:
-                if host != self.receiver_host:
+                parts=urlsplit(url)
+                origin=(parts.scheme,parts.port or 443,host)
+                if host != self.receiver_host or origin != self.receiver_origin:
                     self._destroy_receiver()
                     if not self._load_receiver_url(url,host,require_consent=True):
                         return False
@@ -885,7 +888,11 @@ class RadioPanel(QWidget):
             raise RuntimeError("The embedded receiver requires Chromium sandboxing")
         if hasattr(os,"geteuid") and os.geteuid()==0:
             raise RuntimeError("The embedded receiver requires a standard user session")
-        if self.receiver_view and self.receiver_host==host:
+        target, _ = self._receiver_target()
+        origin_parts = urlsplit(target)
+        origin = (origin_parts.scheme, origin_parts.port or 443, host)
+        if (self.receiver_view is not None and
+                self.receiver_host==host and self.receiver_origin==origin):
             return
 
         self._destroy_receiver()
@@ -936,6 +943,7 @@ class RadioPanel(QWidget):
                 )
 
         self.receiver_host=host
+        self.receiver_origin=origin
         self.receiver_profile=QWebEngineProfile(self)
         self.receiver_profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
         self.receiver_profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
@@ -984,6 +992,7 @@ class RadioPanel(QWidget):
             self.receiver_profile=None
         self.receiver_interceptor=None
         self.receiver_host=""
+        self.receiver_origin=None
 
     def disconnect_receiver(self):
         self._destroy_receiver()
