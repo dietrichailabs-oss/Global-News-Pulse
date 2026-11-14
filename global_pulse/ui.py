@@ -487,6 +487,7 @@ class MainWindow(SituationActions, QMainWindow):
         layout.addWidget(self.vertical_split);self.pages.addWidget(page)
         self.world_map.event_selected.connect(self.navigate_event)
         self.world_map.country_selected.connect(self._country_selected)
+        self.world_map.economic_country_requested.connect(self._open_economic_country)
         self.world_map.global_search_requested.connect(self._search_full_archive)
 
     def _build_situations(self):
@@ -1054,6 +1055,22 @@ class MainWindow(SituationActions, QMainWindow):
     def _country_selected(self,name):
         self.country_search.setText(name)
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
+
+    def _open_economic_country(self, name):
+        """Open sourced dated measurements; never turn them into event pins."""
+        from .crisis_overlay import normalize_country
+        target = normalize_country(name)
+        self.open_page(2)  # Populates the real stored Economy observations.
+        for index in range(1, self.economy_country.count()):
+            if normalize_country(self.economy_country.itemText(index)) == target:
+                self.economy_country.setCurrentIndex(index)
+                self.status_label.setText(
+                    f"Economy: dated sourced observations for {name}; not a verified crisis."
+                )
+                return
+        self.status_label.setText(
+            f"Economy data for {name} is no longer in the local archive."
+        )
 
     def _search_full_archive(self, phrase):
         """Search all local headlines with one refresh and no invented geography."""
