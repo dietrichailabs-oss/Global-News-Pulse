@@ -141,10 +141,18 @@ def test_archive_world_brief_star_tab_camera_and_media_latency(app, tmp_path, ar
         from contextlib import ExitStack
         from unittest.mock import patch
         phases = []
+        # Repeated headline language identification is a suspected hot path;
+        # measure both the actual presentation and the actual detector without
+        # changing their output, consent decisions or retained evidence.
+        from importlib import import_module
+        headline_module = import_module("global_pulse.headline_translation")
+        aggregate = {"headline_view": {"calls": 0, "total_ms": 0.0},
+                     "language_of": {"calls": 0, "total_ms": 0.0}}
         targets = [(controller, "events"), (controller.store, "list_observations"),
                    (window.world_map, "set_events"),
                    (window, "_populate_feed"), (window, "_populate_filter_options"),
-                   (window, "_update_world_overview"), (window, "_sync_map_controls")]
+                   (window, "_update_world_overview"), (window, "_sync_map_controls"),
+                   (controller, "headline_view"), (headline_module, "language_of")]
         if window.gdelt_panel is not None:
             targets.append((window.gdelt_panel, "refresh"))
         with ExitStack() as patches:
@@ -159,13 +167,20 @@ def test_archive_world_brief_star_tab_camera_and_media_latency(app, tmp_path, ar
                         if _name == "events":
                             label += ":" + ("country_map" if kwargs.get("map_evidence") else
                                               "map" if kwargs.get("map_view") else "feed")
-                        phases.append({"phase": label, "ms": round(
-                            (time.perf_counter()-started)*1000, 3)})
+                        elapsed = (time.perf_counter()-started)*1000
+                        if label in aggregate:
+                            aggregate[label]["calls"] += 1
+                            aggregate[label]["total_ms"] += elapsed
+                        else:
+                            phases.append({"phase": label, "ms": round(elapsed, 3)})
                 patches.enter_context(patch.object(target, method_name, timed))
             total = _measure(app, window.refresh_data)
         print("PULSE_GUI_PHASES=" + json.dumps({
             "archive_size": archive_size, "full_refresh_ms": round(total, 3),
-            "phases": phases}, sort_keys=True), flush=True)
+            "phases": phases,
+            "row_work": {k: {"calls": v["calls"],
+                             "total_ms": round(v["total_ms"], 3)}
+                         for k, v in aggregate.items()}}, sort_keys=True), flush=True)
 
         url = QUrl("pulse-event://open/" + quote(identity, safe=""))
         results["overview_story_link"] = _summary([
