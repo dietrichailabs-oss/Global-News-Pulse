@@ -232,6 +232,133 @@ jobs:
               Write-Host 'HOST_GDB_AVAILABLE=no; no unreviewed debugger download or source change.'
             }
           }
+          # A single extra replay under a small Windows DEBUG_PROCESS monitor.
+          # This is preferable to guessing from the missing WER dump or the
+          # MinGW GDB attempt. It uses the runner's existing compiler only.
+          # Capture ONLY exception code, first/second chance, owning DLL basename
+          # and child exit status; never a stack address, file path, dump or memory.
+          $nativeProbeTokens = @()
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
+            $compiler = Get-Command g++.exe -ErrorAction SilentlyContinue
+            if ($compiler) {
+              $probeSource = @'
+          #include <windows.h>
+          #include <tlhelp32.h>
+          #include <cstdint>
+          #include <cstdio>
+          #include <string>
+          static std::string owner_module(DWORD pid, const void* address) {
+            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+            if (snap == INVALID_HANDLE_VALUE) return "unresolved";
+            MODULEENTRY32A mod{};
+            mod.dwSize = sizeof(mod);
+            std::string answer = "unresolved";
+            if (Module32FirstA(snap, &mod)) {
+              do {
+                uintptr_t pc = reinterpret_cast<uintptr_t>(address);
+                uintptr_t start = reinterpret_cast<uintptr_t>(mod.modBaseAddr);
+                if (pc >= start && pc - start < static_cast<uintptr_t>(mod.modBaseSize)) {
+                  answer = mod.szModule;
+                  break;
+                }
+              } while (Module32NextA(snap, &mod));
+            }
+            CloseHandle(snap);
+            return answer;
+          }
+          int main(int argc, char** argv) {
+            if (argc < 3) return 2;
+            std::string command;
+            for (int i = 1; i < argc; ++i) {
+              if (i > 1) command += ' ';
+              command += '"';
+              command += argv[i];
+              command += '"';
+            }
+            STARTUPINFOA si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+            si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+            si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+            PROCESS_INFORMATION child{};
+            if (!CreateProcessA(argv[1], &command[0], nullptr, nullptr, TRUE,
+                                DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW,
+                                nullptr, nullptr, &si, &child)) {
+              printf("NATIVE_PROBE_LAUNCH_ERROR=%lu\n", GetLastError());
+              return 2;
+            }
+            bool exited = false;
+            DWORD childExit = STILL_ACTIVE;
+            DWORD startTime = GetTickCount();
+            while (!exited && (GetTickCount() - startTime < 180000)) {
+              DEBUG_EVENT evt{};
+              if (!WaitForDebugEvent(&evt, 3000)) continue;
+              DWORD continuation = DBG_CONTINUE;
+              if (evt.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
+                const auto& exc = evt.u.Exception;
+                DWORD code = exc.ExceptionRecord.ExceptionCode;
+                if (code == 0x80000003UL || code == 0x80000004UL) {
+                  continuation = DBG_CONTINUE; // debugger's initial breakpoint/step
+                } else {
+                  continuation = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                if (code == 0xC0000005UL || code == 0xC0000409UL ||
+                    code == 0x40000015UL || code == 0xC000001DUL) {
+                  std::string module = owner_module(evt.dwProcessId, exc.ExceptionRecord.ExceptionAddress);
+                  printf("NATIVE_PROBE_EXCEPTION=0x%08lX CHANCE=%u MODULE=%s\n",
+                         code, exc.dwFirstChance ? 1U : 2U, module.c_str());
+                  fflush(stdout);
+                }
+              } else if (evt.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
+                if (evt.u.CreateProcessInfo.hFile) CloseHandle(evt.u.CreateProcessInfo.hFile);
+              } else if (evt.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
+                if (evt.u.LoadDll.hFile) CloseHandle(evt.u.LoadDll.hFile);
+              } else if (evt.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) {
+                childExit = evt.u.ExitProcess.dwExitCode;
+                exited = true;
+              }
+              if (!ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continuation)) {
+                printf("NATIVE_PROBE_CONTINUE_ERROR=%lu\n", GetLastError());
+                break;
+              }
+            }
+            if (!exited) {
+              TerminateProcess(child.hProcess, 124);
+              WaitForSingleObject(child.hProcess, 3000);
+              GetExitCodeProcess(child.hProcess, &childExit);
+            }
+            printf("NATIVE_PROBE_EXIT=0x%08lX COMPLETED=%u\n", childExit, exited ? 1U : 0U);
+            CloseHandle(child.hThread);
+            CloseHandle(child.hProcess);
+            return (exited && childExit == 0) ? 0 : 3;
+          }
+          '@
+              Set-Content -LiteralPath native-exception-probe.cpp -Value $probeSource -Encoding utf8
+              & $compiler.Source -std=c++17 -O2 -Wall -Wextra -o native-exception-probe.exe native-exception-probe.cpp
+              $compileExit = $LASTEXITCODE
+              Write-Host "LOCAL_NATIVE_DEBUGGER_COMPILE_EXIT=$compileExit"
+              if ($compileExit -eq 0) {
+                $probeArgs = @($py, '-X', 'faulthandler', '-m', 'pytest', '-q', '--tb=short') + @($evenA)
+                # One finite, source-unchanged replay only. The debugger can
+                # change crash timing; even exit zero is NOT a packaging pass.
+                & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
+                  $line = [string]$_
+                  if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR)=') {
+                    $nativeProbeTokens += $line
+                    Write-Host $line
+                  }
+                }
+                Write-Host "NATIVE_DEBUGGER_PROCESS_EXIT=$LASTEXITCODE"
+              } else {
+                Write-Host 'Native exception monitor compiler failed; no module inference.'
+              }
+              Remove-Item -LiteralPath native-exception-probe.cpp,native-exception-probe.exe -Force -ErrorAction SilentlyContinue
+            } else {
+              Write-Host 'No preinstalled C++ compiler; native module debugger not available.'
+            }
+          }
+          ConvertTo-Json -InputObject @($nativeProbeTokens) -Depth 3 | Set-Content -LiteralPath native-debug-event-tokens.json -Encoding utf8
           ConvertTo-Json -InputObject @($gdbTokens) -Depth 4 | Set-Content -LiteralPath native-gdb-frame-tokens.json -Encoding utf8
           ConvertTo-Json -InputObject @($stackFrames) -Depth 3 | Set-Content -LiteralPath native-crash-stack-tokens.json -Encoding utf8
           ConvertTo-Json -InputObject @($results) -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
@@ -255,6 +382,7 @@ jobs:
             native-fault-metadata.json
             native-crash-stack-tokens.json
             native-gdb-frame-tokens.json
+            native-debug-event-tokens.json
             native-exit-*.xml
           if-no-files-found: warn
           retention-days: 3
