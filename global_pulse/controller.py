@@ -29,6 +29,9 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Source health/status-only callbacks never re-query the entire map for
+    # each provider ping. MainWindow coalesces this GUI-thread update.
+    source_status_changed = Signal()
     # Bookmark-only updates must not repaint the entire 5,000-record map.
     situation_changed = Signal(str, bool)
     status_changed = Signal(str)
@@ -275,7 +278,9 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # Source status callback can occur once per enabled feed and is not
+        # new evidence. MainWindow merges repeated status-only notifications.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
