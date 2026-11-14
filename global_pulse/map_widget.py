@@ -24,6 +24,21 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+# Country-level source evidence is not precise incident geolocation.
+# These distinct category colors are deliberately separate from SEVERITY,
+# which remains authoritative for genuine coordinate/area event markers.
+CATEGORY_COLORS = {
+    "Conflict": "#e77482", "Government": "#b798ee",
+    "Economy": "#5ecbbf", "Health": "#68d88f",
+    "Humanitarian": "#efb97e", "Infrastructure": "#72adf3",
+    "News": "#bec6dc", "Disaster": "#ebbb70",
+}
+_CATEGORY_PRIORITY = (
+    "Conflict", "Government", "Economy", "Health",
+    "Humanitarian", "Infrastructure", "News", "Disaster",
+)
+
+
 class WorldMap(QWidget):
     event_selected = Signal(str)
     country_selected = Signal(str)
@@ -56,6 +71,7 @@ class WorldMap(QWidget):
         self.crisis_overlay_enabled = True
         self.country_activity = {}
         self.country_only_evidence = {}
+        self._country_badge_hits = []
         self.country_dialog = None
         self._drag = None
         self._moved = False
@@ -181,8 +197,12 @@ class WorldMap(QWidget):
                 # drawn as neutral historical country-only evidence.
                 if build_country_activity((record,), now=now).get(country):
                     continue
-                entry = self.country_only_evidence.setdefault(country, {"count": 0, "events": []})
+                entry = self.country_only_evidence.setdefault(
+                    country, {"count": 0, "events": [], "categories": {}}
+                )
                 entry["count"] += 1
+                category = str(record.get("category") or "News").strip().title()
+                entry["categories"][category] = entry["categories"].get(category, 0) + 1
                 # Keep all *already bounded* evidence identities (max 5,000).
                 # Display remains capped to 30 rows, but queries must search
                 # beyond the first 30 or important stories are unreachable.
@@ -550,6 +570,58 @@ class WorldMap(QWidget):
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, name)
                 occupied.append(rect.adjusted(-5, -3, 5, 3))
         self.area_layer.paint(painter)
+
+        # Country-level category dots make country-attributed politics, economy,
+        # health, humanitarian, and infrastructure sources discoverable even
+        # when the original record has no incident latitude/longitude.
+        # They are *not* severity or event pins; their distinct hollow rings
+        # and clickable country tooltip express that limitation. No fake
+        # centroids or inferred coordinates are added to the event data.
+        self._country_badge_hits.clear()
+        for c in self._countries:
+            key = normalize_country(c["name"])
+            evidence = self.country_only_evidence.get(key, {})
+            category_counts = dict(evidence.get("categories") or {})
+            economy = self.economic_observations.get(key, {})
+            if economy and not category_counts.get("Economy"):
+                category_counts["Economy"] = 0  # dated observations only
+            if not category_counts or c["name"] == "Antarctica":
+                continue
+            label = c.get("label")
+            if not label or not all(_number(v) for v in label):
+                continue
+            point = self.point(*label)
+            if not (-15 < point.x() < self.width()+15 and -15 < point.y() < self.height()+15):
+                continue
+            # Prioritize diverse non-weather evidence on small country labels.
+            kinds = sorted(category_counts,
+                           key=lambda cat: (_CATEGORY_PRIORITY.index(cat)
+                               if cat in _CATEGORY_PRIORITY else len(_CATEGORY_PRIORITY),
+                               cat))[:6]
+            count = len(kinds)
+            # A marker below the geographic label denotes the country, not a
+            # purported incident at the label coordinate.
+            start_x = point.x() - (count-1)*6.5
+            for index, category in enumerate(kinds):
+                center = QPointF(start_x + index*13, point.y()+11)
+                if not self.rect().adjusted(5, 5, -5, -5).contains(center.toPoint()):
+                    continue
+                color = QColor(CATEGORY_COLORS.get(category, "#aebdcf"))
+                painter.setPen(QPen(color, 1.7))
+                painter.setBrush(QColor("#111721"))
+                painter.drawEllipse(center, 5.6, 5.6)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawEllipse(center, 2.8, 2.8)
+                value = int(category_counts.get(category, 0))
+                descriptor = (
+                    f"{value} country-attributed source record(s)"
+                    if value else f"{int(economy.get('count',0))} dated economic observation(s)"
+                )
+                self._country_badge_hits.append((
+                    center, 7.5, c["name"], category, descriptor
+                ))
+
         self._hits.clear()
         for group in self.visible_clusters():
             center = QPointF(sum(p.x() for _, p in group)/len(group), sum(p.y() for _, p in group)/len(group))
@@ -574,7 +646,10 @@ class WorldMap(QWidget):
             painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(center, radius+3, radius+3)
             if verification == "official":
-                painter.drawRect(QRectF(center.x()-radius-3, center.y()-radius-3, 2*radius+6, 2*radius+6))
+                # Distinguish official sourcing by another circular ring. A
+                # square frame looked like an event box rather than a pin.
+                painter.setPen(QPen(QColor("#ede4fd"), 1.5))
+                painter.drawEllipse(center, radius+5, radius+5)
             if selected:
                 painter.setPen(QPen(QColor("#f1e5ff"), 1.7))
                 painter.drawEllipse(center, radius+7, radius+7)
@@ -629,6 +704,17 @@ class WorldMap(QWidget):
         for center, radius, group in self._hits:
             if (center-pos).manhattanLength() <= radius*1.4:
                 QToolTip.showText(event.globalPosition().toPoint(), self.cluster_tooltip(group), self)
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                return
+        for center, radius, country, category, descriptor in self._country_badge_hits:
+            if (center-pos).manhattanLength() <= radius*1.3:
+                QToolTip.showText(
+                    event.globalPosition().toPoint(),
+                    "<qt><b>" + html.escape(country) + " · " +
+                    html.escape(category) + "</b><br>" + html.escape(descriptor) +
+                    "<br>Country-level source/measurement only — NOT an exact incident point. "
+                    "Click to inspect attributed records.</qt>", self
+                )
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 return
         area_hit = self.area_layer.hit(pos)
@@ -689,6 +775,14 @@ class WorldMap(QWidget):
                 else:
                     self.select_event(group[0][0].get("id", ""))
                     self.event_selected.emit(str(group[0][0].get("id", "")))
+                return
+        for center, radius, country, _category, _descriptor in self._country_badge_hits:
+            if (center-pos).manhattanLength() <= radius*1.3:
+                self.selected_country = country
+                self.country_selected.emit(country)
+                self.update()
+                if self.country_evidence_for(country):
+                    self.show_country_evidence(country)
                 return
         area_hit = self.area_layer.hit(pos)
         if area_hit:
