@@ -52,8 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 64ae2d44465be932cc359d976ad25e67510bab49 HEAD
-          git diff --name-only 64ae2d44465be932cc359d976ad25e67510bab49..HEAD > /tmp/changed-files.txt
-          python -c "from pathlib import Path; allowed={'global_pulse/map_widget.py','tests/test_owner_night_stability_map.py','.github/workflows/owner-night-category-drilldown-ci.yml'}; found=set(Path('/tmp/changed-files.txt').read_text().splitlines()); assert found==allowed, (found,allowed)"
+          git diff --name-only 64ae2d44465be932cc359d976ad25e67510bab49..HEAD | python -c "import sys; allowed={'global_pulse/map_widget.py','tests/test_owner_night_stability_map.py','.github/workflows/owner-night-category-drilldown-ci.yml'}; found={line.strip() for line in sys.stdin if line.strip()}; assert found==allowed, (found,allowed)"
       - name: Compile
         shell: bash
         run: python -m compileall -q global_pulse
