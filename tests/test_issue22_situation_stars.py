@@ -321,9 +321,11 @@ def test_provider_status_burst_coalesces_gui_work(desktop,app,monkeypatch):
     for _ in range(30):
         controller.source_status_changed.emit()
     assert window._collection_refresh_timer.isActive()
-    QTest.qWait(150)
+    controller.last_collection="2026-11-13T19:00:00Z"
+    QTest.qWait(700)
     app.processEvents()
-    assert calls==["map"]
+    assert calls==[]  # Thirty status pings must not rebuild 5k map records.
+    assert "13 Nov 19:00" in window.last_label.text()
     assert not window._collection_refresh_timer.isActive()
 
 
