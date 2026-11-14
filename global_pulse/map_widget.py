@@ -24,6 +24,11 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def _map_category(value):
+    """Match map category filters to the canonical displayed country rings."""
+    return str(value or "News").strip().title()
+
+
 # Country-level source evidence is not precise incident geolocation.
 # These distinct category colors are deliberately separate from SEVERITY,
 # which remains authoritative for genuine coordinate/area event markers.
@@ -171,9 +176,9 @@ class WorldMap(QWidget):
         self.update()
 
     def _refresh_country_activity(self):
-        key = None if self.categories is None else frozenset(self.categories)
+        key = None if self.categories is None else frozenset(_map_category(c) for c in self.categories)
         if key != self._activity_categories:
-            selected = [e for e in self.evidence_events if key is None or e.get("category") in key]
+            selected = [e for e in self.evidence_events if key is None or _map_category(e.get("category")) in key]
             # Use one evidence-time boundary for both the current crisis layer
             # and neutral archive classification. Local Store refresh time must
             # not make an old report look like a current crisis.
@@ -260,7 +265,8 @@ class WorldMap(QWidget):
 
     def coverage_summary(self):
         self._refresh_country_activity()
-        selected = [e for e in self.evidence_events if self.categories is None or e.get("category") in self.categories]
+        key = None if self.categories is None else {_map_category(c) for c in self.categories}
+        selected = [e for e in self.evidence_events if key is None or _map_category(e.get("category")) in key]
         countries = {normalize_country(c["name"]) for c in self._countries}
         unlocated = sum(not self.has_location(e) and not e.get("map_areas") and
                         normalize_country(incident_country(e)) not in countries for e in selected)
@@ -540,8 +546,12 @@ class WorldMap(QWidget):
 
     def visible_clusters(self):
         groups = defaultdict(list)
+        selected_categories = (None if self.categories is None else
+                               {_map_category(c) for c in self.categories})
         for event in self.events:
-            if not self.has_location(event) or (self.categories is not None and event.get("category") not in self.categories):
+            if (not self.has_location(event) or
+                    (selected_categories is not None and
+                     _map_category(event.get("category")) not in selected_categories)):
                 continue
             p = self.point(event["longitude"], event["latitude"])
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
