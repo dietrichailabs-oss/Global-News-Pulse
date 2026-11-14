@@ -31,6 +31,20 @@ STATIONS = (
     {"id":"deutschlandfunk_debatten","name":"Deutschlandfunk Dokumente & Debatten","language":"German · News/Debate","url":"https://st04.sslstream.dlf.de/dlf/04/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
 )
 
+# The owner tested this public WebSDR on its operator's original HTTP/8901
+# endpoint. It is a legacy *unencrypted* service; only this exact origin is
+# admitted for private in-app testing after a separate consent prompt. No
+# general-purpose HTTP/any-port WebEngine access is enabled.
+OWNER_TEST_WEBDR_ORIGIN = "http://na5b.com:8901/"
+
+def _owner_legacy_websdr(info, kind):
+    if kind != "websdr":
+        return False
+    from urllib.parse import urlsplit
+    url=urlsplit(str((info or {}).get("url") or ""))
+    return (url.scheme == "http" and url.hostname == "na5b.com"
+            and url.port == 8901 and not url.username and not url.password)
+
 HAM_DIRECTORIES = (
     {"id":"websdr","name":"WebSDR public receivers","url":"https://websdr.org/","note":"Manual ham-band tuning on public receiver pages; provider controls availability."},
     {"id":"kiwisdr","name":"KiwiSDR public receivers","url":"https://kiwisdr.com/public/","note":"Manual ham/shortwave tuning on public receiver pages; provider controls availability."},
@@ -312,6 +326,9 @@ class RadioPanel(QWidget):
         self.receiver_connect.clicked.connect(self.connect_receiver)
         self.receiver_connect.setEnabled(False)
         self.receiver_url.textChanged.connect(self._receiver_url_changed)
+        self.receiver_type.currentIndexChanged.connect(
+            lambda _index: self._receiver_url_changed(self.receiver_url.text())
+        )
         self.receiver_off=QPushButton("Receiver Off")
         self.receiver_off.setAccessibleName("Disconnect in-app public SDR receiver")
         self.receiver_off.clicked.connect(self.disconnect_receiver)
@@ -319,6 +336,15 @@ class RadioPanel(QWidget):
         receiver_row.addWidget(self.receiver_connect)
         receiver_row.addWidget(self.receiver_off)
         layout.addLayout(receiver_row)
+        legacy_row=QHBoxLayout()
+        self.na5b_test=QPushButton("Test NA5B WebSDR (HTTP/8901)")
+        self.na5b_test.setAccessibleName(
+            "Select official NA5B public WebSDR on its HTTP port 8901"
+        )
+        self.na5b_test.clicked.connect(self._select_na5b_test)
+        legacy_row.addWidget(self.na5b_test)
+        legacy_row.addStretch()
+        layout.addLayout(legacy_row)
         self.sdr_status=QLabel("● OFF — No receiver connected")
         self.sdr_status.setTextFormat(Qt.TextFormat.PlainText)
         self.sdr_status.setAccessibleName("HAM SDR connection status")
@@ -451,6 +477,19 @@ class RadioPanel(QWidget):
         if message:
             self.ham_note.setText(message)
 
+    def _select_na5b_test(self):
+        """Select known owner-supplied public receiver; never auto-connect."""
+        self.receiver_type.setCurrentIndex(
+            self.receiver_type.findData("websdr")
+        )
+        self.receiver_url.setText(OWNER_TEST_WEBDR_ORIGIN)
+        self.receiver_list_note.setText(
+            "NA5B selected: public operator HTTP/8901 WebSDR. "
+            "Connection is unencrypted and will require explicit consent; "
+            "its in-app compatibility and audio remain unverified."
+        )
+        return True
+
     def _receiver_url_changed(self, text):
         try:
             item = public_receiver_url(str(text).strip())
@@ -458,11 +497,20 @@ class RadioPanel(QWidget):
             self.receiver_connect.setEnabled(False)
             self.receiver_external.setEnabled(False)
             return
-        self.receiver_connect.setEnabled(item["embedded_candidate"])
+        legacy = _owner_legacy_websdr(item, self.receiver_type.currentData())
+        self.receiver_connect.setEnabled(item["embedded_candidate"] or legacy)
         self.receiver_external.setEnabled(True)
-        if not item["embedded_candidate"]:
+        if legacy:
             self.receiver_list_note.setText(
-                "Browser-only receiver (HTTP/custom port). Use Open receiver in browser."
+                "NA5B operator HTTP/8901 test: an unencrypted in-app "
+                "connection is available after explicit consent. "
+                "Use the receiver's own Audio start control."
+            )
+        elif not item["embedded_candidate"]:
+            self.receiver_list_note.setText(
+                "Browser-only receiver (HTTP/custom port). "
+                "Only the explicitly reviewed NA5B legacy origin is admitted "
+                "for in-app HTTP tests. Open other receivers in your browser."
             )
 
     def _change_receiver_directory(self, *_):
@@ -607,7 +655,10 @@ class RadioPanel(QWidget):
             self._sdr_state_change("ERROR", "Receiver page failed to load. Try Open receiver in browser.")
             return
         self._sdr_state_change(
-            "ON", "SDR receiver page loaded. Start audio on the provider page if required."
+            "ON",
+            "Receiver WEB PAGE loaded; audio and signal have NOT been verified. "
+            "Press Audio start/Play in the operator's interface. "
+            "If the waterfall or audio doesn't work, use Open receiver in browser."
         )
         if self.receiver_view:
             self.receiver_view.page().setAudioMuted(self.sdr_mute.isChecked())
@@ -668,16 +719,16 @@ class RadioPanel(QWidget):
         return bool(opened)
 
     def _receiver_target(self):
-        value=safe_url(self.receiver_url.text().strip())
+        item=public_receiver_url(self.receiver_url.text().strip())
+        value=item["url"]
         parsed=urlsplit(value)
-        host=(parsed.hostname or "").lower().rstrip(".")
-        if not host:
-            raise ValueError("A public receiver hostname is required")
-        # This first integrated receiver path intentionally stays HTTPS/443.
-        # Many receiver operators provide secure frontends; insecure/custom-port
-        # sites remain available through their provider directory until separately reviewed.
-        if parsed.scheme!="https" or parsed.port not in (None,443):
-            raise ValueError("In-app SDR currently requires a public HTTPS receiver on port 443")
+        host=item["host"]
+        legacy=_owner_legacy_websdr(item,self.receiver_type.currentData())
+        if not item["embedded_candidate"] and not legacy:
+            raise ValueError(
+                "In-app SDR requires public HTTPS/443, except explicit "
+                "owner-test NA5B HTTP/8901 with WebSDR selected"
+            )
         return value,host
 
     @staticmethod
@@ -709,11 +760,22 @@ class RadioPanel(QWidget):
 
     def _load_receiver_url(self,url,host, *, require_consent=False):
         if require_consent:
+            info=public_receiver_url(url)
+            legacy=_owner_legacy_websdr(info,self.receiver_type.currentData())
+            warning=(
+                " WARNING: NA5B uses unencrypted HTTP on port 8901; "
+                "other network parties can observe and alter the receiver page. "
+                "Use only this public operator origin, not sensitive credentials."
+                if legacy else ""
+            )
             approved=QMessageBox.question(
                 self,"Connect public SDR inside Pulse?",
-                "Load this exact public receiver host inside Global Pulse? The receiver operator receives your IP address and "
-                "browser requests. Audio/tuning remain controlled by the receiver page. Pulse keeps the browser profile in memory, "
-                "blocks downloads/popups/permissions/cross-host navigation, and Receiver Off / Stop All destroys the session. Continue?",
+                "Load this exact public receiver host inside Global Pulse? "
+                "The operator receives your IP address and browser requests. "
+                "Pulse uses an ephemeral browser profile and denies downloads, "
+                "popups, permissions and cross-host navigation. "
+                "Provider audio must be started manually." + warning +
+                " Continue?",
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )==QMessageBox.StandardButton.Yes
@@ -830,30 +892,46 @@ class RadioPanel(QWidget):
         from PySide6.QtWebEngineWidgets import QWebEngineView
         from PySide6.QtWebEngineCore import QWebEngineProfile,QWebEnginePage,QWebEngineUrlRequestInterceptor,QWebEngineSettings
 
+        # Bind the embedded session to exactly one reviewed scheme+host+port.
+        # HTTP custom ports are NOT generally admitted: only NA5B:8901,
+        # prevalidated above by _receiver_target.
+        target, _ = self._receiver_target()
+        parsed=urlsplit(target)
+        legacy=(parsed.scheme=="http")
+        allowed_scheme="http" if legacy else "https"
+        allowed_ws_scheme="ws" if legacy else "wss"
+        allowed_port=parsed.port or 443
+
         class ReceiverInterceptor(QWebEngineUrlRequestInterceptor):
-            def __init__(self,allowed_host,parent=None):
-                super().__init__(parent);self.allowed_host=allowed_host
+            def __init__(self,allowed_host,scheme,ws_scheme,port,parent=None):
+                super().__init__(parent)
+                self.allowed_host=allowed_host
+                self.scheme=scheme
+                self.ws_scheme=ws_scheme
+                self.port=port
             def interceptRequest(self,info):
                 url=info.requestUrl()
                 if url.scheme() in {"about","data","blob"}:
                     return
                 info.block(
-                    url.scheme() not in {"https","wss"}
-                    or url.port(443)!=443
+                    url.scheme() not in {self.scheme,self.ws_scheme}
+                    or url.port(self.port)!=self.port
                     or url.host().lower().rstrip(".")!=self.allowed_host
                 )
 
         class ReceiverPage(QWebEnginePage):
-            def __init__(self,profile,view,allowed_host):
-                super().__init__(profile,view);self.allowed_host=allowed_host
+            def __init__(self,profile,view,allowed_host,scheme,port):
+                super().__init__(profile,view)
+                self.allowed_host=allowed_host
+                self.scheme=scheme
+                self.port=port
             def createWindow(self,_):
                 return None
             def acceptNavigationRequest(self,url,kind,main):
-                if not main:
-                    return True
+                if not main:return True
                 return url.scheme()=="about" or (
-                    url.scheme()=="https"
-                    and url.port(443)==443
+                    url.scheme()==self.scheme
+                    and url.port(self.port)==self.port
                     and url.host().lower().rstrip(".")==self.allowed_host
                 )
 
@@ -862,12 +940,18 @@ class RadioPanel(QWidget):
         self.receiver_profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
         self.receiver_profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
         self.receiver_profile.setPushServiceEnabled(False)
-        self.receiver_interceptor=ReceiverInterceptor(host,self.receiver_profile)
+        self.receiver_interceptor=ReceiverInterceptor(
+            host,allowed_scheme,allowed_ws_scheme,allowed_port,
+            self.receiver_profile
+        )
         self.receiver_profile.setUrlRequestInterceptor(self.receiver_interceptor)
         self.receiver_profile.downloadRequested.connect(lambda download:download.cancel())
 
         self.receiver_view=QWebEngineView(self)
-        page=ReceiverPage(self.receiver_profile,self.receiver_view,host)
+        page=ReceiverPage(
+            self.receiver_profile,self.receiver_view,host,
+            allowed_scheme,allowed_port
+        )
         page.permissionRequested.connect(lambda permission:permission.deny())
         page.certificateError.connect(lambda error:error.rejectCertificate())
         self.receiver_view.setPage(page)
