@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSystemTrayIcon, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
 from . import __version__, BUILD_ID
 from .security import event_id, redact
@@ -85,6 +85,38 @@ def onboarding(controller, parent):
     return False
 
 
+
+class _StartupSplash(QSplashScreen):
+    """Non-dismissible notice painted before opening heavy local source data."""
+
+    def mousePressEvent(self, event):
+        # Splash clicks during slow loading must not expose an unfinished UI.
+        event.accept()
+
+
+def show_initializing(app):
+    background = QPixmap(560, 186)
+    background.fill(QColor("#17161e"))
+    painter = QPainter(background)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#9169d9"), 2))
+    painter.drawRoundedRect(5, 5, 550, 176, 14, 14)
+    painter.end()
+    splash = _StartupSplash(background, Qt.WindowType.WindowStaysOnTopHint)
+    splash.setAccessibleName("Global Pulse initializing")
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Preparing your local archive and source settings.\n"
+        "The dashboard will open when its data is ready.",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7")
+    )
+    splash.show()
+    # Draw before Controller construction or SQLite/Qt resource setup.
+    app.processEvents()
+    return splash
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["--gdelt-worker"]:
@@ -147,12 +179,34 @@ def main(argv=None):
     except RuntimeError as error:
         QMessageBox.warning(None, "Global Pulse", str(error))
         return 1
-    from .controller import Controller, in_quiet_hours
-    from .native_notifications import NativeNotifications
-    from .ui import MainWindow
-    controller = Controller(directory, demo=args.demo)
-    window = MainWindow(controller)
-    window.setWindowIcon(pulse_icon())
+    splash = show_initializing(app)
+    controller = None
+    try:
+        from .controller import Controller, in_quiet_hours
+        from .native_notifications import NativeNotifications
+        from .ui import MainWindow
+        controller = Controller(directory, demo=args.demo)
+        splash.showMessage(
+            "INITIALIZING GLOBAL PULSE\nPreparing the world map, media, and reports…",
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            QColor("#eee8f7")
+        )
+        app.processEvents()
+        window = MainWindow(controller)
+        window.setWindowIcon(pulse_icon())
+    except BaseException:
+        splash.close()
+        if controller is not None:
+            try:
+                controller.close()
+            except Exception:
+                logging.getLogger("global_pulse").exception(
+                    "Controller cleanup failed during initial desktop construction"
+                )
+        instance.close()
+        handler.close()
+        log.removeHandler(handler)
+        raise
     def native_allowed():
         return controller.monitoring and controller.get_setting("notifications_enabled", True) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
 
@@ -249,6 +303,7 @@ def main(argv=None):
 
     window.set_close_handler(close_window)
     window.show()
+    splash.finish(window)
     if args.fixture:
         controller.load_fixture(args.fixture)
     if args.snapshot_first_fixture_event:
