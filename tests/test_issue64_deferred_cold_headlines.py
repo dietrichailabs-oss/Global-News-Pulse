@@ -96,8 +96,9 @@ def test_deferred_routing_preserves_unknown_and_checks_model_after_detection(mon
         new_title = title + " corrected"
         assert engine.view(_event(new_title), defer_language=True)["state"] == "detecting"
         enabled["value"] = False
-        app.processEvents()
-        QTest.qWait(5)
+        # Matches Controller.set_setting(english_headlines=False): queued work
+        # and translation jobs must be cancelled without waiting for a tick.
+        engine.cancel_pending()
         assert not engine.deferred
         assert engine.view(_event(new_title), defer_language=True)["state"] == "original"
     finally:
