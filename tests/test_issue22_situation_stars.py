@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtTest import QTest
 from global_pulse.core import Store
 from global_pulse.controller import Controller
 from global_pulse.ui import MainWindow
@@ -308,3 +309,34 @@ def test_bookmark_signal_changes_selected_row_without_full_refresh(desktop,app,m
     app.processEvents()
     assert not controller.store.saved_situation_ids()
     assert window.situation_list.count()==0
+
+
+def test_provider_status_burst_coalesces_gui_work(desktop,app,monkeypatch):
+    window,controller,_=desktop
+    calls=[]
+    def count_map(*args,**kwargs):
+        calls.append("map")
+    monkeypatch.setattr(window.world_map,"set_events",count_map)
+    window._collection_refresh_timer.setInterval(40)
+    for _ in range(30):
+        controller.source_status_changed.emit()
+    assert window._collection_refresh_timer.isActive()
+    QTest.qWait(150)
+    app.processEvents()
+    assert calls==["map"]
+    assert not window._collection_refresh_timer.isActive()
+
+
+def test_reopening_current_tab_does_not_reread_sqlite(desktop,monkeypatch):
+    window,controller,_=desktop
+    calls=[]
+    original=window._populate_sources
+    def spy():
+        calls.append("sources")
+        return original()
+    monkeypatch.setattr(window,"_populate_sources",spy)
+    window.open_page(3)
+    assert calls==["sources"]
+    for _ in range(10):
+        window.open_page(3)
+    assert calls==["sources"]
