@@ -412,7 +412,11 @@ jobs:
                 $phaseScriptPath = Join-Path $env:RUNNER_TEMP 'native-phase-probe.py'
                 $phaseSource = @'
           import atexit
+          import os
           import sys
+          # -m pytest adds cwd to sys.path; preserve the same project import
+          # root even though this temporary diagnostic script lives in RUNNER_TEMP.
+          sys.path.insert(0, os.getcwd())
           import pytest
 
           @atexit.register
