@@ -73,7 +73,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'source install failed' }
           & $py -m pip check
           if ($LASTEXITCODE -ne 0) { throw 'dependency check failed' }
-      - name: Isolate native Qt failure by separate fresh Python processes
+      - name: Replay intermittent native Qt exit and capture sanitized Windows fault metadata
         run: |
           $ErrorActionPreference = 'Stop'
           $py = 'build/venv-exit-diag/Scripts/python.exe'
@@ -105,30 +105,64 @@ jobs:
           if (($focusA.Count + $focusB.Count) -ne $evenA.Count -or $focusA.Count -eq 0 -or $focusB.Count -eq 0) {
             throw 'Incorrect implicated cohort partition'
           }
+          # Repeat ONLY the previously faulting 29-module native Windows cohort.
+          # Preserve original test expectations; never count pytest's assertion
+          # summary as success when the native interpreter exit is nonzero.
+          $runStart = Get-Date
           $results = @()
-          $ab = @($focusA) + @($focusB)
-          $ba = @($focusB) + @($focusA)
-          foreach ($group in @(@{ Name='a1-then-a2'; Files=$ab }, @{ Name='a2-then-a1'; Files=$ba })) {
-            Write-Host "BEGIN_NATIVE_WINDOWS_GROUP=$($group.Name) MODULE_COUNT=$($group.Files.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
-            Write-Host "GROUP_FILES=$($group.Files -join ';')"
-            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-$($group.Name).xml" @($group.Files)
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            Write-Host "BEGIN_NATIVE_WINDOWS_REPLAY=$attempt MODULE_COUNT=$($evenA.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+            Write-Host "GROUP_FILES=$($evenA -join ';')"
+            $attemptStart = Get-Date
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-even-a-$attempt.xml" @($evenA)
             $code = $LASTEXITCODE
-            Write-Host "NATIVE_WINDOWS_GROUP=$($group.Name) RAW_PROCESS_EXIT=$code"
-            $results += [pscustomobject]@{ group=$group.Name; module_count=$group.Files.Count; native_exit=$code }
+            Write-Host "NATIVE_WINDOWS_REPLAY=$attempt RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{
+              attempt = $attempt
+              module_count = $evenA.Count
+              native_exit = $code
+              started_utc = $attemptStart.ToUniversalTime().ToString('o')
+            }
+            if ($code -ne 0) {
+              Write-Host 'Native exit not zero: stop replays and inspect Windows Application Error metadata.'
+              break
+            }
           }
-          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -eq 0) {
-            Write-Host 'Both sequential cohort orderings exit zero; original interleaved ordering remains the reproducible candidate.'
-            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-even-a-interleaved.xml @($evenA)
-            $code = $LASTEXITCODE
-            Write-Host "NATIVE_WINDOWS_GROUP=even-a-interleaved RAW_PROCESS_EXIT=$code"
-            $results += [pscustomobject]@{ group='even-a-interleaved'; module_count=$evenA.Count; native_exit=$code }
-          } else {
-            Write-Host 'A smaller cohort reproduced a failure; skip larger replay to preserve diagnostic isolation.'
+          # Windows Application Error event 1000 has stable, structured fields:
+          # application name, faulting module and exception code. Read only
+          # events AFTER this test run, and publish ONLY these three identifiers,
+          # event timestamp and ID. Never export full EventLog messages,
+          # process paths, WER dumps, memory or user-machine data.
+          Start-Sleep -Seconds 3
+          $faults = @()
+          try {
+            $events = @(Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000; StartTime=$runStart.AddSeconds(-10)} -MaxEvents 100 -ErrorAction Stop)
+            foreach ($evt in $events) {
+              $xml = [xml]$evt.ToXml()
+              $values = @($xml.Event.EventData.Data | ForEach-Object { [string]$_.'#text' })
+              if ($values.Count -lt 7 -or $values[0] -notmatch '(?i)^pythonw?\.exe$') { continue }
+              $faults += [pscustomobject]@{
+                event_id = $evt.Id
+                time_utc = $evt.TimeCreated.ToUniversalTime().ToString('o')
+                application = $values[0]
+                faulting_module = (Split-Path -Leaf $values[3])
+                exception_code = $values[6]
+              }
+            }
+          } catch {
+            Write-Host 'Windows Application Error events unavailable; no inference about crash module.'
           }
-          $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
+          ConvertTo-Json -InputObject @($results) -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
+          ConvertTo-Json -InputObject @($faults) -Depth 4 | Set-Content -LiteralPath native-fault-metadata.json -Encoding utf8
           $results | Format-Table | Out-String | Write-Host
-          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) { throw 'Diagnostic tests or native process exit failed; inspect exact exit codes and assertion logs. No package or acceptance.' }
-          Write-Host 'Diagnostic segments exited zero; not acceptance of the original failed PR48 package.'
+          Write-Host "SANITIZED_WINDOWS_APPLICATION_FAULT_EVENTS=$($faults.Count)"
+          foreach ($fault in $faults) {
+            Write-Host "FAULT_MODULE=$($fault.faulting_module) EXCEPTION_CODE=$($fault.exception_code) TIME_UTC=$($fault.time_utc)"
+          }
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
+            throw 'Native Qt Windows pytest process terminated abnormally; unchanged product and packaging HOLD.'
+          }
+          Write-Host 'Five diagnostic cohort replays exited zero; this does NOT validate unsplit Windows package tests or installer smoke.'
       - name: Upload diagnostic-only records (no executable)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -136,6 +170,7 @@ jobs:
           name: issue22-native-qt-exit-diagnostic
           path: |
             native-exit-results.json
+            native-fault-metadata.json
             native-exit-*.xml
           if-no-files-found: warn
           retention-days: 3
