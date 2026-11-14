@@ -151,6 +151,7 @@ def desktop(app,tmp_path):
 def test_sidebar_opens_global_overview_not_first_weather_detail(desktop,app):
     window,controller,ids=desktop
     assert window.intelligence_mode.currentIndex()==0
+    assert window.overview_browser.openLinks() is False
     overview=window.overview_browser.toPlainText()
     assert "World intelligence overview" in overview
     assert "Health & disease" in overview
