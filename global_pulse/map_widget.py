@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import html
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,7 @@ from collections import defaultdict
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QTransform, QRadialGradient
 from PySide6.QtWidgets import (QWidget, QToolTip, QDialog, QVBoxLayout,
-    QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel)
+    QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel, QLineEdit, QComboBox)
 
 from .theme import SEVERITY
 from .crisis_overlay import build_country_activity, normalize_country
@@ -23,9 +24,26 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+# Country-level source evidence is not precise incident geolocation.
+# These distinct category colors are deliberately separate from SEVERITY,
+# which remains authoritative for genuine coordinate/area event markers.
+CATEGORY_COLORS = {
+    "Conflict": "#e77482", "Government": "#b798ee",
+    "Economy": "#5ecbbf", "Health": "#68d88f",
+    "Humanitarian": "#efb97e", "Infrastructure": "#72adf3",
+    "News": "#bec6dc", "Disaster": "#ebbb70",
+}
+_CATEGORY_PRIORITY = (
+    "Conflict", "Government", "Economy", "Health",
+    "Humanitarian", "Infrastructure", "News", "Disaster",
+)
+
+
 class WorldMap(QWidget):
     event_selected = Signal(str)
     country_selected = Signal(str)
+    global_search_requested = Signal(str)  # Search full archive; no geographic attribution implied
+    economic_country_requested = Signal(str)  # Country-only dated measurements -> Economy tab
     view_changed = Signal()
 
     def __init__(self, parent=None):
@@ -38,6 +56,8 @@ class WorldMap(QWidget):
         self.events = []
         self.gdelt_layer = None
         self.evidence_events = []
+        self.observations = []
+        self.economic_observations = {}
         self._activity_categories = object()
         self.area_layer = WarningAreaLayer(self)
         self.selected_event = ""
@@ -51,7 +71,9 @@ class WorldMap(QWidget):
         self.crisis_layers = {"conflict": True, "unrest": True, "migration": True}
         self.crisis_overlay_enabled = True
         self.country_activity = {}
-        self.country_only_evidence = {}
+        self.country_only_evidence = {}  # Neutral/historical country-only archive
+        self.country_category_evidence = {}  # All attributed categories, including current reports
+        self._country_badge_hits = []
         self.country_dialog = None
         self._drag = None
         self._moved = False
@@ -139,9 +161,10 @@ class WorldMap(QWidget):
     def point(self, lon, lat):
         return self._transform().map(self.normalized(lon, lat))
 
-    def set_events(self, events, *, country_events=None):
+    def set_events(self, events, *, country_events=None, observations=None):
         self.events = list(events)[:5000]
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
+        self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
         self._activity_categories = object()
         self._refresh_country_activity()
@@ -161,12 +184,30 @@ class WorldMap(QWidget):
             # stripe. These are *records*, not new crisis assertions.
             countries = {normalize_country(c["name"]) for c in self._countries}
             self.country_only_evidence = {}
+            self.country_category_evidence = {}
             for record in selected:
-                if (record.get("synthetic") or self.has_location(record)
-                        or record.get("map_areas")):
+                if record.get("synthetic"):
                     continue
                 country = normalize_country(incident_country(record))
                 if not country or country not in countries:
+                    continue
+                # A country-category circle summarizes attributable SOURCE
+                # records, including those separately represented by a real
+                # incident point/area or a corroborated current crisis stripe.
+                # It NEVER denotes a new incident at the country label.
+                category = str(record.get("category") or "News").strip().title()
+                category_entry = self.country_category_evidence.setdefault(
+                    country, {"count": 0, "events": [], "categories": {}}
+                )
+                category_entry["count"] += 1
+                category_entry["categories"][category] = (
+                    category_entry["categories"].get(category, 0) + 1
+                )
+                category_entry["events"].append(record)
+                # Preserve the old neutral/historical country-only index and
+                # its no-double-counting contract. Current supported crises
+                # stay in the separate stripe, not this neutral archive.
+                if self.has_location(record) or record.get("map_areas"):
                     continue
                 # The country activity's event_ids are capped at 20 for display:
                 # do not use that truncated list to decide what is neutral.
@@ -176,10 +217,45 @@ class WorldMap(QWidget):
                 # drawn as neutral historical country-only evidence.
                 if build_country_activity((record,), now=now).get(country):
                     continue
-                entry = self.country_only_evidence.setdefault(country, {"count": 0, "events": []})
+                entry = self.country_only_evidence.setdefault(
+                    country, {"count": 0, "events": [], "categories": {}}
+                )
                 entry["count"] += 1
-                if len(entry["events"]) < 30:
-                    entry["events"].append(record)
+                category = str(record.get("category") or "News").strip().title()
+                entry["categories"][category] = entry["categories"].get(category, 0) + 1
+                # Keep all *already bounded* evidence identities (max 5,000).
+                # Display remains capped to 30 rows, but queries must search
+                # beyond the first 30 or important stories are unreachable.
+                entry["events"].append(record)
+
+            # Economic observations are dated measurements, not crisis events.
+            # Map them by provider ISO3 code when possible, then by exact
+            # country-name identity. They use a separate outline and tooltip.
+            self.economic_observations = {}
+            if key is None or "Economy" in key:
+                code_to_country = {
+                    str(c.get("code") or "").upper(): normalize_country(c["name"])
+                    for c in self._countries if c.get("code")
+                }
+                valid_countries = {normalize_country(c["name"]) for c in self._countries}
+                for observation in self.observations:
+                    code = str(observation.get("country_code") or "").upper()
+                    country = code_to_country.get(code) or normalize_country(
+                        observation.get("country_name") or observation.get("country")
+                    )
+                    if not country or country not in valid_countries:
+                        continue
+                    date = str(observation.get("observation_date") or observation.get("date") or "")
+                    if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
+                        continue
+                    entry = self.economic_observations.setdefault(
+                        country, {"count": 0, "latest": "", "indicators": set()}
+                    )
+                    entry["count"] += 1
+                    entry["latest"] = max(entry["latest"], date)
+                    indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
+                    if indicator and len(entry["indicators"]) < 8:
+                        entry["indicators"].add(indicator)
             self._activity_categories = key
 
     def coverage_summary(self):
@@ -192,22 +268,31 @@ class WorldMap(QWidget):
         areas = len(self.area_layer.visible())
         activity = sum(country in countries for country in self.country_activity)
         country_only = sum(entry["count"] for entry in self.country_only_evidence.values())
+        economic_countries = len(self.economic_observations)
+        economic_rows = sum(entry["count"] for entry in self.economic_observations.values())
         suffix = f" · {self.area_layer.omitted} area(s) omitted by geometry/budget checks" if self.area_layer.omitted else ""
         incomplete = sum(area.get("context_only") is True for _path, _event, area in self.area_layer.visible())
         if incomplete:suffix += f" · {incomplete} area(s) have incomplete warning history"
         return (f"{points} points · {areas} warning areas · {activity} countries with activity"
-                f" · {country_only} country-only records · {unlocated} unlocated" + suffix)
+                f" · {country_only} country-only records · {economic_countries} economy countries/{economic_rows} observations"
+                f" · {unlocated} unlocated" + suffix)
 
     def empty_coverage_message(self):
-        if self.country_only_evidence:
-            return "Country-only records are available for inspection; no point is inferred."
+        if self.country_category_evidence or self.economic_observations:
+            return "Country-only records or dated economic observations are available; no point or crisis is inferred."
         if self.evidence_events:
             return "Reports collected; no usable geometry or supported current country activity in this view."
         return "No reports match this map view. This does not mean there are no crises."
 
     def country_evidence_for(self, name):
+        """Neutral/historical country-only archive, excluding current stripes."""
         self._refresh_country_activity()
         return self.country_only_evidence.get(normalize_country(name), {})
+
+    def country_category_evidence_for(self, name):
+        """All explicitly country-attributed category reports, not location pins."""
+        self._refresh_country_activity()
+        return self.country_category_evidence.get(normalize_country(name), {})
 
     @staticmethod
     def _latest_source_publication(event):
@@ -227,39 +312,126 @@ class WorldMap(QWidget):
                 continue
         return max(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "source publication undated"
 
-    def show_country_evidence(self, name):
-        """Read-only country-only archive drill-down, bounded to 30 event identities."""
-        entry = self.country_evidence_for(name)
+    def show_country_evidence(self, name, *, include_current=False, initial_category=None):
+        """Searchable attributed archive; never infer an incident's location.
+
+        Exactly 30 results are rendered at once, but searches cover the entire
+        bounded (max 5,000 identities) country-evidence index. Records lacking
+        country evidence must be found via the clearly separate global search.
+        """
+        entry = (self.country_category_evidence_for(name) if include_current
+                 else self.country_evidence_for(name))
         if not entry:
             return False
         if self.country_dialog:
             self.country_dialog.close()
         dialog = QDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.setWindowTitle(f"Country-only source records — {name}")
-        dialog.resize(620, 480)
+        title = "Country-attributed source records" if include_current else "Country-only source records"
+        dialog.setWindowTitle(f"{title} — {name}")
+        dialog.resize(690, 550)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(
-            "Stored country-attributed reports, not verified current crises. "
-            "No incident coordinates or warning boundaries are inferred."))
+        explainer = QLabel(
+            ("Country-level category circles are SOURCE summaries, never incident points. "
+             "Some records may separately have valid incident geometry or qualify "
+             "for a current activity stripe. Dates and evidence must be inspected. "
+             if include_current else
+             "Country-attributed source reports, not verified current crises. ")
+            + "Publisher headquarters alone do not establish an event location. "
+            + "Incident coordinates and warning boundaries are never inferred."
+        )
+        explainer.setWordWrap(True)
+        layout.addWidget(explainer)
+
+        search = QLineEdit(dialog)
+        search.setObjectName("country_evidence_search")
+        search.setAccessibleName("Search all attributed records for selected country")
+        search.setPlaceholderText("Search all country records (e.g., FAA, ground stop, storm)")
+        search.setClearButtonEnabled(True)
+        layout.addWidget(search)
+
+        categories = QComboBox(dialog)
+        categories.setObjectName("country_evidence_categories")
+        categories.addItem("All source categories", "")
+        kinds = sorted({str(event.get("category") or "Uncategorized").strip().title()
+                        for event in entry["events"]})
+        for value in kinds:
+            categories.addItem(value, value)
+        # Country category rings represent a selected category. Open its
+        # evidence rather than silently defaulting to unrelated weather/news.
+        # Direct country selections without a category retain "All".
+        if initial_category:
+            index = categories.findData(str(initial_category).strip().title())
+            if index >= 0:
+                categories.setCurrentIndex(index)
+        layout.addWidget(categories)
+
         listing = QListWidget(dialog)
-        listing.setAccessibleName("Country-only evidence records")
-        for event in entry["events"]:
-            title = str(event.get("title") or "Untitled event")
-            date = self._latest_source_publication(event)
-            status = str(event.get("status") or "unknown")
-            row = QListWidgetItem(f"{title}\nSource: {date} · status: {status}")
-            row.setData(Qt.ItemDataRole.UserRole, str(event.get("id") or ""))
-            row.setToolTip("Open to inspect original publisher links, revisions, and source evidence.")
-            listing.addItem(row)
-        listing.setCurrentRow(0)
-        layout.addWidget(listing)
-        if entry["count"] > len(entry["events"]):
-            layout.addWidget(QLabel(
-                f"Showing {len(entry['events'])} of {entry['count']} records; narrow map filters for more."))
+        listing.setObjectName("country_evidence_results")
+        listing.setAccessibleName("Filtered country-only evidence records")
+        listing.setUniformItemSizes(True)
+        layout.addWidget(listing, 1)
+        count_label = QLabel(dialog)
+        count_label.setObjectName("country_evidence_count")
+        count_label.setWordWrap(True)
+        layout.addWidget(count_label)
+
+        # Index only attributed metadata, never private article bodies, generic
+        # summaries, publisher country defaults or external content. No network.
+        searchable = []
+        for record in entry["events"]:
+            parts = [str(record.get("title") or ""), str(record.get("category") or "")]
+            reports = record.get("reports")
+            if isinstance(reports, list):
+                for report in reports[:20]:
+                    if isinstance(report, dict):
+                        parts.extend((str(report.get("title") or ""),
+                                      str(report.get("source_id") or "")))
+            searchable.append((record, " ".join(parts).casefold()))
+
+        def fill(*_):
+            terms = search.text().casefold().split()
+            category = categories.currentData() or ""
+            matches = [(record, value) for record, value in searchable
+                       if (not category or str(record.get("category") or "Uncategorized").strip().title() == category)
+                       and all(term in value for term in terms)]
+            listing.clear()
+            for event, _ in matches[:30]:
+                title = str(event.get("title") or "Untitled event")
+                date = self._latest_source_publication(event)
+                status = str(event.get("status") or "unknown")
+                category_name = str(event.get("category") or "Uncategorized")
+                row = QListWidgetItem(
+                    f"[{category_name}] {title}\nSource: {date} · status: {status}"
+                )
+                row.setData(Qt.ItemDataRole.UserRole, str(event.get("id") or ""))
+                row.setToolTip("Inspect original publisher links, revisions and source evidence")
+                listing.addItem(row)
+            if listing.count():
+                listing.setCurrentRow(0)
+                count_label.setText(
+                    f"Showing {min(30, len(matches))} of {len(matches)} matching "
+                    f"country-attributed records ({entry['count']} total). "
+                    "Search covers the full country list, not only its first 30."
+                )
+            else:
+                count_label.setText(
+                    "No matching country-attributed records. An aviation story "
+                    "may lack independent US incident geography; use Search full news "
+                    "archive to search all locally collected headlines."
+                )
+
+        search.textChanged.connect(fill)
+        categories.currentIndexChanged.connect(fill)
         controls = QHBoxLayout()
         open_button = QPushButton("Inspect selected evidence")
+        global_button = QPushButton("Search full news archive")
+        global_button.setObjectName("country_search_full_archive")
+        global_button.setToolTip(
+            "Search all local reports, including unlocated news, without assigning them to this country"
+        )
         close_button = QPushButton("Close")
+
         def choose(*_):
             row = listing.currentItem()
             if row and row.data(Qt.ItemDataRole.UserRole):
@@ -267,17 +439,34 @@ class WorldMap(QWidget):
                 self.select_event(identity)
                 self.event_selected.emit(identity)
                 dialog.close()
+
+        def search_global():
+            phrase = search.text().strip()
+            if not phrase:
+                count_label.setText(
+                    "Type a keyword such as FAA or ground stop first. "
+                    "Global archive search does not assume an incident location."
+                )
+                search.setFocus()
+                return
+            self.global_search_requested.emit(phrase)
+            dialog.close()
+
         open_button.clicked.connect(choose)
         listing.itemActivated.connect(choose)
+        global_button.clicked.connect(search_global)
         close_button.clicked.connect(dialog.close)
         controls.addWidget(open_button)
+        controls.addWidget(global_button)
         controls.addWidget(close_button)
         layout.addLayout(controls)
         self.country_dialog = dialog
         dialog.destroyed.connect(
-            lambda: setattr(self, "country_dialog", None) if self.country_dialog is dialog else None)
+            lambda: setattr(self, "country_dialog", None) if self.country_dialog is dialog else None
+        )
+        fill()
         dialog.show()
-        listing.setFocus()
+        search.setFocus()
         return True
 
     def set_crisis_layer(self, kind, enabled):
@@ -381,8 +570,13 @@ class WorldMap(QWidget):
             painter.drawPath(mapped_path)
             # Neutral dashed boundary means archived country-only evidence,
             # never a crisis stripe or a fabricated geographic point.
-            if normalize_country(c["name"]) in self.country_only_evidence:
+            country_key = normalize_country(c["name"])
+            if country_key in self.country_only_evidence:
                 painter.setPen(QPen(QColor("#668192"), 1, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(mapped_path)
+            if country_key in self.economic_observations:
+                painter.setPen(QPen(QColor("#58a6b8"), 1.4, Qt.PenStyle.DashDotLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPath(mapped_path)
             if self.crisis_overlay_enabled:
@@ -415,6 +609,58 @@ class WorldMap(QWidget):
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, name)
                 occupied.append(rect.adjusted(-5, -3, 5, 3))
         self.area_layer.paint(painter)
+
+        # Country-level category dots make country-attributed politics, economy,
+        # health, humanitarian, infrastructure and conflict evidence visible
+        # by country regardless of separately justified incident points/areas.
+        # They are *not* severity or event pins; their distinct hollow rings
+        # and clickable country tooltip express that limitation. No fake
+        # centroids or inferred coordinates are added to the event data.
+        self._country_badge_hits.clear()
+        for c in self._countries:
+            key = normalize_country(c["name"])
+            evidence = self.country_category_evidence.get(key, {})
+            category_counts = dict(evidence.get("categories") or {})
+            economy = self.economic_observations.get(key, {})
+            if economy and not category_counts.get("Economy"):
+                category_counts["Economy"] = 0  # dated observations only
+            if not category_counts or c["name"] == "Antarctica":
+                continue
+            label = c.get("label")
+            if not label or not all(_number(v) for v in label):
+                continue
+            point = self.point(*label)
+            if not (-15 < point.x() < self.width()+15 and -15 < point.y() < self.height()+15):
+                continue
+            # Prioritize diverse non-weather evidence on small country labels.
+            kinds = sorted(category_counts,
+                           key=lambda cat: (_CATEGORY_PRIORITY.index(cat)
+                               if cat in _CATEGORY_PRIORITY else len(_CATEGORY_PRIORITY),
+                               cat))[:8]
+            count = len(kinds)
+            # A marker below the geographic label denotes the country, not a
+            # purported incident at the label coordinate.
+            start_x = point.x() - (count-1)*6.5
+            for index, category in enumerate(kinds):
+                center = QPointF(start_x + index*13, point.y()+11)
+                if not self.rect().adjusted(5, 5, -5, -5).contains(center.toPoint()):
+                    continue
+                color = QColor(CATEGORY_COLORS.get(category, "#aebdcf"))
+                painter.setPen(QPen(color, 1.7))
+                painter.setBrush(QColor("#111721"))
+                painter.drawEllipse(center, 5.6, 5.6)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawEllipse(center, 2.8, 2.8)
+                value = int(category_counts.get(category, 0))
+                descriptor = (
+                    f"{value} country-attributed source record(s)"
+                    if value else f"{int(economy.get('count',0))} dated economic observation(s)"
+                )
+                self._country_badge_hits.append((
+                    center, 7.5, c["name"], category, descriptor
+                ))
+
         self._hits.clear()
         for group in self.visible_clusters():
             center = QPointF(sum(p.x() for _, p in group)/len(group), sum(p.y() for _, p in group)/len(group))
@@ -439,7 +685,10 @@ class WorldMap(QWidget):
             painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(center, radius+3, radius+3)
             if verification == "official":
-                painter.drawRect(QRectF(center.x()-radius-3, center.y()-radius-3, 2*radius+6, 2*radius+6))
+                # Distinguish official sourcing by another circular ring. A
+                # square frame looked like an event box rather than a pin.
+                painter.setPen(QPen(QColor("#ede4fd"), 1.5))
+                painter.drawEllipse(center, radius+5, radius+5)
             if selected:
                 painter.setPen(QPen(QColor("#f1e5ff"), 1.7))
                 painter.drawEllipse(center, radius+7, radius+7)
@@ -463,7 +712,7 @@ class WorldMap(QWidget):
             painter.setPen(QColor("#ffb1ba"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._map_error)
         elif (not self.events and not self.area_layer.visible()
-              and not self.country_activity and not self.country_only_evidence
+              and not self.country_activity and not self.country_category_evidence
               and not (self.gdelt_layer and self.gdelt_layer.mapped_count)):
             painter.setPen(QColor("#aab4c5"))
             painter.drawText(QRectF(0,self.height()-66,self.width(),28),Qt.AlignmentFlag.AlignCenter,
@@ -496,6 +745,17 @@ class WorldMap(QWidget):
                 QToolTip.showText(event.globalPosition().toPoint(), self.cluster_tooltip(group), self)
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 return
+        for center, radius, country, category, descriptor in self._country_badge_hits:
+            if (center-pos).manhattanLength() <= radius*1.3:
+                QToolTip.showText(
+                    event.globalPosition().toPoint(),
+                    "<qt><b>" + html.escape(country) + " · " +
+                    html.escape(category) + "</b><br>" + html.escape(descriptor) +
+                    "<br>Country-level source/measurement only — NOT an exact incident point. "
+                    "Click to inspect attributed records.</qt>", self
+                )
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                return
         area_hit = self.area_layer.hit(pos)
         if area_hit:
             record, area = area_hit
@@ -521,11 +781,19 @@ class WorldMap(QWidget):
                 count = int(activity.get(kind, 0) or 0)
                 if self.crisis_overlay_enabled and self.crisis_layers.get(kind, True) and count:
                     labels.append(f"{title}: {count} recent sourced event(s)")
-            evidence = self.country_evidence_for(name)
+            evidence = self.country_category_evidence_for(name)
             if evidence:
                 labels.append(
-                    f"{evidence['count']} country-only source record(s); click to inspect. "
-                    "No incident point or current crisis inferred.")
+                    f"{evidence['count']} country-attributed source record(s). "
+                    "Category circles summarize reports, not coordinates or "
+                    "independent declarations of a current crisis.")
+            economy = self.economic_observations.get(normalize_country(name))
+            if economy:
+                indicators = ", ".join(sorted(economy["indicators"])[:3])
+                labels.append(
+                    f"Economy: {economy['count']} dated observation(s); latest {economy['latest']}. "
+                    + (f"{indicators}. " if indicators else "")
+                    + "Dated measurements only; no economic crisis inferred.")
             if self.gdelt_layer is not None:
                 coded_note = self.gdelt_layer.country_text(name)
                 if coded_note: labels.append(coded_note)
@@ -547,6 +815,23 @@ class WorldMap(QWidget):
                 else:
                     self.select_event(group[0][0].get("id", ""))
                     self.event_selected.emit(str(group[0][0].get("id", "")))
+                return
+        for center, radius, country, category, _descriptor in self._country_badge_hits:
+            if (center-pos).manhattanLength() <= radius*1.3:
+                self.selected_country = country
+                self.country_selected.emit(country)
+                self.update()
+                evidence = self.country_category_evidence_for(country)
+                # A circle based *only* on dated economic observations is
+                # actionable: navigate to the actual Economy data, not an
+                # empty country news dialog. Source-reported Economy events
+                # still open their original country evidence instead.
+                if (category == "Economy" and
+                        self.economic_observations.get(normalize_country(country)) and
+                        not evidence.get("categories", {}).get("Economy")):
+                    self.economic_country_requested.emit(country)
+                elif evidence:
+                    self.show_country_evidence(country, include_current=True, initial_category=category)
                 return
         area_hit = self.area_layer.hit(pos)
         if area_hit:

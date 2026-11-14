@@ -137,6 +137,28 @@ class Schedule:
                         stamp, count, gap, state, status, token))
             return True
 
+    def recover_legacy_transport_failure(self):
+        """Clear only the pre-fix never-successful 301/404 suspension.
+
+        The old client could suspend a fresh archive after repeatedly treating
+        GDELT publication lag/redirect behavior as a hard failure. Preserve
+        next_at and all successful history; never reopen access denials or a
+        collector that has previously imported data.
+        """
+        with self.db() as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            row=db.execute("SELECT * FROM gdelt_schedule WHERE id=1").fetchone()
+            eligible=(row['token'] is None and bool(row['suspended'])
+                      and row['last_success']==0 and row['cached_rows']==0
+                      and row['http_status'] in (301,404))
+            if not eligible:
+                return False
+            db.execute(
+                "UPDATE gdelt_schedule SET suspended=0,failures=0,state='waiting' "
+                "WHERE id=1 AND token IS NULL"
+            )
+            return True
+
     def review_retry(self):
         """Explicit user action; never shortens a provider delay or starts a fetch."""
         with self.db() as db, db:

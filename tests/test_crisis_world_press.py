@@ -206,13 +206,17 @@ def test_map_crisis_toggle_state_round_trips(app):
     restored.close()
 
 
-def test_gdelt_catalog_is_enabled_metadata_only_world_press():
+def test_gdelt_catalog_is_quarantined_metadata_only_world_press():
     source = next(item for item in load_catalog() if item["id"] == "gdelt_world_press")
-    assert source["enabled"]
+    assert source["enabled"] is False
+    assert source["status"] == "disabled"
     assert source["adapter"] == "gdelt_doc"
     assert source["metadata_only"]
     assert source["allowed_domains"] == ["api.gdeltproject.org"]
     assert source["country_batch_size"] == 8
+    assert "43448330100" in source["disabled_reason"]
+    assert "43448945600" in source["disabled_reason"]
+    assert "43448926428" in source["disabled_reason"]
 
 
 def test_gdelt_country_rotation_is_bounded_and_persistent():
@@ -352,7 +356,11 @@ def test_direct_global_reporting_feeds_are_reviewed_and_metadata_first():
     assert expected <= set(catalog)
     for identity in expected:
         source = catalog[identity]
-        assert source["enabled"]
+        if identity == "gdelt_world_press":
+            assert source["enabled"] is False
+            assert source["status"] == "disabled"
+        else:
+            assert source["enabled"]
         assert source["access_status"] == "reviewed_public"
         assert source.get("metadata_only")
         assert source["url"].startswith("https://")

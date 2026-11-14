@@ -5,7 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import json
 from pathlib import Path
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.controller import Controller
@@ -38,6 +39,30 @@ def load_scenario(controller):
     controller.data_changed.emit()
     return controller.events()[0]
 
+
+
+def test_economy_only_country_circle_navigates_real_economy_filter(desktop, qtapp):
+    window, controller = desktop
+    controller.store.put_observations([{
+        "source_id": "world_bank", "indicator": "GDP growth",
+        "country": "United States of America", "observation_date": "2025",
+        "value": 1.0, "unit": "percent", "synthetic": True,
+        "release_date": "2026-01-01",
+        "retrieved_at": "2026-11-13T20:00:00Z",
+        "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG",
+    }])
+    window.world_map.set_events([], country_events=[],
+                                observations=controller.store.list_observations())
+    window.world_map.grab()
+    hits = [hit for hit in window.world_map._country_badge_hits
+            if hit[2] == "United States of America" and hit[3] == "Economy"]
+    assert len(hits) == 1
+    point = hits[0][0].toPoint()
+    QTest.mouseClick(window.world_map, Qt.MouseButton.LeftButton, pos=point)
+    qtapp.processEvents()
+    assert window.pages.currentIndex() == 2
+    assert window.economy_country.currentText() == "United States of America"
+    assert "dated sourced observations" in window.status_label.text()
 
 def test_real_empty_archive_has_no_simulated_events(desktop, qtapp):
     window,controller=desktop
@@ -195,13 +220,25 @@ def test_all_map_layers_can_be_disabled_and_state_restored(qtapp):
 def test_close_handler_and_persisted_view(desktop,qtapp):
     window,controller=desktop
     calls=[]
-    window.set_close_handler(lambda:calls.append("close"))
+    # Bootstrap, not QWidget.closeEvent, owns one deferred save. Model that
+    # queued persistence without exercising a real OS tray in offscreen Qt.
+    window.set_close_handler(lambda:(calls.append("close"),QTimer.singleShot(0,window.save_layout)))
     window.world_map.zoom_by(2)
     window.close();qtapp.processEvents()
     assert calls==["close"]
     assert window.isVisible() # Bootstrap decides hide or exit; Qt did not destroy it.
     assert controller.get_setting("map_view")["zoom"]==2.0
     assert controller.get_setting("window_geometry")
+
+
+def test_close_handler_does_not_block_ui_with_layout_database_write(desktop):
+    window,_=desktop
+    calls=[]
+    window.save_layout=lambda:calls.append("unexpected synchronous save")
+    window.set_close_handler(lambda:calls.append("handler"))
+    window.close()
+    assert calls==["handler"]
+    assert window.isVisible()
 
 
 def test_small_window_map_stays_inside_panel(desktop,qtapp):

@@ -1,0 +1,83 @@
+name: Source Expansion - NZ Official Alert Feed Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-nz-alert-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nz-alert-feeds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Unadmitted official CAP-index RSS/Atom probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          sources=[
+            dict(id="nz_nema_ema_rss_probe",name="New Zealand NEMA - Emergency Mobile Alerts",
+              url="https://alerthub.civildefence.govt.nz/rss/pwp",adapter="rss",
+              enabled=True,metadata_only=True,access_status="reviewed_public",independence="original",
+              official=True,official_scope="statement",category="Disaster",region="Oceania",
+              country="New Zealand",language="en",publisher_origin_id="nz_nema_alerts",
+              min_interval=1800,stale_after_days=30,retention_days=90,
+              allowed_domains=["alerthub.civildefence.govt.nz"],
+              article_domains=["alerthub.civildefence.govt.nz","www.civildefence.govt.nz","civildefence.govt.nz"],
+              attribution="NZ NEMA / originating alert authority, CC BY 4.0; original link and date; may include multiple underlying issuing authorities"),
+            dict(id="nz_geonet_cap_atom_probe",name="New Zealand GeoNet - quake CAP Atom feed",
+              url="https://api.geonet.org.nz/cap/1.2/GPA1.0/feed/atom1.0/quake",
+              adapter="atom",enabled=True,metadata_only=True,access_status="reviewed_public",independence="original",
+              official=True,official_scope="measurement",category="Disaster",region="Oceania",
+              country="New Zealand",language="en",publisher_origin_id="nz_geonet",
+              min_interval=1800,stale_after_days=7,retention_days=90,
+              allowed_domains=["api.geonet.org.nz"],
+              article_domains=["api.geonet.org.nz","www.geonet.org.nz","geonet.org.nz"],
+              attribution="Earth Sciences NZ / GeoNet; CC BY 3.0 NZ; official CAP links and dates")
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for row in sources:
+              try:
+                  out=Collector(row).collect(); state=out["state"]; reports=out.get("reports",[])
+                  recent=[r for r in reports if r.get("published_at")
+                      and 0<=now-timestamp(r["published_at"])<=30*86400]
+                  violations=[r for r in reports if r.get("summary") or r.get("media")
+                      or not r.get("title") or not r.get("attribution")
+                      or r.get("origin_id")!=row["publisher_origin_id"]
+                      or urlsplit(r.get("url","")).scheme!="https"
+                      or urlsplit(r.get("url","")).hostname not in row["article_domains"]]
+                  passed=bool(state.get("status")=="available" and state.get("http_status")==200
+                      and reports and recent and not violations)
+                  result=dict(id=row["id"],passed=passed,http_status=state.get("http_status"),
+                      status=state.get("status"),reports=len(reports),recent_30d=len(recent),
+                      latest=state.get("latest_publication"),violations=len(violations),
+                      error=state.get("error") or "")
+              except Exception as e:
+                  result=dict(id=row["id"],passed=False,error=f"{type(e).__name__}: {str(e)[:140]}")
+              print("NZ_UNADMITTED_ALERT_PROBE",json.dumps(result,sort_keys=True),flush=True)
+          print("NZ_PROBE_ONLY_NO_CATALOG_MODIFICATION",flush=True)
+          PY

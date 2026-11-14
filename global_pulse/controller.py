@@ -29,6 +29,11 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Source health/status-only callbacks never re-query the entire map for
+    # each provider ping. MainWindow coalesces this GUI-thread update.
+    source_status_changed = Signal()
+    # Bookmark-only updates must not repaint the entire 5,000-record map.
+    situation_changed = Signal(str, bool)
     status_changed = Signal(str)
     alert_received = Signal(dict)
     translation_ready = Signal(str, str)
@@ -273,7 +278,9 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # Source status callback can occur once per enabled feed and is not
+        # new evidence. MainWindow merges repeated status-only notifications.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
@@ -426,7 +433,10 @@ class Controller(QObject):
         if self._closed:
             raise ValueError("Archive is closed")
         state = self.store.set_situation_saved(identifier, saved)
-        self.data_changed.emit()
+        # The evidence archive and geolocation did not change. Only the
+        # bookmark state needs to update; full data_changed would synchronously
+        # run every map/feed/GDELT query from the Star button's click handler.
+        self.situation_changed.emit(state["event_id"], state["saved"])
         return state
 
     def save_situation(self, identifier):
