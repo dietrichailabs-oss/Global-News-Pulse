@@ -48,12 +48,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Guard frozen PR69 exact source and only five scoped paths
+      - name: Guard frozen PR69 exact source and only six scoped paths
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor b658efcb283201b28775370984c27449ba81456e HEAD
-          git diff --name-only b658efcb283201b28775370984c27449ba81456e..HEAD | python -c "import sys; expected={'global_pulse/headline_translation.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue64_deferred_cold_headlines.py','.github/workflows/issue64-nonblocking-cold-headlines.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only b658efcb283201b28775370984c27449ba81456e..HEAD | python -c "import sys; expected={'global_pulse/headline_translation.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue64_deferred_cold_headlines.py','tests/test_issue64_cold_paint_attribution.py','.github/workflows/issue64-nonblocking-cold-headlines.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Compile full application and tests
         shell: bash
         run: |
