@@ -61,6 +61,12 @@ class Television(_MediaTile):
         add.addWidget(self.video_url,1);add.addWidget(save)
         add.addWidget(test_clip);add.addWidget(owner_clip)
         self.layout_.addLayout(add)
+        self.full_watch_button=QPushButton("Try YouTube watch page in Pulse")
+        self.full_watch_button.setAccessibleName(
+            "Try the selected video in YouTube's normal watch page, with consent"
+        )
+        self.full_watch_button.clicked.connect(self.watch_full_page)
+        self.layout_.addWidget(self.full_watch_button)
         self._saved=[]
         self._builtins=[]
         self._test_candidates=[]
@@ -250,6 +256,9 @@ class Television(_MediaTile):
                 self.view.loadFinished.connect(self._tv_load_finished)
                 self._player_signal_connected=True
             self._begin_observation()
+            page=self.view.page()
+            page.allowed_video_id=video
+            page.full_watch_mode=False
             self.view.load(request);self.view.show();self.display.hide()
             if item.get("owner_test_candidate"):
                 self.note.setText("OWNER TEST CANDIDATE · official embedded player · if playback reaches PLAYING, report the channel so it can be promoted to verified.")
@@ -258,6 +267,64 @@ class Television(_MediaTile):
         except (ImportError,RuntimeError,ValueError):
             self.stop();self.tv_status.setText("ERROR")
             self.note.setText("The sandboxed embedded player could not start. No external website was opened.")
+
+    def watch_full_page(self):
+        """Load the selected official YouTube watch URL, not a stream mirror.
+
+        Explicit consent, one exact video ID and strict mainframe/third-party
+        origin policy remain. This offers YouTube's own normal player inside
+        the app where iframe embedding is unavailable, without autoplay.
+        """
+        import os
+        video=youtube_id(self._current().get("url",""))
+        if not video:
+            self.note.setText("Select an exact YouTube video first.")
+            return False
+        approved=QMessageBox.question(
+            self,"Try official YouTube watch page inside Pulse?",
+            "Open the selected video on YouTube's normal watch page inside "
+            "Pulse? YouTube receives your IP address and player requests. "
+            "Only this exact video may navigate; other videos, sign-in pages, "
+            "downloads and popups remain blocked. Press Play yourself; "
+            "availability depends on YouTube and the publisher. Continue?",
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )==QMessageBox.StandardButton.Yes
+        if not approved:
+            return False
+        try:
+            if (os.environ.get("QTWEBENGINE_DISABLE_SANDBOX","").lower()
+                not in {"","0","false"}
+                or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS","")):
+                raise RuntimeError("Chromium sandbox is required")
+            if hasattr(os,"geteuid") and os.geteuid()==0:
+                raise RuntimeError("Standard user session required")
+            self.stop()
+            self._ensure_player()
+            if not self._player_signal_connected:
+                self.view.loadFinished.connect(self._tv_load_finished)
+                self._player_signal_connected=True
+            self.view.page().allowed_video_id=video
+            self.view.page().full_watch_mode=True
+            self.mute.setChecked(True)
+            self._begin_observation()
+            self.view.load(QUrl("https://www.youtube.com/watch?v="+video))
+            self.view.show()
+            self.display.hide()
+            self.tv_status.setText("OFFICIAL WATCH PAGE · video not verified")
+            self.note.setText(
+                "Normal YouTube player opened inside Pulse. "
+                "Use Play there; only advancing video proves playback."
+            )
+            return True
+        except (ImportError,RuntimeError,ValueError,OSError):
+            self.stop()
+            self.tv_status.setText("ERROR · official watch page unavailable")
+            self.note.setText(
+                "YouTube watch page could not start inside Pulse. "
+                "Use Open on YouTube in your regular browser."
+            )
+            return False
 
     def _begin_observation(self):
         self._generation+=1;self._requested=True;self._poll_pending=False;self._last_time=None
@@ -293,7 +360,8 @@ class Television(_MediaTile):
             self.stop()
             self.tv_status.setText("UNAVAILABLE · YouTube video/embedding")
             self.note.setText(
-                message + " · Open on YouTube for the current video, or try another exact test ID."
+                message + " · Try YouTube watch page in Pulse or "
+                "Open on YouTube, or select another exact video."
             )
             return
         if not isinstance(value,dict) or value.get("missing"):
