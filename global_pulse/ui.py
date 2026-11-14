@@ -491,6 +491,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.overview_browser.setObjectName("world_intelligence_overview")
         self.overview_browser.setAccessibleName("Balanced local world intelligence overview")
         self.overview_browser.setOpenExternalLinks(False)
+        self.overview_browser.setOpenLinks(False)  # Local event anchors are handled exactly once below.
         self.overview_browser.anchorClicked.connect(self._open_overview_event)
         self.overview_browser.setHtml(
             "<p>World overview will appear when local reports are loaded.</p>"
