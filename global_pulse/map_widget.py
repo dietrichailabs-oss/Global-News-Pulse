@@ -12,7 +12,7 @@ from collections import defaultdict
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QTransform, QRadialGradient
 from PySide6.QtWidgets import (QWidget, QToolTip, QDialog, QVBoxLayout,
-    QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel)
+    QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel, QLineEdit, QComboBox)
 
 from .theme import SEVERITY
 from .crisis_overlay import build_country_activity, normalize_country
@@ -27,6 +27,7 @@ def _number(value):
 class WorldMap(QWidget):
     event_selected = Signal(str)
     country_selected = Signal(str)
+    global_search_requested = Signal(str)  # Search full archive; no geographic attribution implied
     view_changed = Signal()
 
     def __init__(self, parent=None):
@@ -182,8 +183,10 @@ class WorldMap(QWidget):
                     continue
                 entry = self.country_only_evidence.setdefault(country, {"count": 0, "events": []})
                 entry["count"] += 1
-                if len(entry["events"]) < 30:
-                    entry["events"].append(record)
+                # Keep all *already bounded* evidence identities (max 5,000).
+                # Display remains capped to 30 rows, but queries must search
+                # beyond the first 30 or important stories are unreachable.
+                entry["events"].append(record)
 
             # Economic observations are dated measurements, not crisis events.
             # Map them by provider ISO3 code when possible, then by exact
@@ -264,7 +267,12 @@ class WorldMap(QWidget):
         return max(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "source publication undated"
 
     def show_country_evidence(self, name):
-        """Read-only country-only archive drill-down, bounded to 30 event identities."""
+        """Searchable country-only archive; never infer an incident's location.
+
+        Exactly 30 results are rendered at once, but searches cover the entire
+        bounded (max 5,000 identities) country-evidence index. Records lacking
+        country evidence must be found via the clearly separate global search.
+        """
         entry = self.country_evidence_for(name)
         if not entry:
             return False
@@ -273,29 +281,98 @@ class WorldMap(QWidget):
         dialog = QDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setWindowTitle(f"Country-only source records — {name}")
-        dialog.resize(620, 480)
+        dialog.resize(690, 550)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(
-            "Stored country-attributed reports, not verified current crises. "
-            "No incident coordinates or warning boundaries are inferred."))
+        explainer = QLabel(
+            "Country-attributed source reports, not verified current crises. "
+            "Publisher headquarters alone do not establish an event location. "
+            "Incident coordinates and warning boundaries are never inferred."
+        )
+        explainer.setWordWrap(True)
+        layout.addWidget(explainer)
+
+        search = QLineEdit(dialog)
+        search.setObjectName("country_evidence_search")
+        search.setAccessibleName("Search all attributed records for selected country")
+        search.setPlaceholderText("Search all country records (e.g., FAA, ground stop, storm)")
+        search.setClearButtonEnabled(True)
+        layout.addWidget(search)
+
+        categories = QComboBox(dialog)
+        categories.setObjectName("country_evidence_categories")
+        categories.addItem("All source categories", "")
+        kinds = sorted({str(event.get("category") or "Uncategorized")
+                        for event in entry["events"]})
+        for value in kinds:
+            categories.addItem(value, value)
+        layout.addWidget(categories)
+
         listing = QListWidget(dialog)
-        listing.setAccessibleName("Country-only evidence records")
-        for event in entry["events"]:
-            title = str(event.get("title") or "Untitled event")
-            date = self._latest_source_publication(event)
-            status = str(event.get("status") or "unknown")
-            row = QListWidgetItem(f"{title}\nSource: {date} · status: {status}")
-            row.setData(Qt.ItemDataRole.UserRole, str(event.get("id") or ""))
-            row.setToolTip("Open to inspect original publisher links, revisions, and source evidence.")
-            listing.addItem(row)
-        listing.setCurrentRow(0)
-        layout.addWidget(listing)
-        if entry["count"] > len(entry["events"]):
-            layout.addWidget(QLabel(
-                f"Showing {len(entry['events'])} of {entry['count']} records; narrow map filters for more."))
+        listing.setObjectName("country_evidence_results")
+        listing.setAccessibleName("Filtered country-only evidence records")
+        listing.setUniformItemSizes(True)
+        layout.addWidget(listing, 1)
+        count_label = QLabel(dialog)
+        count_label.setObjectName("country_evidence_count")
+        count_label.setWordWrap(True)
+        layout.addWidget(count_label)
+
+        # Index only attributed metadata, never private article bodies, generic
+        # summaries, publisher country defaults or external content. No network.
+        searchable = []
+        for record in entry["events"]:
+            parts = [str(record.get("title") or ""), str(record.get("category") or "")]
+            reports = record.get("reports")
+            if isinstance(reports, list):
+                for report in reports[:20]:
+                    if isinstance(report, dict):
+                        parts.extend((str(report.get("title") or ""),
+                                      str(report.get("source_id") or "")))
+            searchable.append((record, " ".join(parts).casefold()))
+
+        def fill(*_):
+            terms = search.text().casefold().split()
+            category = categories.currentData() or ""
+            matches = [(record, value) for record, value in searchable
+                       if (not category or str(record.get("category") or "Uncategorized") == category)
+                       and all(term in value for term in terms)]
+            listing.clear()
+            for event, _ in matches[:30]:
+                title = str(event.get("title") or "Untitled event")
+                date = self._latest_source_publication(event)
+                status = str(event.get("status") or "unknown")
+                category_name = str(event.get("category") or "Uncategorized")
+                row = QListWidgetItem(
+                    f"[{category_name}] {title}\nSource: {date} · status: {status}"
+                )
+                row.setData(Qt.ItemDataRole.UserRole, str(event.get("id") or ""))
+                row.setToolTip("Inspect original publisher links, revisions and source evidence")
+                listing.addItem(row)
+            if listing.count():
+                listing.setCurrentRow(0)
+                count_label.setText(
+                    f"Showing {min(30, len(matches))} of {len(matches)} matching "
+                    f"country-attributed records ({entry['count']} total). "
+                    "Search covers the full country list, not only its first 30."
+                )
+            else:
+                count_label.setText(
+                    "No matching country-attributed records. An aviation story "
+                    "may lack independent US incident geography; use Search full news "
+                    "archive to search all locally collected headlines."
+                )
+
+        search.textChanged.connect(fill)
+        categories.currentIndexChanged.connect(fill)
         controls = QHBoxLayout()
         open_button = QPushButton("Inspect selected evidence")
+        global_button = QPushButton("Search full news archive")
+        global_button.setObjectName("country_search_full_archive")
+        global_button.setToolTip(
+            "Search all local reports, including unlocated news, without assigning them to this country"
+        )
         close_button = QPushButton("Close")
+
         def choose(*_):
             row = listing.currentItem()
             if row and row.data(Qt.ItemDataRole.UserRole):
@@ -303,17 +380,34 @@ class WorldMap(QWidget):
                 self.select_event(identity)
                 self.event_selected.emit(identity)
                 dialog.close()
+
+        def search_global():
+            phrase = search.text().strip()
+            if not phrase:
+                count_label.setText(
+                    "Type a keyword such as FAA or ground stop first. "
+                    "Global archive search does not assume an incident location."
+                )
+                search.setFocus()
+                return
+            self.global_search_requested.emit(phrase)
+            dialog.close()
+
         open_button.clicked.connect(choose)
         listing.itemActivated.connect(choose)
+        global_button.clicked.connect(search_global)
         close_button.clicked.connect(dialog.close)
         controls.addWidget(open_button)
+        controls.addWidget(global_button)
         controls.addWidget(close_button)
         layout.addLayout(controls)
         self.country_dialog = dialog
         dialog.destroyed.connect(
-            lambda: setattr(self, "country_dialog", None) if self.country_dialog is dialog else None)
+            lambda: setattr(self, "country_dialog", None) if self.country_dialog is dialog else None
+        )
+        fill()
         dialog.show()
-        listing.setFocus()
+        search.setFocus()
         return True
 
     def set_crisis_layer(self, kind, enabled):
