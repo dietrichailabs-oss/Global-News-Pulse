@@ -1,0 +1,68 @@
+name: Issue22 GDELT Revised Checkpoint and Replication Freshness CI
+
+on:
+  push:
+    branches: [eng/issue22-gdelt-revision-freshness-reintegration-20261114]
+  pull_request:
+    branches: [eng/issue22-gdelt-revision-freshness-cooldown-20261114]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-nws-refusal-finite
+  cancel-in-progress: true
+
+jobs:
+  verify-gdelt-checkpoints:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Guard frozen PR54 ancestry and exactly four changed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor d48c9b5eac54291bc764f782bf03334563e4bf5f HEAD
+          git diff --name-only d48c9b5eac54291bc764f782bf03334563e4bf5f..HEAD | python -c "import sys; expected={'global_pulse/gdelt_batches.py','global_pulse/gdelt_schedule.py','tests/test_gdelt_poll.py','.github/workflows/issue22-gdelt-revision-freshness-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Compile
+        shell: bash
+        run: python -m compileall -q global_pulse
+      - name: GDELT HTTPX-SQLite-scheduler revision, lag, and existing parser regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_gdelt_poll.py tests/test_gdelt_schedule.py tests/test_gdelt_country_projection.py
+      - name: Clean tracked tree
+        if: always()
+        shell: bash
+        run: git diff --exit-code
