@@ -1177,10 +1177,12 @@ class MainWindow(SituationActions, QMainWindow):
     def closeEvent(self,event):
         if self._force_close or getattr(self.controller,"_closed",False):
             event.accept();return
-        self.save_layout()
         if self._close_handler and not self._force_close:
+            # Close-to-tray policy and one deferred settings save belong to
+            # bootstrap; avoid blocking the X click with duplicate SQLite IO.
             event.ignore();self._close_handler()
         else:
+            self.save_layout()
             if hasattr(self.media,"shutdown"):self.media.shutdown()
             event.accept()
 
