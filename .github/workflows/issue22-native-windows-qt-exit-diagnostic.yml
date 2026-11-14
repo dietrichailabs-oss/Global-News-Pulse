@@ -414,10 +414,23 @@ jobs:
           import atexit
           import os
           import sys
+          import threading
           # -m pytest adds cwd to sys.path; preserve the same project import
           # root even though this temporary diagnostic script lives in RUNNER_TEMP.
           sys.path.insert(0, os.getcwd())
           import pytest
+
+          # CPython calls threading._shutdown before registered atexit hooks.
+          # Observe this boundary WITHOUT skipping or altering the native
+          # destructor path, and do not print thread names, paths or user data.
+          original_thread_shutdown = threading._shutdown
+          def _traced_thread_shutdown():
+              print("NATIVE_PROBE_PHASE=threading_shutdown_enter", flush=True)
+              try:
+                  return original_thread_shutdown()
+              finally:
+                  print("NATIVE_PROBE_PHASE=threading_shutdown_exit", flush=True)
+          threading._shutdown = _traced_thread_shutdown
 
           @atexit.register
           def _last_phase():
@@ -426,6 +439,7 @@ jobs:
           print("NATIVE_PROBE_PHASE=before_pytest_main", flush=True)
           result = pytest.main(sys.argv[1:])
           print("NATIVE_PROBE_PHASE=after_pytest_main CODE=%s" % int(result), flush=True)
+          print("NATIVE_PROBE_PHASE=pre_exit THREAD_COUNT=%s" % len(threading.enumerate()), flush=True)
           raise SystemExit(int(result))
           '@
                 Set-Content -LiteralPath $phaseScriptPath -Value $phaseSource -Encoding utf8
