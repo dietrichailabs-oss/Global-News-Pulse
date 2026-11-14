@@ -43,6 +43,7 @@ class WorldMap(QWidget):
     event_selected = Signal(str)
     country_selected = Signal(str)
     global_search_requested = Signal(str)  # Search full archive; no geographic attribution implied
+    economic_country_requested = Signal(str)  # Country-only dated measurements -> Economy tab
     view_changed = Signal()
 
     def __init__(self, parent=None):
@@ -776,12 +777,21 @@ class WorldMap(QWidget):
                     self.select_event(group[0][0].get("id", ""))
                     self.event_selected.emit(str(group[0][0].get("id", "")))
                 return
-        for center, radius, country, _category, _descriptor in self._country_badge_hits:
+        for center, radius, country, category, _descriptor in self._country_badge_hits:
             if (center-pos).manhattanLength() <= radius*1.3:
                 self.selected_country = country
                 self.country_selected.emit(country)
                 self.update()
-                if self.country_evidence_for(country):
+                evidence = self.country_evidence_for(country)
+                # A circle based *only* on dated economic observations is
+                # actionable: navigate to the actual Economy data, not an
+                # empty country news dialog. Source-reported Economy events
+                # still open their original country evidence instead.
+                if (category == "Economy" and
+                        self.economic_observations.get(normalize_country(country)) and
+                        not evidence.get("categories", {}).get("Economy")):
+                    self.economic_country_requested.emit(country)
+                elif evidence:
                     self.show_country_evidence(country)
                 return
         area_hit = self.area_layer.hit(pos)
