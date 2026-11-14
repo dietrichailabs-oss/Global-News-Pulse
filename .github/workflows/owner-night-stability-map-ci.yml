@@ -2,7 +2,7 @@ name: Owner Night Stability and Multi-Category Map CI
 
 on:
   push:
-    branches: [eng/owner-night-stable-map-categories-20261113, eng/owner-night-economy-badge-navigation-20261113]
+    branches: [eng/owner-night-stable-map-categories-20261113, eng/owner-night-economy-badge-navigation-20261113, eng/owner-night-current-conflict-category-circles-20261113]
   workflow_dispatch:
 
 permissions:
