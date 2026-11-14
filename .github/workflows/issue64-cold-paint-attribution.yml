@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q -s --tb=short tests/test_issue64_cold_paint_attribution.py
+          # Separate fresh Python interpreters avoid warming langdetect from 180 rows\n          # before measuring 820-row cold startup. These are ONLY diagnostic tests,\n          # not the mandatory full native Windows package suite.\n          python -m pytest -q -s --tb=short tests/test_issue64_cold_paint_attribution.py -k 180\n          python -m pytest -q -s --tb=short tests/test_issue64_cold_paint_attribution.py -k 820
       - name: No tracked file mutations
         if: always()
         shell: bash
