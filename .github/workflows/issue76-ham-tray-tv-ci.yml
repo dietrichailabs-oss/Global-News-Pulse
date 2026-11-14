@@ -1,0 +1,67 @@
+name: Issue76 Owner HAM / TV / Tray / Tab Responsiveness CI
+
+on:
+  push:
+    branches: [eng/issue76-tv-tray-tab-smoothness-20261114]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue76-ham-tray-tv
+  cancel-in-progress: true
+
+jobs:
+  focused-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Confirm frozen PR74 parent and nine-path scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 303b75aaa11e9c5c7f04d859bec0306957a718dd HEAD
+          git diff --name-only 303b75aaa11e9c5c7f04d859bec0306957a718dd..HEAD | python -c "import sys; expected={'global_pulse/internet_radio.py','global_pulse/single_media.py','global_pulse/resources/media_catalog.json','global_pulse/__main__.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue31_tv_basic_player.py','tests/test_issue76_ham_tv_tray_tabs.py','.github/workflows/issue76-ham-tray-tv-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Syntax and source compile
+        shell: bash
+        run: python -m compileall -q global_pulse tests/test_issue76_ham_tv_tray_tabs.py
+      - name: Owner-specific player, HAM, notification, tab and legacy tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue31_tv_basic_player.py tests/test_issue37_country_owner_video.py tests/test_issue21_sdr_owner_controls.py tests/test_issue22_owner_media_lineup.py tests/test_issue22_situation_stars.py tests/test_issue74_row_lifetime.py tests/test_ui_desktop.py
+      - name: Check tracked product cleanliness
+        if: always()
+        shell: bash
+        run: git diff --exit-code
