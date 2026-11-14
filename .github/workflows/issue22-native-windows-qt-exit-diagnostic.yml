@@ -1,0 +1,117 @@
+name: Issue22 Native Windows Qt Exit Diagnosis (No Package)
+
+on:
+  push:
+    branches:
+      - eng/issue22-native-windows-qt-exit-diagnostic-20261114
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-native-windows-exit-diag
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PIP_NO_INPUT: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTHONFAULTHANDLER: '1'
+      QT_QPA_PLATFORM: windows
+      PYTEST_ADDOPTS: >-
+        --ignore=tests/test_qa_correction_policy.py
+        --deselect=tests/test_e2_workstation_layout.py::test_default_404020_composition_and_stacked_sidebar
+        --deselect=tests/test_e2_workstation_layout.py::test_four_tiles_do_not_autoconnect_and_stop_on_replacement
+        --deselect=tests/test_e2_workstation_layout.py::test_category_controls_keep_original_links_and_honest_empty_states
+        --deselect=tests/test_gate_d_local_cleanup.py::test_cleanup_controls_are_present_in_ui_sources
+        --deselect=tests/test_map_evidence_geometry.py::test_point_budget_rejected_before_constructing_large_paths
+        --deselect=tests/test_nws_geometry_capacity.py::test_captured_shape_is_exact_and_all_coordinates_survive
+        --deselect=tests/test_nws_geometry_capacity.py::test_normalization_resource_measurement_is_bounded
+        --deselect=tests/test_nws_geometry_capacity.py::test_actual_capture_resolver_store_restart_map_pipeline
+        --deselect=tests/test_nws_geometry_capacity_qt.py::test_actual_captured_shape_paints_with_unchanged_total_budget
+        --deselect=tests/test_official_feed_batch.py::test_integrated_catalog_adds_only_completed_live_passes
+        --deselect=tests/test_official_feed_batch2.py::test_batch2_frozen_catalog_preserves_baseline_and_appends_exact_candidates_once
+        --deselect=tests/test_gdelt_named_schema.py::test_prior_parent_is_correct_and_rejected_parser_reproduces_real_schema_failure
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_catalog_is_exact_41_plus_two
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_receipts_match_original_completed_job_identity
+        --ignore=tests/test_official_feed_receipt_recovery.py
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify unchanged product and exact failed parent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parent = (git rev-parse HEAD^).Trim()
+          if ($parent -ne '205e5fec6239443e0feb020eced3b8ea8399672f') { throw "Diagnostic must be one commit after exact failed PR48 head; observed $parent" }
+          $changed = @(git diff --name-only '205e5fec6239443e0feb020eced3b8ea8399672f..HEAD')
+          if ($changed.Count -ne 1 -or $changed[0] -ne '.github/workflows/issue22-native-windows-qt-exit-diagnostic.yml') { throw "Unapproved product or tests change: $($changed -join ', ')" }
+          Write-Host 'FAILED_NATIVE_SOURCE=205e5fec6239443e0feb020eced3b8ea8399672f'
+          Write-Host 'Only isolated diagnostic workflow changed; original package workflow is untouched.'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Create identical locked Python environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m venv build/venv-exit-diag
+          if ($LASTEXITCODE -ne 0) { throw 'venv failed' }
+          $py = 'build/venv-exit-diag/Scripts/python.exe'
+          & $py -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          if ($LASTEXITCODE -ne 0) { throw 'bootstrap lock failed' }
+          & $py -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+          if ($LASTEXITCODE -ne 0) { throw 'build lock failed' }
+          & $py -m pip install --no-deps --no-build-isolation --no-index .
+          if ($LASTEXITCODE -ne 0) { throw 'source install failed' }
+          & $py -m pip check
+          if ($LASTEXITCODE -ne 0) { throw 'dependency check failed' }
+      - name: Isolate native Qt failure by separate fresh Python processes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $py = 'build/venv-exit-diag/Scripts/python.exe'
+          $files = @(Get-ChildItem -LiteralPath tests -Filter 'test_*.py' -File | Sort-Object Name | ForEach-Object { 'tests/' + $_.Name })
+          if ($files.Count -lt 4) { throw 'Too few files for diagnostic partition' }
+          $even = @()
+          $odd = @()
+          for ($i = 0; $i -lt $files.Count; $i++) {
+            if (($i % 2) -eq 0) { $even += $files[$i] } else { $odd += $files[$i] }
+          }
+          $results = @()
+          foreach ($group in @(@{ Name='even'; Files=$even }, @{ Name='odd'; Files=$odd })) {
+            Write-Host "BEGIN_NATIVE_WINDOWS_GROUP=$($group.Name) MODULE_COUNT=$($group.Files.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-$($group.Name).xml" @($group.Files)
+            $code = $LASTEXITCODE
+            Write-Host "NATIVE_WINDOWS_GROUP=$($group.Name) RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{ group=$group.Name; module_count=$group.Files.Count; native_exit=$code }
+          }
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -eq 0) {
+            Write-Host 'Both module partitions exited 0; testing original full-suite ordering under real Windows Qt backend.'
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-full.xml
+            $code = $LASTEXITCODE
+            Write-Host "NATIVE_WINDOWS_GROUP=full RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{ group='full'; module_count=$files.Count; native_exit=$code }
+          } else {
+            Write-Host 'A partition has reproduced the failure. Full re-run suppressed to avoid redundant CPU time.'
+          }
+          $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
+          $results | Format-Table | Out-String | Write-Host
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) { throw 'Native Windows Qt exit failure reproduced. No package and no acceptance.' }
+          Write-Host 'Diagnostic segments exited zero; not acceptance of the original failed PR48 package.'
+      - name: Upload diagnostic-only records (no executable)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue22-native-qt-exit-diagnostic
+          path: |
+            native-exit-results.json
+            native-exit-*.xml
+          if-no-files-found: warn
+          retention-days: 3
