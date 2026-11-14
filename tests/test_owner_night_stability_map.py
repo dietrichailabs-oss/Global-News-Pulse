@@ -130,6 +130,23 @@ def test_dated_economic_observation_has_country_circle_not_crisis(map_widget):
     assert not map_widget.country_activity
 
 
+
+def test_observation_only_economy_badge_opens_dated_data_not_empty_country_dialog(map_widget, app):
+    map_widget.set_events([], country_events=[], observations=[{
+        "country_name": "United States of America", "country_code": "USA",
+        "indicator_name": "GDP growth", "observation_date": "2025", "value": 1.0,
+    }])
+    _render(map_widget)
+    economic = [hit for hit in map_widget._country_badge_hits if hit[3] == "Economy"]
+    assert len(economic) == 1
+    selected = []
+    map_widget.economic_country_requested.connect(selected.append)
+    point = QPoint(round(economic[0][0].x()), round(economic[0][0].y()))
+    QTest.mouseClick(map_widget, Qt.MouseButton.LeftButton, pos=point)
+    app.processEvents()
+    assert selected == ["United States of America"]
+    assert map_widget.country_dialog is None
+
 def test_official_pin_is_double_circular_ring_never_square_frame():
     method=inspect.getsource(WorldMap.paintEvent)
     assert "if verification == \"official\"" in method
