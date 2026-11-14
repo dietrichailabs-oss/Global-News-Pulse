@@ -56,6 +56,45 @@ jobs:
       - name: Compile unchanged product
         shell: bash
         run: python -m compileall -q global_pulse
+      - name: Paired 5k-point hover repaint timings (informational, no threshold)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach ../issue58-before 9346c3e90b9542308d61aa15a9783cf74380a197
+          for label in before after; do
+            if [ "$label" = before ]; then workdir=../issue58-before; else workdir="$PWD"; fi
+            (
+              cd "$workdir"
+              python - "$label" <<'PY'
+          import os, sys, time, statistics
+          os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+          from PySide6.QtWidgets import QApplication
+          from global_pulse.map_widget import WorldMap
+          label=sys.argv[1]
+          app=QApplication.instance() or QApplication([])
+          world=WorldMap()
+          world.resize(1600,760)
+          world.show()
+          world.events=[{"id":str(i),"longitude":-170+(i%34)*9.7,
+                         "latitude":-45+(i%17)*6.4, "category":"Government",
+                         "severity":"moderate","verification":"unverified"}
+                        for i in range(5000)]
+          for _ in range(3):
+              world.grab()
+          durations=[]
+          for i in range(60):
+              world._hover_country = ("Canada" if i%2 else "France")
+              start=time.perf_counter()
+              world.grab()
+              durations.append((time.perf_counter()-start)*1000)
+          print("PAIRED_QA_RENDER_%s P50_MS=%.3f MAX_MS=%.3f" %
+                (label,statistics.median(durations),max(durations)),flush=True)
+          world.close()
+          del world
+          PY
+            )
+          done
+          git worktree remove --force ../issue58-before
       - name: QA-only map stress with geometry / provenance suites
         shell: bash
         run: |
