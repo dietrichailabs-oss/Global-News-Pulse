@@ -333,3 +333,119 @@ def test_master_tail_range_body_mismatch_cannot_admit_older_fallback(tmp_path, m
             assert cache.status()["cached_rows"] == 0
             assert len([url for url in calls if url.endswith("masterfilelist.txt")]) == 1
             assert not any(url.endswith(f"{earlier}.export.CSV.zip") for url in calls)
+
+def test_gdelt_http_200_declared_length_mismatch_never_imports_or_updates_checkpoint(tmp_path):
+    """Manifest and archive short/long framing cannot become durable evidence.
+
+    An honest retry of the *same* published source after transport repair must
+    recover normally. This covers HTTP transport -> parser -> SQLite, not merely
+    a standalone size helper or an HTTP 200 receipt.
+    """
+    from global_pulse.gdelt_schedule import Schedule, INTERVAL
+
+    raw = archive_for(STAMP)
+    manifest = manifest_for(STAMP, raw)
+    for phase in ("manifest", "archive"):
+        for offset in (-1, 1):
+            calls = []
+            broken = {"value": True}
+
+            def handler(request):
+                url = str(request.url)
+                calls.append(url)
+                is_manifest = url.endswith("lastupdate.txt")
+                body = manifest if is_manifest else raw
+                if broken["value"] and (phase == "manifest") == is_manifest:
+                    return httpx.Response(
+                        200, content=body,
+                        headers={"Content-Length": str(len(body) + offset)},
+                    )
+                return httpx.Response(200, content=body)
+
+            database = tmp_path / f"gdelt-framing-{phase}-{offset}.sqlite3"
+            with GdeltBatchCache(database) as cache, make_client(handler) as client:
+                scheduler = Schedule(database)
+                moment = 1794409200
+                token = scheduler.claim(now=moment, jitter=0)
+                assert token
+                failed = poll_latest_export(cache, client=client)
+                assert failed["status"] == "error" and not failed["downloaded"]
+                assert "Content-Length body length mismatch" in failed["error"]
+                assert scheduler.finish(token, failed, now=moment)
+                assert Schedule(database).status()["state"] == "error"
+                assert cache.status()["cached_rows"] == 0
+                if phase == "manifest":
+                    assert len(calls) == 1  # No untrusted archive request.
+                else:
+                    assert len(calls) == 2
+                    assert cache.status()["latest_batch"]["status"] == "error"
+
+                broken["value"] = False
+                token = Schedule(database).claim(now=moment + INTERVAL, jitter=0)
+                assert token
+                repaired = poll_latest_export(cache, client=client)
+                assert repaired["status"] == "complete" and repaired["added"] == 1
+                assert Schedule(database).finish(token, repaired, now=moment + INTERVAL)
+                assert Schedule(database).status()["state"] == "current"
+                assert cache.status()["cached_rows"] == 1
+                assert not any("example.org" in url for url in calls)
+
+
+def test_gdelt_bounded_http_200_with_no_content_length_remains_supported(tmp_path):
+    """Streaming no-length responses remain eligible within the existing cap."""
+    archive = archive_for(STAMP)
+    manifest = manifest_for(STAMP, archive)
+
+    def handler(request):
+        body = manifest if str(request.url).endswith("lastupdate.txt") else archive
+        return httpx.Response(200, stream=httpx.ByteStream(body))
+
+    with GdeltBatchCache(tmp_path / "no-length.sqlite3") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "complete"
+        assert cache.status()["cached_rows"] == 1
+
+
+def test_master_tail_rejects_mismatching_declared_length_even_with_complete_range(tmp_path, monkeypatch):
+    """Conflicting transfer headers cannot promote checksum-backed fallbacks."""
+    earlier = "20261111074500"
+    previous_archive = archive_for(earlier)
+    latest_archive = archive_for(STAMP)
+    tail = b"partial-first-row\n" + manifest_for(earlier, previous_archive)
+    calls = []
+    broken = {"value": True}
+    monkeypatch.setattr("global_pulse.gdelt_poll.time.sleep", lambda _seconds: None)
+
+    def handler(request):
+        url = str(request.url)
+        calls.append(url)
+        if url.endswith("lastupdate.txt"):
+            return httpx.Response(200, content=manifest_for(STAMP, latest_archive))
+        if url.endswith(f"{STAMP}.export.CSV.zip"):
+            return httpx.Response(404)
+        if url.endswith("masterfilelist.txt"):
+            start = 100000
+            return httpx.Response(206, content=tail, headers={
+                "Content-Range": f"bytes {start}-{start + len(tail) - 1}/9999999",
+                "Content-Length": str(len(tail) + (1 if broken["value"] else 0)),
+            })
+        if url.endswith(f"{earlier}.export.CSV.zip") and not broken["value"]:
+            return httpx.Response(200, content=previous_archive)
+        raise AssertionError(f"Unapproved fallback request: {url}")
+
+    with GdeltBatchCache(tmp_path / "master-length.sqlite3") as cache, make_client(handler) as client:
+        result = poll_latest_export(cache, client=client)
+        assert result["status"] == "error" and not result["downloaded"]
+        assert "master-list Content-Length body length mismatch" in result["error"]
+        assert cache.status()["cached_rows"] == 0
+        assert len(calls) == 5  # Manifest, 3 same-URL 404 attempts, 1 tail.
+        # A later honest transfer of exactly the same official tail can still
+        # recover a checksum-backed earlier batch. This positive control makes
+        # the integrity test depend on HTTP framing, not malformed fixture text.
+        broken["value"] = False
+        repaired = poll_latest_export(cache, client=client)
+        assert repaired["status"] == "complete" and repaired["added"] == 1
+        assert repaired["recovered_from_master_list"] is True
+        assert repaired["replication_pending"] is True
+        assert cache.status()["cached_rows"] == 1
+        assert not any("example.org" in url for url in calls)
