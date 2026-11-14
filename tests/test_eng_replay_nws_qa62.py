@@ -210,18 +210,32 @@ def test_negative_zone_cache_expires_and_can_recover():
     assert len(seen) == 2 and third[0]["area_geometry_basis"] == "nws_affected_zones"
 
 
-def test_expired_and_future_report_never_lookup_geo_even_if_zone_valid():
+def test_expired_bulletin_ongoing_hazard_retains_official_area_but_not_ended_future_cancelled():
+    """The original bulletin expires before a separately dated hazard ends.
+
+    Geometry is historical evidence only: Store lifecycle still marks that
+    expired bulletin expired, as tested by test_nws_zone_resolution. A warning
+    whose hazard also ended, a future report or cancellation must not fetch.
+    """
     z, _ = resolver()
-    factory, seen = factory_for(lambda req: pytest.fail("Must not contact expired or future alert"))
+    factory, seen = factory_for(
+        lambda req: httpx.Response(200, json=zone_feature(), request=req)
+    )
     result, stats = z.enrich(
         [
             report(expires_at="2026-11-11T08:30:00Z"),
+            report(expires_at="2026-11-11T08:30:00Z",
+                   ends_at="2026-11-11T08:30:00Z"),
             report(published_at="2026-11-11T11:00:00Z"),
             report(cap_message_type="Cancel"),
         ], client_factory=factory
     )
-    assert not seen and stats["requests"] == 0
-    assert all("area_geometry" not in r for r in result)
+    assert seen == [ZONE] and stats["requests"] == 1
+    assert result[0]["area_geometry_basis"] == "nws_affected_zones"
+    assert result[0]["area_zone_sources"][0]["url"] == ZONE
+    assert result[0]["expires_at"] == "2026-11-11T08:30:00Z"
+    assert result[0]["ends_at"] == "2026-11-11T14:00:00Z"
+    assert all("area_geometry" not in row for row in result[1:])
 
 
 def test_existing_real_alert_shape_skips_zone_lookup_without_rewriting_end():
