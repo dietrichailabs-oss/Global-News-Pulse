@@ -3,6 +3,8 @@ name: Issue22 GDELT Master Tail Integrity Reintegration CI
 on:
   push:
     branches: [eng/issue22-gdelt-master-tail-reintegration-20261114]
+  pull_request:
+    branches: [eng/issue22-origin-contract-canonical-full-package-20261114]
 
 permissions:
   contents: read
