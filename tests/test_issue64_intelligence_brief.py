@@ -78,7 +78,7 @@ def test_world_overview_writes_source_coverage_not_verified_global_claims():
     assert "World intelligence overview" in page
     assert "Unverified reports are not independently confirmed" in page
     assert "pulse-event://open/brief-fixture-201" in page
-    assert "no conflict" not in page.lower()
+    assert "not that no conflict, disease, or emergency exists" in page.lower()
 
 
 def test_unknown_and_missing_sections_are_coverage_gaps_not_no_crisis_claims():
