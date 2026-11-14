@@ -46,7 +46,7 @@ def test_economy_only_country_circle_navigates_real_economy_filter(desktop, qtap
     controller.store.put_observations([{
         "source_id": "world_bank", "indicator": "GDP growth",
         "country": "United States of America", "observation_date": "2025",
-        "value": 1.0, "unit": "percent",
+        "value": 1.0, "unit": "percent", "synthetic": True,
         "release_date": "2026-01-01",
         "retrieved_at": "2026-11-13T20:00:00Z",
         "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG",
