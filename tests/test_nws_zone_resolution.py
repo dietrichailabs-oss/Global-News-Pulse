@@ -178,7 +178,7 @@ def test_expired_bulletin_with_future_hazard_end_retains_official_area_without_r
     assert reports[0]['expires_at']=='2026-11-11T08:30:00Z'
     assert reports[0]['ends_at']=='2026-11-11T14:00:00Z'
     assert reports[0]['area_geometry_basis']=='nws_affected_zones'
-    assert not any(key in reports[0] for key in ('latitude','longitude'))
+    assert reports[0].get('latitude') is None and reports[0].get('longitude') is None
     path=tmp_path/'expired_offshore.sqlite3'
     store=Store(path,mode='live')
     try: store.ingest(reports,now='2026-11-11T09:00:00Z')
