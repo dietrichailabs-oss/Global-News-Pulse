@@ -597,7 +597,7 @@ class WorldMap(QWidget):
             kinds = sorted(category_counts,
                            key=lambda cat: (_CATEGORY_PRIORITY.index(cat)
                                if cat in _CATEGORY_PRIORITY else len(_CATEGORY_PRIORITY),
-                               cat))[:6]
+                               cat))[:8]
             count = len(kinds)
             # A marker below the geographic label denotes the country, not a
             # purported incident at the label coordinate.
