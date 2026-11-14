@@ -440,6 +440,20 @@ jobs:
           result = pytest.main(sys.argv[1:])
           print("NATIVE_PROBE_PHASE=after_pytest_main CODE=%s" % int(result), flush=True)
           print("NATIVE_PROBE_PHASE=pre_exit THREAD_COUNT=%s" % len(threading.enumerate()), flush=True)
+          # Read-only QObject lifetime inventory; no widget close, Python GC
+          # overrides, resource teardown or profiler-induced source mutations.
+          # The only identifier exported is the number of Qt top-level windows.
+          try:
+              from PySide6.QtWidgets import QApplication
+              qtapp = QApplication.instance()
+              print("NATIVE_PROBE_PHASE=qt_app_present VALUE=%s" % bool(qtapp), flush=True)
+              if qtapp is not None:
+                  top = qtapp.topLevelWidgets()
+                  print("NATIVE_PROBE_PHASE=qt_toplevel_count VALUE=%s" % len(top), flush=True)
+                  print("NATIVE_PROBE_PHASE=qt_visible_toplevel_count VALUE=%s" %
+                        sum(1 for widget in top if widget.isVisible()), flush=True)
+          except Exception:
+              print("NATIVE_PROBE_PHASE=qt_inventory_unavailable", flush=True)
           raise SystemExit(int(result))
           '@
                 Set-Content -LiteralPath $phaseScriptPath -Value $phaseSource -Encoding utf8
@@ -447,7 +461,7 @@ jobs:
                 # Finite diagnostic-only replays, stop on the first nonzero
                 # raw native process exit; never interpret a phase marker or a
                 # pytest assertion summary as full package/installer success.
-                for ($monitoredAttempt = 1; $monitoredAttempt -le 3; $monitoredAttempt++) {
+                for ($monitoredAttempt = 1; $monitoredAttempt -le 6; $monitoredAttempt++) {
                   Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
                   & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
                     $line = [string]$_
