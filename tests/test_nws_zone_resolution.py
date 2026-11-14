@@ -5,7 +5,7 @@ from datetime import datetime,timezone
 import socket
 import httpx
 import pytest
-from global_pulse.nws_zone_resolver import ZoneResolver,MAX_REQUESTS,MAX_CACHE_ENTRIES
+from global_pulse.nws_zone_resolver import ZoneResolver,MAX_REQUESTS,MAX_CACHE_ENTRIES,MAX_REFUSAL_COOLDOWN_SECONDS
 from global_pulse.map_evidence import normalize_map_fields,event_areas,wrapped_polygons
 from global_pulse.sources import Collector,load_catalog
 from global_pulse.core import Store
@@ -106,6 +106,32 @@ def test_provider_refusal_cools_whole_zone_origin(status):
     r.enrich([report([OTHER])],client_factory=factory)
     assert len(calls)==1 and 'area_geometry' not in out[0]
     if status==429:assert r.blocked_until>=7200
+
+
+@pytest.mark.parametrize('status,retry_after',[
+    (429, '999999999999999999999999999999999999999999'),
+    (503, 'Fri, 01 Jan 2099 00:00:00 GMT'),
+    (429, '86401'),
+])
+def test_official_zone_refusal_retry_after_is_finite_and_recovery_is_possible(status,retry_after):
+    r,clock=resolver()
+    def handler(req):
+        if str(req.url)==ZONE:
+            return httpx.Response(status,headers={'Retry-After':retry_after},request=req)
+        return httpx.Response(200,json=zone_payload(str(req.url)),request=req)
+    factory,calls=transport(handler)
+    rejected,stats=r.enrich([report([ZONE,OTHER])],client_factory=factory)
+    assert stats['provider_refusals']==1 and len(calls)==1
+    assert 'area_geometry' not in rejected[0]
+    assert r.blocked_until==MAX_REFUSAL_COOLDOWN_SECONDS
+    clock.value=MAX_REFUSAL_COOLDOWN_SECONDS-1
+    r.enrich([report([OTHER])],client_factory=factory)
+    assert len(calls)==1  # No traffic before the bounded cooldown ends.
+    clock.value=MAX_REFUSAL_COOLDOWN_SECONDS+1
+    recovered,stats=r.enrich([report([OTHER])],client_factory=factory)
+    assert len(calls)==2 and stats['resolved_alerts']==1
+    assert recovered[0]['area_geometry_basis']=='nws_affected_zones'
+    assert recovered[0]['area_zone_sources'][0]['url']==OTHER
 
 @pytest.mark.parametrize('kind',['redirect','wrong_id','missing_geometry','oversize','malformed'])
 def test_failed_zone_keeps_alert_and_does_not_retry_loop(kind):

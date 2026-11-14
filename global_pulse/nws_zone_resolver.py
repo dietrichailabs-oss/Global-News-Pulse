@@ -16,6 +16,7 @@ import httpx
 from .map_evidence import normalize_geometry, valid_nws_zone, MAX_ZONE_REFS
 
 MAX_REQUESTS = 8
+MAX_REFUSAL_COOLDOWN_SECONDS = 24 * 3600  # deny/retry must remain finite
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CACHE_BYTES = 4 * 1024 * 1024
 MAX_CACHE_ENTRIES = 128
@@ -47,13 +48,15 @@ def _eligible(report, now):
 
 
 def _retry_seconds(value, now):
+    # Honor Retry-After up to a finite 24h circuit-breaker; do not permanently
+    # disable official affected-zone lookups for huge dates or integer values.
     if isinstance(value,str):
         if value.isascii() and value.isdigit():
             # An unrepresentably large delay is a refusal, not a shorter retry.
-            return float('inf') if len(value)>12 else float(value)
+            return MAX_REFUSAL_COOLDOWN_SECONDS if len(value)>12 else min(float(value), MAX_REFUSAL_COOLDOWN_SECONDS)
         try:
             dt=parsedate_to_datetime(value)
-            if dt.tzinfo is not None:return max(0,(dt-now).total_seconds())
+            if dt.tzinfo is not None:return min(MAX_REFUSAL_COOLDOWN_SECONDS, max(0,(dt-now).total_seconds()))
         except (ValueError,TypeError,OverflowError):pass
     return 0.0
 
