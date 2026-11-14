@@ -330,9 +330,12 @@ jobs:
               printf("NATIVE_PROBE_LAUNCH_ERROR=%lu\n", GetLastError());
               return 2;
             }
-            // Load only installed native symbol metadata; no remote symbol lookup.
-            bool symReady = SymInitialize(child.hProcess, nullptr, TRUE) != FALSE;
-            printf("NATIVE_PROBE_SYM_INIT=%u\n", symReady ? 1U : 0U);
+            // Delay DbgHelp initialization until the loader's initial breakpoint:
+            // immediately after CreateProcess the target loader is not ready.
+            bool symReady = false;
+            bool symbolInitAttempted = false;
+            unsigned long exceptionEventCount = 0;
+            unsigned long crashCodeEventCount = 0;
             bool exited = false;
             DWORD childExit = STILL_ACTIVE;
             DWORD startTime = GetTickCount();
@@ -343,13 +346,22 @@ jobs:
               if (evt.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
                 const auto& exc = evt.u.Exception;
                 DWORD code = exc.ExceptionRecord.ExceptionCode;
+                ++exceptionEventCount;
                 if (code == 0x80000003UL || code == 0x80000004UL) {
                   continuation = DBG_CONTINUE; // debugger's initial breakpoint/step
+                  if (!symbolInitAttempted && code == 0x80000003UL) {
+                    symbolInitAttempted = true;
+                    SetLastError(0);
+                    symReady = SymInitialize(child.hProcess, nullptr, TRUE) != FALSE;
+                    printf("NATIVE_PROBE_SYM_INIT=%u LAST_ERROR=%lu\n",
+                           symReady ? 1U : 0U, symReady ? 0UL : GetLastError());
+                  }
                 } else {
                   continuation = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 if (code == 0xC0000005UL || code == 0xC0000409UL ||
                     code == 0x40000015UL || code == 0xC000001DUL) {
+                  ++crashCodeEventCount;
                   std::string module = owner_module(evt.dwProcessId, exc.ExceptionRecord.ExceptionAddress);
                   printf("NATIVE_PROBE_EXCEPTION=0x%08lX CHANCE=%u MODULE=%s\n",
                          code, exc.dwFirstChance ? 1U : 2U, module.c_str());
@@ -376,6 +388,8 @@ jobs:
               WaitForSingleObject(child.hProcess, 3000);
               GetExitCodeProcess(child.hProcess, &childExit);
             }
+            printf("NATIVE_PROBE_EVENT_COUNTS=all:%lu crash_codes:%lu\n",
+                   exceptionEventCount, crashCodeEventCount);
             printf("NATIVE_PROBE_EXIT=0x%08lX COMPLETED=%u\n", childExit, exited ? 1U : 0U);
             if (symReady) SymCleanup(child.hProcess);
             CloseHandle(child.hThread);
@@ -399,7 +413,7 @@ jobs:
                   Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
                   & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
                     $line = [string]$_
-                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT)=') {
+                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT|EVENT_COUNTS)=') {
                       $nativeProbeTokens += "ATTEMPT=$monitoredAttempt $line"
                       Write-Host $line
                     }
