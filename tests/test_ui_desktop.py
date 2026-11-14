@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import pytest
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.controller import Controller
@@ -38,6 +39,30 @@ def load_scenario(controller):
     controller.data_changed.emit()
     return controller.events()[0]
 
+
+
+def test_economy_only_country_circle_navigates_real_economy_filter(desktop, qtapp):
+    window, controller = desktop
+    controller.store.put_observations([{
+        "source_id": "world_bank", "indicator": "GDP growth",
+        "country": "United States of America", "observation_date": "2025",
+        "value": 1.0, "unit": "percent",
+        "release_date": "2026-01-01",
+        "retrieved_at": "2026-11-13T20:00:00Z",
+        "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG",
+    }])
+    window.world_map.set_events([], country_events=[],
+                                observations=controller.store.list_observations())
+    window.world_map.grab()
+    hits = [hit for hit in window.world_map._country_badge_hits
+            if hit[2] == "United States of America" and hit[3] == "Economy"]
+    assert len(hits) == 1
+    point = hits[0][0].toPoint()
+    QTest.mouseClick(window.world_map, Qt.MouseButton.LeftButton, pos=point)
+    qtapp.processEvents()
+    assert window.pages.currentIndex() == 2
+    assert window.economy_country.currentText() == "United States of America"
+    assert "dated sourced observations" in window.status_label.text()
 
 def test_real_empty_archive_has_no_simulated_events(desktop, qtapp):
     window,controller=desktop
