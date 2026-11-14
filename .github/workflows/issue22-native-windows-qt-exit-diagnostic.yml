@@ -85,10 +85,10 @@ jobs:
           for ($i = 0; $i -lt $files.Count; $i++) {
             if (($i % 2) -eq 0) { $even += $files[$i] } else { $odd += $files[$i] }
           }
-          # Prior attempt 3: 804/804 tests in the even 58-module cohort passed,
-          # then the native process crashed at interpreter exit (0xC0000005).
-          # Odd 58-module cohort exited 0. Split only the implicated even cohort
-          # to distinguish a smaller teardown trigger from cross-module interaction.
+          # Attempt 4: even-a of the 58-module cohort reproduced native shutdown
+          # access violation after 415 passing assertions; even-b exited zero
+          # after 389 passing assertions. Bisect only implicated even-a (29 modules)
+          # without repeating the previously successful odd and even-b cohorts.
           $evenA = @()
           $evenB = @()
           for ($i = 0; $i -lt $even.Count; $i++) {
@@ -97,8 +97,16 @@ jobs:
           if (($evenA.Count + $evenB.Count) -ne $even.Count -or $evenA.Count -eq 0 -or $evenB.Count -eq 0) {
             throw 'Incorrect disjoint even-cohort partition'
           }
+          $focusA = @()
+          $focusB = @()
+          for ($i = 0; $i -lt $evenA.Count; $i++) {
+            if (($i % 2) -eq 0) { $focusA += $evenA[$i] } else { $focusB += $evenA[$i] }
+          }
+          if (($focusA.Count + $focusB.Count) -ne $evenA.Count -or $focusA.Count -eq 0 -or $focusB.Count -eq 0) {
+            throw 'Incorrect implicated cohort partition'
+          }
           $results = @()
-          foreach ($group in @(@{ Name='even-a'; Files=$evenA }, @{ Name='even-b'; Files=$evenB })) {
+          foreach ($group in @(@{ Name='even-a1'; Files=$focusA }, @{ Name='even-a2'; Files=$focusB })) {
             Write-Host "BEGIN_NATIVE_WINDOWS_GROUP=$($group.Name) MODULE_COUNT=$($group.Files.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
             Write-Host "GROUP_FILES=$($group.Files -join ';')"
             & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-$($group.Name).xml" @($group.Files)
@@ -107,11 +115,11 @@ jobs:
             $results += [pscustomobject]@{ group=$group.Name; module_count=$group.Files.Count; native_exit=$code }
           }
           if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -eq 0) {
-            Write-Host 'Both 29-module subcohorts exited zero; verifying 58-module even cohort interaction under original order.'
-            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-even-combined.xml @($even)
+            Write-Host 'Both smaller subcohorts exited zero; verifying 29-module even-a cohort interaction under original order.'
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 --junitxml=native-exit-even-a-combined.xml @($evenA)
             $code = $LASTEXITCODE
-            Write-Host "NATIVE_WINDOWS_GROUP=even-combined RAW_PROCESS_EXIT=$code"
-            $results += [pscustomobject]@{ group='even-combined'; module_count=$even.Count; native_exit=$code }
+            Write-Host "NATIVE_WINDOWS_GROUP=even-a-combined RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{ group='even-a-combined'; module_count=$evenA.Count; native_exit=$code }
           } else {
             Write-Host 'A smaller cohort reproduced a failure; skip larger replay to preserve diagnostic isolation.'
           }
