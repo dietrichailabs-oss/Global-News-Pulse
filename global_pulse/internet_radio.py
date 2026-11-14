@@ -326,9 +326,6 @@ class RadioPanel(QWidget):
         self.receiver_connect.clicked.connect(self.connect_receiver)
         self.receiver_connect.setEnabled(False)
         self.receiver_url.textChanged.connect(self._receiver_url_changed)
-        self.receiver_type.currentIndexChanged.connect(
-            lambda _index: self._receiver_url_changed(self.receiver_url.text())
-        )
         self.receiver_off=QPushButton("Receiver Off")
         self.receiver_off.setAccessibleName("Disconnect in-app public SDR receiver")
         self.receiver_off.clicked.connect(self.disconnect_receiver)
@@ -379,6 +376,9 @@ class RadioPanel(QWidget):
         self.receiver_type.addItem("KiwiSDR","kiwi")
         self.receiver_type.addItem("WebSDR","websdr")
         self.receiver_type.setAccessibleName("SDR receiver type")
+        self.receiver_type.currentIndexChanged.connect(
+            lambda _index: self._receiver_url_changed(self.receiver_url.text())
+        )
         self.frequency=QLineEdit("7100")
         self.frequency.setPlaceholderText("Frequency kHz")
         self.frequency.setAccessibleName("SDR frequency in kilohertz")
