@@ -118,6 +118,18 @@ def balanced_brief_sections(events, *, per_domain=3, max_total=30,
     return selected
 
 
+def _source_time_label(report, event):
+    """Never mislabel a retrieved/updated timestamp as publication time."""
+    if report.get("publication_time_known") is not False and report.get("published_at"):
+        return "source published " + escape(str(report["published_at"])[:19])
+    fetched = report.get("first_retrieved_at") or report.get("retrieved_at")
+    if fetched:
+        return "first retrieved " + escape(str(fetched)[:19]) + " (publication unknown)"
+    changed = event.get("updated_at")
+    return ("record updated " + escape(str(changed)[:19]) +
+            " (publication unknown)") if changed else "source publication unknown"
+
+
 def overview_html(events, *, label="visible local feed"):
     """Compact HTML for a read-only sidebar, with local event detail links."""
     limited = list(events)[:1000]
@@ -152,13 +164,14 @@ def overview_html(events, *, label="visible local feed"):
                                    item.get("publisher") or "Publisher unlisted")[:65])
             status = escape(str(item.get("verification") or "unverified")[:30])
             level = escape(str(item.get("severity") or "unassessed")[:30])
+            time_label = _source_time_label(first, item)
             blocks.append(
                 "<p style='margin:0 0 9px'>"
                 "<a style='color:#e5e3f2' href='pulse-event://open/" +
                 identity + "'>" + title + "</a>"
                 "<br><span style='color:#8d9aad;font-size:10px'>" +
                 publisher + " · " + level + " · " + status +
-                "</span></p>"
+                "<br>" + time_label + "</span></p>"
             )
     if nonweather == 0:
         blocks.append("<p style='color:#e4b576'><b>Coverage gap:</b> "
