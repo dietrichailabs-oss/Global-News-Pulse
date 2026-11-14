@@ -196,16 +196,13 @@ jobs:
           } else {
             Write-Host 'No WER dump captured; no native crash stack inference.'
           }
-          # Windows-hosted GDB (when present) can catch an exception directly
-          # even where the disposable runner suppresses WER LocalDumps and
-          # Application Error events. Do not install/download new packages.
-          # All raw debugger text remains on this runner; export only bounded
-          # function/module tokens, never memory/arguments/process paths.
+          # One native debugger replay ONLY after a normal run reproduces failure.
+          # Do not download tools or export debugger memory, paths or arguments.
           $gdbTokens = @()
           if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
             $gdb = Get-Command gdb.exe -ErrorAction SilentlyContinue
             if ($gdb) {
-              Write-Host 'HOST_GDB_AVAILABLE=yes; one unchanged native Qt cohort under debugger (diagnostic, not acceptance).'
+              Write-Host 'HOST_GDB_AVAILABLE=yes; replaying unchanged native cohort under existing host debugger.'
               $localGdbLog = Join-Path $env:RUNNER_TEMP 'native-qt-gdb-local.log'
               $gdbArgs = @('--nx','--batch','--quiet','-ex','set pagination off','-ex','set confirm off','-ex','run','-ex','thread apply all bt 24','--args',$py,'-X','faulthandler','-m','pytest','-q','--tb=short') + @($evenA)
               & $gdb.Source @gdbArgs 2>&1 | Out-File -LiteralPath $localGdbLog -Encoding utf8
@@ -216,31 +213,7 @@ jobs:
                 if ($line -match '(?i)received signal (SIG[A-Z]+)') {
                   $gdbTokens += 'SIGNAL:' + $Matches[1]
                 }
-                if ($line -match '^\s*#\d+\s+(.+)          ConvertTo-Json -InputObject @($results) -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
-          ConvertTo-Json -InputObject @($faults) -Depth 4 | Set-Content -LiteralPath native-fault-metadata.json -Encoding utf8
-          $results | Format-Table | Out-String | Write-Host
-          Write-Host "SANITIZED_WINDOWS_APPLICATION_FAULT_EVENTS=$($faults.Count)"
-          foreach ($fault in $faults) {
-            Write-Host "FAULT_MODULE=$($fault.faulting_module) EXCEPTION_CODE=$($fault.exception_code) TIME_UTC=$($fault.time_utc)"
-          }
-          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
-            throw 'Native Qt Windows pytest process terminated abnormally; unchanged product and packaging HOLD.'
-          }
-          Write-Host 'Two diagnostic cohort replays exited zero; this does NOT validate unsplit Windows package tests or installer smoke.'
-      - name: Upload diagnostic-only records (no executable)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: issue22-native-qt-exit-diagnostic
-          path: |
-            native-exit-results.json
-            native-fault-metadata.json
-            native-crash-stack-tokens.json
-            native-gdb-frame-tokens.json
-            native-exit-*.xml
-          if-no-files-found: warn
-          retention-days: 3
-) {
+                if ($line -match '^\s*#\d+\s+(.+)$') {
                   $frame = $Matches[1]
                   $function = ''
                   $module = ''
@@ -256,7 +229,7 @@ jobs:
               Write-Host "SANITIZED_GDB_TOKENS=$($gdbTokens.Count)"
               foreach ($token in $gdbTokens | Select-Object -First 30) { Write-Host "GDB_DIAGNOSTIC=$token" }
             } else {
-              Write-Host 'HOST_GDB_AVAILABLE=no; no unreviewed debugger downloads or source changes.'
+              Write-Host 'HOST_GDB_AVAILABLE=no; no unreviewed debugger download or source change.'
             }
           }
           ConvertTo-Json -InputObject @($gdbTokens) -Depth 4 | Set-Content -LiteralPath native-gdb-frame-tokens.json -Encoding utf8
@@ -281,6 +254,7 @@ jobs:
             native-exit-results.json
             native-fault-metadata.json
             native-crash-stack-tokens.json
+            native-gdb-frame-tokens.json
             native-exit-*.xml
           if-no-files-found: warn
           retention-days: 3
