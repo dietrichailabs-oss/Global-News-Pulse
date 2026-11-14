@@ -454,6 +454,26 @@ jobs:
                         sum(1 for widget in top if widget.isVisible()), flush=True)
           except Exception:
               print("NATIVE_PROBE_PHASE=qt_inventory_unavailable", flush=True)
+          # Diagnostic-only controlled cleanup AFTER pytest returns, not part
+          # of the product/tests or release gate. Alternate with untouched
+          # process exits to test whether Qt DeferredDelete ownership matters.
+          if os.environ.get("GP_DIAG_QT_CLEANUP") == "1":
+              print("NATIVE_PROBE_PHASE=qt_cleanup_begin", flush=True)
+              try:
+                  from PySide6.QtCore import QCoreApplication, QEvent
+                  from PySide6.QtWidgets import QApplication
+                  qtapp = QApplication.instance()
+                  if qtapp:
+                      for widget in tuple(qtapp.topLevelWidgets()):
+                          widget.hide()
+                          widget.deleteLater()
+                      QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                      qtapp.processEvents()
+                      print("NATIVE_PROBE_PHASE=qt_cleanup_remaining VALUE=%s" %
+                            len(qtapp.topLevelWidgets()), flush=True)
+              except Exception:
+                  print("NATIVE_PROBE_PHASE=qt_cleanup_exception", flush=True)
+              print("NATIVE_PROBE_PHASE=qt_cleanup_end", flush=True)
           raise SystemExit(int(result))
           '@
                 Set-Content -LiteralPath $phaseScriptPath -Value $phaseSource -Encoding utf8
@@ -462,7 +482,8 @@ jobs:
                 # raw native process exit; never interpret a phase marker or a
                 # pytest assertion summary as full package/installer success.
                 for ($monitoredAttempt = 1; $monitoredAttempt -le 6; $monitoredAttempt++) {
-                  Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
+                  $env:GP_DIAG_QT_CLEANUP = if (($monitoredAttempt % 2) -eq 0) { '1' } else { '0' }
+                  Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt QT_CLEANUP_AFTER_PYTEST=$env:GP_DIAG_QT_CLEANUP"
                   & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
                     $line = [string]$_
                     if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|PHASE|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT|EVENT_COUNTS)=') {
