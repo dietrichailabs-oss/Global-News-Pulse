@@ -1600,11 +1600,35 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
     lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {utcnow()}", "",
              "SYNTHETIC TRAINING DATA — NOT LIVE NEWS" if synthetic else "Source-linked summary of the supplied local monitoring records.", "",
              "Coverage is limited to monitored sources. Official attribution does not independently confirm every underlying claim.", ""]
-    ranked = sorted(events, key=lambda e: (SEVERITY.get(e.get("severity"), 0), e.get("updated_at", "")), reverse=True)[:limit]
-    if not ranked:
+    # A single high-volume weather adapter can otherwise consume every slot
+    # before one disease, conflict, infrastructure or government record appears.
+    # These are source CATEGORY groupings, never invented news/crisis claims.
+    from .brief_selection import balanced_brief_sections, BRIEF_DOMAINS
+    grouped = balanced_brief_sections(
+        events, per_domain=4 if period == "daily" else 9,
+        max_total=limit, disaster_limit=3 if period == "daily" else 6
+    )
+    if not grouped:
         lines.extend(["No matching developments are stored for this period.", ""])
-    for index, event in enumerate(ranked, 1):
-        lines.extend([f"## {index}. {_markdown_text(event['title'])}", "",
+    else:
+        lines.extend([
+            "## Topic coverage", "",
+            "Items are grouped by source category, then by importance and last recorded update. "
+            "These sections do not establish worldwide coverage or verify a crisis.", ""
+        ])
+        present = {domain for domain, _ in grouped}
+        absent = [domain for domain in BRIEF_DOMAINS if domain not in present]
+        if absent:
+            lines.extend(["**Not represented in supplied local records:** " +
+                          ", ".join(absent) +
+                          ". This is a coverage gap, not evidence that no events occurred.", ""])
+    ranked = [(domain, event) for domain, items in grouped for event in items]
+    current_domain = None
+    for index, (domain, event) in enumerate(ranked, 1):
+        if domain != current_domain:
+            current_domain = domain
+            lines.extend([f"## {domain}", ""])
+        lines.extend([f"### {index}. {_markdown_text(event['title'])}", "",
                       f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {_markdown_text(event['category'])} · {_markdown_text(event['region'])} · {_markdown_text(event['verification'])}", "",
                       _markdown_text(event["recap"]), "",
                       f"Last material record update: {event['updated_at']} · Local event: {event['id']}", ""])

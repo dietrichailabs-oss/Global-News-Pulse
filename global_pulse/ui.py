@@ -431,6 +431,11 @@ class MainWindow(SituationActions, QMainWindow):
         feed.heading.addWidget(self.english_headlines)
         self.sort_combo=QComboBox();self.sort_combo.addItems(["Latest first","Highest importance","Most reports"]);self.sort_combo.currentIndexChanged.connect(self._populate_feed);feed.heading.addWidget(self.sort_combo)
         self.feed_list=QListWidget();self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
+        # Clicking even an already-selected item is an explicit request for
+        # its evidence view; initial auto-selection does NOT hide World Overview.
+        self.feed_list.itemClicked.connect(
+            lambda _item: self.intelligence_mode.setCurrentIndex(1)
+        )
         self.feed_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.feed_list.customContextMenuRequested.connect(self._show_feed_situation_menu)
         feed.layout.addWidget(self.feed_list,1)
@@ -448,6 +453,11 @@ class MainWindow(SituationActions, QMainWindow):
         media.layout.addWidget(self.media_scroll,1)
         self.lower_split.addWidget(media)
         intel=Panel("INTELLIGENCE BRIEF")
+        self.intelligence_mode=QComboBox()
+        self.intelligence_mode.addItems(["World overview","Selected event"])
+        self.intelligence_mode.setObjectName("intelligence_brief_mode")
+        self.intelligence_mode.setAccessibleName("World intelligence overview or selected event evidence")
+        intel.heading.addWidget(self.intelligence_mode)
         self.save_button=button("☆ Star",self._toggle_selected_situation,"Star the selected event in Situations",checkable=True);intel.heading.addWidget(self.save_button)
         self.save_button.setObjectName("situation_star")
         self.intel_browser=QTextBrowser();self.intel_browser.setOpenExternalLinks(False);self.intel_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));self.intel_browser.setAccessibleName("Selected event evidence brief")
@@ -477,7 +487,23 @@ class MainWindow(SituationActions, QMainWindow):
         self.intel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.intel_scroll.setMinimumSize(0,0)
         self.intel_scroll.setWidget(self.intel_stack)
-        intel.layout.addWidget(self.intel_scroll,1)
+        self.overview_browser=QTextBrowser()
+        self.overview_browser.setObjectName("world_intelligence_overview")
+        self.overview_browser.setAccessibleName("Balanced local world intelligence overview")
+        self.overview_browser.setOpenExternalLinks(False)
+        self.overview_browser.setOpenLinks(False)  # Local event anchors are handled exactly once below.
+        self.overview_browser.anchorClicked.connect(self._open_overview_event)
+        self.overview_browser.setHtml(
+            "<p>World overview will appear when local reports are loaded.</p>"
+        )
+        self.intelligence_pages=QStackedWidget()
+        self.intelligence_pages.addWidget(self.overview_browser)
+        self.intelligence_pages.addWidget(self.intel_scroll)
+        self.intelligence_mode.currentIndexChanged.connect(
+            self.intelligence_pages.setCurrentIndex
+        )
+        self._overview_html_cached=""
+        intel.layout.addWidget(self.intelligence_pages,1)
         actionrow=QHBoxLayout()
         self.original_button=button("Source ↗",self._open_original);self.translate_button=button("Translate",self._translate_selected)
         actionrow.addWidget(self.original_button);actionrow.addWidget(self.translate_button);intel.layout.addLayout(actionrow)
@@ -697,6 +723,7 @@ class MainWindow(SituationActions, QMainWindow):
             )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
             self._populate_feed()
+            self._update_world_overview()
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
             count=len(self._events);self.feed_count.setText(str(count))
@@ -770,6 +797,30 @@ class MainWindow(SituationActions, QMainWindow):
         self.feed_list.verticalScrollBar().setValue(feed_scroll)
         self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
+    def _update_world_overview(self):
+        """Format current bounded feed rows without new DB/map/network queries."""
+        from .brief_selection import overview_html
+        scope=(self.time_range.currentText().lower() +
+               (", filtered" if self.category.currentData() or
+                self.region.currentData() or self.search.text().strip()
+                else ", all categories"))
+        updated=overview_html(self._events, label=scope)
+        if updated != self._overview_html_cached:
+            position=self.overview_browser.verticalScrollBar().value()
+            self.overview_browser.setHtml(updated)
+            self.overview_browser.verticalScrollBar().setValue(position)
+            self._overview_html_cached=updated
+
+    def _open_overview_event(self, url):
+        """Only local event IDs are actionable; never treat links as web URLs."""
+        if url.scheme() != "pulse-event" or url.host() != "open":
+            return
+        from urllib.parse import unquote
+        identity=unquote(url.path().lstrip("/"))
+        if identity and any(str(e.get("id"))==identity for e in self._events):
+            self.navigate_event(identity)
+            self.intelligence_mode.setCurrentIndex(1)
+
     def _render_empty_brief(self):
         self.intel_browser.setHtml("<p style='color:#a78bfa;font-size:18px'><b>Connect the evidence.</b></p><p style='color:#a5afc1'>Select an event to inspect its recap, original sources, verification state, and competing claims.</p><p style='color:#748198'>Official attribution and independent corroboration are shown separately. Coverage gaps remain visible.</p>")
         self.evidence_status_text.setPlainText("No event selected · no confidence inferred.")
@@ -834,6 +885,7 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _feed_selected(self,item,previous):
         if item:
+            self.intelligence_mode.setCurrentIndex(1)
             e=item.data(Qt.ItemDataRole.UserRole);self._selected_id=str(e.get("id",""));self.world_map.select_event(self._selected_id);full=self._selected_event() or e;self._render_event(full)
         else:
             # Clearing the highlighted feed row must clear its Brief/Star
@@ -861,6 +913,7 @@ class MainWindow(SituationActions, QMainWindow):
             return
         self._selected_id = identity
         self.open_page(0)
+        self.intelligence_mode.setCurrentIndex(1)
 
         # Historical replay or an event outside the current feed requires one
         # deliberate broaden-to-All archive navigation. Change ALL dimensions
