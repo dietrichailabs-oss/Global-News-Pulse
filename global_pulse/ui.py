@@ -847,17 +847,72 @@ class MainWindow(SituationActions, QMainWindow):
         return self.controller.event(self._selected_id)
 
     def navigate_event(self,event_id):
-        event=self.controller.event(event_id)
+        """Navigate from map/alerts without repeated full archive/map rebuilds.
+
+        The old map-click path could emit four filter signals followed by one
+        explicit refresh, then rebuild all 500 feed rows again. On an active
+        collector with thousands of country-evidence reports, those synchronous
+        refreshes stall the Windows GUI event loop.
+        """
+        identity = str(event_id or "")
+        event = self.controller.event(identity)
         if not event:
-            self.status_label.setText("This event is no longer in the local archive.");return
-        self._selected_id=str(event_id)
+            self.status_label.setText("This event is no longer in the local archive.")
+            return
+        self._selected_id = identity
         self.open_page(0)
-        if self.history_slider.value()!=1000:self.history_slider.setValue(1000)
-        if not any(str(e.get("id"))==self._selected_id for e in self._events):
-            self.search.clear();self.category.setCurrentIndex(0);self.region.setCurrentIndex(0);self.time_range.setCurrentIndex(3);self.history_slider.setValue(1000);self.refresh_data()
-        self._populate_feed();self._render_event(event);self.world_map.select_event(event_id,center=True)
-        if self.isMinimized():self.showNormal()
-        self.show();self.raise_();self.activateWindow()
+
+        # Historical replay or an event outside the current feed requires one
+        # deliberate broaden-to-All archive navigation. Change ALL dimensions
+        # atomically, without invoking every combo's refresh_data slot.
+        visible = any(str(e.get("id")) == identity for e in self._events)
+        reset_view = not visible or self.history_slider.value() != 1000
+        if reset_view:
+            self.search_timer.stop()
+            updates = (
+                (self.search, "text", ""),
+                (self.category, "index", 0),
+                (self.region, "index", 0),
+                (self.time_range, "index", 3),
+                (self.history_slider, "value", 1000),
+            )
+            for control, mode, value in updates:
+                before = control.blockSignals(True)
+                try:
+                    if mode == "text":
+                        control.setText(value)
+                    elif mode == "index":
+                        control.setCurrentIndex(value)
+                    else:
+                        control.setValue(value)
+                finally:
+                    control.blockSignals(before)
+            self.history_label.setText("Latest")
+            # This refresh also populates the feed and renders the selected
+            # record. Do NOT do either again below.
+            self.refresh_data()
+        else:
+            # The selected row already exists; only synchronize its selection
+            # and the brief. Never reconstruct 500 QListWidgetItems for a
+            # single map click.
+            previous = self.feed_list.blockSignals(True)
+            try:
+                for row_index in range(self.feed_list.count()):
+                    row = self.feed_list.item(row_index)
+                    data = row.data(Qt.ItemDataRole.UserRole) or {}
+                    if str(data.get("id") or "") == identity:
+                        self.feed_list.setCurrentItem(row)
+                        break
+            finally:
+                self.feed_list.blockSignals(previous)
+            self._render_event(event)
+
+        self.world_map.select_event(identity,center=True)
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def _open_original(self):
         e=self._selected_event()
