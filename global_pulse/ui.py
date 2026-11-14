@@ -461,6 +461,7 @@ class MainWindow(SituationActions, QMainWindow):
         layout.addWidget(self.vertical_split);self.pages.addWidget(page)
         self.world_map.event_selected.connect(self.navigate_event)
         self.world_map.country_selected.connect(self._country_selected)
+        self.world_map.global_search_requested.connect(self._search_full_archive)
 
     def _build_situations(self):
         panel=Panel("SITUATION ROOMS")
@@ -974,6 +975,22 @@ class MainWindow(SituationActions, QMainWindow):
     def _country_selected(self,name):
         self.country_search.setText(name)
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
+
+    def _search_full_archive(self, phrase):
+        """Search locally across all source headlines, without inferred coordinates."""
+        phrase=str(phrase or "").strip()[:200]
+        if not phrase:
+            return
+        self.open_page(0)
+        self.search.setText(phrase)
+        # All-history search finds aviation and government stories omitted
+        # from country attribution, never fakes an incident location.
+        if self.time_range.currentIndex()!=3:
+            self.time_range.setCurrentIndex(3)
+        self.refresh_data()
+        self.status_label.setText(
+            f"Full archive search: {phrase}. Results have no implied country coordinates."
+        )
 
     def _reset_map(self):
         self.world_map.reset_view();self.country_search.clear()
