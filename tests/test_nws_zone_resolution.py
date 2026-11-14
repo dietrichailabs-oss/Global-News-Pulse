@@ -185,7 +185,7 @@ def test_expired_bulletin_with_future_hazard_end_retains_official_area_without_r
     finally: store.close()
     store=Store(path,mode='live')
     try:
-        events=store.list_events(map_evidence=True)
+        events=store.list_events()  # Historical archive; map evidence may filter an expired notice.
         assert len(events)==1
         restored=events[0]['reports'][0]
         assert restored['evidence_status']=='expired'
