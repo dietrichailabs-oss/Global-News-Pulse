@@ -2,7 +2,7 @@ name: Windows Owner-Test Package - Issue76 HAM / TV / Tray Test
 
 on:
   push:
-    branches: [eng/issue76-private-owner-integration-20261114]
+    branches: [eng/issue76-cam003-tray-shutdown-test-contract-20261114]
     paths:
       - '.github/workflows/issue76-native-owner-package.yml'
   workflow_dispatch:
@@ -54,14 +54,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify exact Issue76 focused QA source and workflow-only diff
+      - name: Verify exact Issue76 product and isolated CAM003 test dependency repair
         run: |
           $ErrorActionPreference='Stop'
           git merge-base --is-ancestor b885ee98c80a280fede535903301871b9ebf1199 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Focused QA Issue76 source missing' }
           $changed=@(git diff --name-only b885ee98c80a280fede535903301871b9ebf1199..HEAD)
-          $unexpected=@($changed | Where-Object { $_ -ne '.github/workflows/issue76-native-owner-package.yml' })
-          if ($unexpected.Count -ne 0 -or $changed.Count -ne 1) { throw ('Unexpected source diff: ' + ($changed -join ',')) }
+          $allowed=@('.github/workflows/issue76-native-owner-package.yml','tests/test_owner_feedback_qa_repairs.py')
+          $unexpected=@($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -ne 0 -or $changed.Count -ne 2) { throw ('Unexpected source diff: ' + ($changed -join ',')) }
+          Write-Host 'CAM003_TEST_BINDING=tray_refresh_timer.stop + menu.hide asserted'
           Write-Host 'ISSUE76_FOCUSED_PRODUCT=b885ee98c80a280fede535903301871b9ebf1199'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
           Write-Host 'PUBLIC_RELEASE_RIGHTS_HOLD=unchanged'
