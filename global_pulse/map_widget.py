@@ -91,6 +91,10 @@ class WorldMap(QWidget):
         # evidence-status repaint. Qt GUI-thread ownership is unchanged.
         self._projected_view_key = None
         self._projected_paths = ()
+        # Projected point clusters change with source dataset, view or category
+        # only. Cursor hover/selection can reuse the same 5,000-point grouping.
+        self._cluster_view_key = None
+        self._cluster_groups = ()
         self._load_map()
 
     def _load_map(self):
@@ -185,6 +189,8 @@ class WorldMap(QWidget):
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
         self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
+        self._cluster_view_key = None
+        self._cluster_groups = ()
         self._activity_categories = object()
         self._refresh_country_activity()
         self.update()
@@ -559,11 +565,16 @@ class WorldMap(QWidget):
         self.pan_y = min(limit, max(-limit, self.pan_y))
 
     def visible_clusters(self):
-        groups = defaultdict(list)
         selected_categories = (None if self.categories is None else
-                               {_map_category(c) for c in self.categories})
-        # A single frame can have 5,000 plotted records. Allocate QTransform
-        # once per collection pass instead of once for every source event.
+                               frozenset(_map_category(c) for c in self.categories))
+        key = (id(self.events), len(self.events), self.width(), self.height(),
+               self.zoom, self.pan_x, self.pan_y, selected_categories)
+        if key == self._cluster_view_key:
+            return self._cluster_groups
+        groups = defaultdict(list)
+        # Source events are replaced through set_events(), never modified in
+        # place by the renderer. Source, view and filter changes invalidate this
+        # cache; hover, selected event, or severity style does not.
         transform = self._transform()
         for event in self.events:
             if (not self.has_location(event) or
@@ -573,7 +584,9 @@ class WorldMap(QWidget):
             p = transform.map(self.normalized(event["longitude"], event["latitude"]))
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
                 groups[(round(p.x() / 27), round(p.y() / 27))].append((event, p))
-        return list(groups.values())
+        self._cluster_groups = list(groups.values())
+        self._cluster_view_key = key
+        return self._cluster_groups
 
     def paintEvent(self, event):
         painter = QPainter(self)
