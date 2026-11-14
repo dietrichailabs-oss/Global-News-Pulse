@@ -254,18 +254,21 @@ jobs:
           static std::string owner_module(DWORD pid, const void* address) {
             HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
             if (snap == INVALID_HANDLE_VALUE) return "unresolved";
-            MODULEENTRY32A mod{};
+            MODULEENTRY32W mod{};
             mod.dwSize = sizeof(mod);
             std::string answer = "unresolved";
-            if (Module32FirstA(snap, &mod)) {
+            if (Module32FirstW(snap, &mod)) {
               do {
                 uintptr_t pc = reinterpret_cast<uintptr_t>(address);
                 uintptr_t start = reinterpret_cast<uintptr_t>(mod.modBaseAddr);
                 if (pc >= start && pc - start < static_cast<uintptr_t>(mod.modBaseSize)) {
-                  answer = mod.szModule;
+                  answer.clear();
+                  for (const wchar_t* name = mod.szModule; *name; ++name) {
+                    answer.push_back((*name >= 32 && *name <= 126) ? static_cast<char>(*name) : '?');
+                  }
                   break;
                 }
-              } while (Module32NextA(snap, &mod));
+              } while (Module32NextW(snap, &mod));
             }
             CloseHandle(snap);
             return answer;
