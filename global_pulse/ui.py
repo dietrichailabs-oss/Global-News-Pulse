@@ -316,6 +316,8 @@ class MainWindow(SituationActions, QMainWindow):
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        if hasattr(controller, "situation_changed"):
+            controller.situation_changed.connect(self._situation_state_changed)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -559,13 +561,45 @@ class MainWindow(SituationActions, QMainWindow):
         table.setAlternatingRowColors(True);table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents);table.horizontalHeader().setStretchLastSection(True)
 
     def open_page(self,index):
+        previous=self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
         for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
+        # Clicking the already-visible tab must not repeat potentially costly
+        # SQLite loads and HTML rendering. This often happens while users
+        # navigate rapidly between the monitor and the Star/Situations pane.
+        if previous==index:
+            return
         if index==1:self._populate_situations()
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
         elif index==5:self._generate_brief()
+
+    def _situation_state_changed(self, event_id, saved):
+        """Update a bookmark without re-querying/repainting the world map.
+
+        The archive's events and provenance are unchanged. Only the starred
+        marker on matching feed entries and (when visible) Situations view need
+        to change; all other expensive views remain untouched.
+        """
+        identity=str(event_id or "")
+        if not identity:
+            return
+        if hasattr(self,"feed_list"):
+            for index in range(self.feed_list.count()):
+                item=self.feed_list.item(index)
+                event=item.data(Qt.ItemDataRole.UserRole)
+                if not isinstance(event,dict) or str(event.get("id") or "")!=identity:
+                    continue
+                row=dict(event,_situation_starred=bool(saved))
+                item.setData(Qt.ItemDataRole.UserRole,row)
+                self.feed_list.viewport().update(self.feed_list.visualItemRect(item))
+                break
+        if self._selected_id==identity:
+            self._sync_situation_star({"id":identity})
+        if self.pages.currentIndex()==1:
+            # Situations query is bounded by user's own bookmarks, not map size.
+            self._populate_situations()
 
     def events_filters(self):
         self._history_at=None
