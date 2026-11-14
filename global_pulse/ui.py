@@ -274,6 +274,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._historical=False
         self._history_at=None
         self._refreshing=False
+        # Hidden workspaces are populated once per real data revision, not
+        # synchronously on every back-and-forth tab switch.
+        self._dirty_pages=set(range(1,6))
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -325,6 +328,8 @@ class MainWindow(SituationActions, QMainWindow):
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        if hasattr(controller, "notification_changed"):
+            controller.notification_changed.connect(self._notification_status_only)
         if hasattr(controller, "source_status_changed"):
             controller.source_status_changed.connect(self._schedule_collected_refresh)
         if hasattr(controller, "situation_changed"):
@@ -663,16 +668,24 @@ class MainWindow(SituationActions, QMainWindow):
         previous=self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
         for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
-        # Clicking the already-visible tab must not repeat potentially costly
-        # SQLite loads and HTML rendering. This often happens while users
-        # navigate rapidly between the monitor and the Star/Situations pane.
-        if previous==index:
+        # Data hasn't changed: switching tabs must not repeatedly read SQLite,
+        # reconstruct tables or re-render brief HTML on the main Qt thread.
+        # Stale pages stay marked dirty until they're next actually displayed.
+        if index not in self._dirty_pages:
             return
         if index==1:self._populate_situations()
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
         elif index==5:self._generate_brief()
+        self._dirty_pages.discard(index)
+
+    def _notification_status_only(self):
+        """Refresh the Alerts view only, never the 5,000-event world map."""
+        self._dirty_pages.add(4)
+        if self.pages.currentIndex()==4:
+            self._populate_alerts()
+            self._dirty_pages.discard(4)
 
     def _situation_state_changed(self, event_id, saved):
         """Update a bookmark without re-querying/repainting the world map.
@@ -696,9 +709,11 @@ class MainWindow(SituationActions, QMainWindow):
                 break
         if self._selected_id==identity:
             self._sync_situation_star({"id":identity})
+        self._dirty_pages.add(1)
         if self.pages.currentIndex()==1:
             # Situations query is bounded by user's own bookmarks, not map size.
             self._populate_situations()
+            self._dirty_pages.discard(1)
 
     def events_filters(self):
         self._history_at=None
@@ -727,6 +742,7 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _refresh_source_status_ui(self):
         """A provider polling status is not a reason to reload 5k map events."""
+        self._dirty_pages.add(3)
         self.last_label.setText(
             "Last collection  " +
             timestamp(getattr(self.controller,"last_collection",""))
@@ -736,6 +752,7 @@ class MainWindow(SituationActions, QMainWindow):
         # event/map refresh. No stale incident location is fabricated here.
         if self.pages.currentIndex()==3 and self.isVisible():
             self._populate_sources()
+            self._dirty_pages.discard(3)
 
     def refresh_data(self,*args):
         if self._refreshing:return
@@ -745,6 +762,7 @@ class MainWindow(SituationActions, QMainWindow):
             self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
+            self._dirty_pages.update(range(1,6))
             filters=self.events_filters()
             self._events=self.controller.events(**filters)
             # A filter or historical-time change can remove the previously
@@ -789,6 +807,8 @@ class MainWindow(SituationActions, QMainWindow):
             elif page==2:self._populate_economy()
             elif page==3:self._populate_sources()
             elif page==4:self._populate_alerts()
+            elif page==5:self._generate_brief()
+            self._dirty_pages.discard(page)
         except Exception as exc:
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
@@ -1187,6 +1207,7 @@ class MainWindow(SituationActions, QMainWindow):
         values["alert_threshold"]=self.setting_threshold.currentData()
         try:
             for key,value in values.items():self.controller.set_setting(key,value)
+            self._dirty_pages.update((2,3,4,5))
             self.settings_result.setText("Settings saved. Provider rate limits still apply; existing history stays available.")
         except Exception as exc:self.settings_result.setText(f"Settings could not be saved: {exc}")
 
@@ -1243,11 +1264,19 @@ class MainWindow(SituationActions, QMainWindow):
         self.titlebar.status.setStyleSheet("color:#7fdbb2;background:#173029;border:1px solid #284d40;border-radius:9px;padding:3px 9px;font-size:10px;" if monitoring else "color:#d3bd8f;background:#30291e;border:1px solid #514532;border-radius:9px;padding:3px 9px;font-size:10px;")
         self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
         if text:self.status_label.setText(str(text)[:250])
-        if self.pages.currentIndex()==3:self._populate_sources()
+        if self.pages.currentIndex()==3:
+            self._dirty_pages.add(3)
+            self._populate_sources()
+            self._dirty_pages.discard(3)
+        else:
+            self._dirty_pages.add(3)
 
     def _on_alert(self,alert):
         self.status_label.setText("New alert saved in Alerts.")
-        if self.pages.currentIndex()==4:self._populate_alerts()
+        self._dirty_pages.add(4)
+        if self.pages.currentIndex()==4:
+            self._populate_alerts()
+            self._dirty_pages.discard(4)
 
     def _find_country(self,*args):
         name=args[0] if args and isinstance(args[0],str) else self.country_search.text().strip()
