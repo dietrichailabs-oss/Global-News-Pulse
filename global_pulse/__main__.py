@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
 from . import __version__, BUILD_ID
@@ -212,13 +212,19 @@ def main(argv=None):
 
     notifier = NativeNotifications(enabled=not args.demo, predicate=native_allowed)
     controller.native_alert.connect(notifier.notify)
-    notifier.status_changed.connect(lambda status: setattr(controller, "notification_status", status))
-    notifier.status_changed.connect(lambda _: controller.data_changed.emit())
+    def notification_status_only(status):
+        if not controller._closed:
+            controller.notification_status = status
+            controller.notification_changed.emit()
+
+    notifier.status_changed.connect(notification_status_only)
 
     def delivered(identifier, status):
         if not controller._closed:
             controller.store.update_alert_delivery(identifier, status)
-            controller.data_changed.emit()
+            # Delivery state changes the Alerts card, not the event archive,
+            # source clustering or 5,000-point world map.
+            controller.notification_changed.emit()
 
     notifier.delivery_changed.connect(delivered)
 
@@ -247,7 +253,17 @@ def main(argv=None):
     menu.addSeparator()
     menu.addAction("Exit Completely", controller.quit)
     tray.setContextMenu(menu)
-    tray.activated.connect(lambda reason: activate() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+    # Keep the native Windows right-click menu. Some taskbar overflow icons
+    # swallow the first context click; single LEFT click now offers the same
+    # menu via non-blocking popup, with double click still restoring the app.
+    def tray_activated(reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            menu.hide()
+            activate()
+        elif reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if not menu.isVisible() and not controller._closed:
+                menu.popup(QCursor.pos())
+    tray.activated.connect(tray_activated)
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray.show()
 
@@ -258,7 +274,21 @@ def main(argv=None):
         tray.setIcon(pulse_icon(state))
         tray.setToolTip("Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused"))
 
-    controller.data_changed.connect(update_tray)
+    # Source health and incoming alerts arrive in bursts. A store scan and
+    # tray icon replacement for every signal competes with native popup events.
+    tray_refresh_timer = QTimer(tray)
+    tray_refresh_timer.setSingleShot(True)
+    tray_refresh_timer.setInterval(700)
+    tray_refresh_timer.timeout.connect(update_tray)
+
+    def schedule_tray(*_):
+        if not tray_refresh_timer.isActive():
+            tray_refresh_timer.start()
+
+    controller.data_changed.connect(schedule_tray)
+    controller.source_status_changed.connect(schedule_tray)
+    controller.notification_changed.connect(schedule_tray)
+    controller.alert_received.connect(schedule_tray)
     shutting_down = False
 
     def shutdown():
@@ -266,6 +296,8 @@ def main(argv=None):
         if shutting_down:
             return
         shutting_down = True
+        tray_refresh_timer.stop()
+        menu.hide()
         window.save_layout()
         for widget in window.findChildren(QWidget):
             if widget.__class__.__name__ == "MediaPanel":
