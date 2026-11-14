@@ -32,6 +32,30 @@ def youtube_id(url):
     return candidate if VIDEO_ID.fullmatch(candidate) else None
 
 
+def youtube_player_navigation(url, video_id, *, full_watch=False):
+    """Permit only the explicitly selected official YouTube video main frame.
+
+    Main-frame links to other videos, channel navigation, redirects to login,
+    and non-YouTube sites are never approved by the in-app viewer.
+    """
+    if not isinstance(video_id,str) or not VIDEO_ID.fullmatch(video_id):
+        return False
+    try:
+        parsed=urlsplit(safe_url(url))
+    except (TypeError,ValueError):
+        return False
+    host=(parsed.hostname or "").lower()
+    if (host in {"www.youtube.com","youtube.com",
+                 "www.youtube-nocookie.com","youtube-nocookie.com"}
+            and parsed.path=="/embed/"+video_id):
+        return True
+    return bool(
+        full_watch and host in {"www.youtube.com","youtube.com"}
+        and parsed.path=="/watch"
+        and parse_qs(parsed.query).get("v",[""])[0]==video_id
+    )
+
+
 def media_identity(item):
     """Keep separate tuned stations even when they share one public receiver URL."""
     url = str(item.get("url", item.get("original_url", "")))
