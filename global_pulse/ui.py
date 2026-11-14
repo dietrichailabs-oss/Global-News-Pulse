@@ -889,8 +889,19 @@ class MainWindow(SituationActions, QMainWindow):
                     control.blockSignals(before)
             self.history_label.setText("Latest")
             # This refresh also populates the feed and renders the selected
-            # record. Do NOT do either again below.
+            # record if it is inside the 500-row feed window.
             self.refresh_data()
+            if not any(str(e.get("id")) == identity for e in self._events):
+                # A country/incident map may expose any of 5,000 positions;
+                # it is normal for the clicked archived record to fall outside
+                # the first 500 feed rows. Explicitly include only that chosen
+                # event in the current feed (one list construction), so the
+                # selected Brief/Star remains bound to a visible canonical row.
+                self._events = [event] + list(self._events[:499])
+                self._selected_id = identity
+                self._populate_feed()
+                self._render_event(event)
+                self.feed_count.setText(str(len(self._events)))
         else:
             # The selected row already exists; only synchronize its selection
             # and the brief. Never reconstruct 500 QListWidgetItems for a
