@@ -404,16 +404,36 @@ jobs:
               Write-Host "LOCAL_NATIVE_DEBUGGER_COMPILE_EXIT=$compileExit"
               if ($compileExit -eq 0) {
                 $resolvedPython = (Resolve-Path -LiteralPath $py).Path
-                $probeArgs = @($resolvedPython, '-X', 'faulthandler', '-m', 'pytest', '-q', '--tb=short') + @($evenA)
-                # One finite, source-unchanged replay only. The debugger can
-                # change crash timing; even exit zero is NOT a packaging pass.
-                # Finite, isolated monitored replays: stop on first nonzero
-                # process exit; all test source/selection remains unchanged.
-                for ($monitoredAttempt = 1; $monitoredAttempt -le 4; $monitoredAttempt++) {
+                # Compare with the earlier unwrapped python -m pytest replay.
+                # A temporary, runner-local launcher marks pytest return and the
+                # Python atexit phase. This changes only diagnostic invocation,
+                # NOT tracked product/tests or release packaging. It establishes
+                # which exit phase precedes a crash, not a causal native module.
+                $phaseScriptPath = Join-Path $env:RUNNER_TEMP 'native-phase-probe.py'
+                $phaseSource = @'
+          import atexit
+          import sys
+          import pytest
+
+          @atexit.register
+          def _last_phase():
+              print("NATIVE_PROBE_PHASE=atexit_callback_reached", flush=True)
+
+          print("NATIVE_PROBE_PHASE=before_pytest_main", flush=True)
+          result = pytest.main(sys.argv[1:])
+          print("NATIVE_PROBE_PHASE=after_pytest_main CODE=%s" % int(result), flush=True)
+          raise SystemExit(int(result))
+          '@
+                Set-Content -LiteralPath $phaseScriptPath -Value $phaseSource -Encoding utf8
+                $probeArgs = @($resolvedPython, '-X', 'faulthandler', $phaseScriptPath, '-q', '--tb=short') + @($evenA)
+                # Finite diagnostic-only replays, stop on the first nonzero
+                # raw native process exit; never interpret a phase marker or a
+                # pytest assertion summary as full package/installer success.
+                for ($monitoredAttempt = 1; $monitoredAttempt -le 3; $monitoredAttempt++) {
                   Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
                   & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
                     $line = [string]$_
-                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT|EVENT_COUNTS)=') {
+                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|PHASE|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT|EVENT_COUNTS)=') {
                       $nativeProbeTokens += "ATTEMPT=$monitoredAttempt $line"
                       Write-Host $line
                     }
