@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 from global_pulse.sources import load_catalog, parse_feed
 
 SID = "ecb_mid"
-ORIGIN = "eu_ecb"
+ORIGIN = "ecb"
 STAMP = "2026-11-13T09:10:00Z"
 
 

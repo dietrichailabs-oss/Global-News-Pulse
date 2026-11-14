@@ -83,7 +83,7 @@ def test_second_batch_is_metadata_only_and_publisher_grouped():
         "noaa":{"nws","swpc","noaa_news","nhc_atlantic_outlook","nhc_east_pacific_outlook"},
         "european_commission":{"ec_trade_news","ec_energy_news","ec_environment_news"},
         "nz_government":{"nz_economic_growth","nz_energy","nz_foreign_affairs","nz_health","nz_infrastructure","nz_national_security","nz_trade"},
-        "who":{"who","who_afro_emergencies"},
+        "who_don":{"who","who_afro_emergencies"},
         "bls":{"bls_latest","bls_employment","bls_jolts","bls_cpi","bls_ppi","bls_import_export","bls_work_stoppages"},
     }
     denied_nz=groups["nz_government"]

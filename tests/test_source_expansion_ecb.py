@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 from global_pulse.sources import load_catalog, parse_feed
 
 IDS = ("ecb_press", "ecb_statpress")
-ORIGIN = "eu_ecb"
+ORIGIN = "ecb"
 STAMP = "2026-11-13T08:30:00Z"
 REJECTED = {"br_gov_economy", "br_gov_health", "br_gov_infrastructure",
             "br_gov_energy", "br_gov_justice"}
