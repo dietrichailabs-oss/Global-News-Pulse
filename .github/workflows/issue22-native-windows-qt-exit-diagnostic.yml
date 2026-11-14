@@ -44,13 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify unchanged product and exact failed parent
         run: |
           $ErrorActionPreference = 'Stop'
-          $parent = (git rev-parse HEAD^).Trim()
-          if ($parent -ne '205e5fec6239443e0feb020eced3b8ea8399672f') { throw "Diagnostic must be one commit after exact failed PR48 head; observed $parent" }
+          git merge-base --is-ancestor '205e5fec6239443e0feb020eced3b8ea8399672f' HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Exact failed PR48 product head is not an ancestor' }
           $changed = @(git diff --name-only '205e5fec6239443e0feb020eced3b8ea8399672f..HEAD')
           if ($changed.Count -ne 1 -or $changed[0] -ne '.github/workflows/issue22-native-windows-qt-exit-diagnostic.yml') { throw "Unapproved product or tests change: $($changed -join ', ')" }
           Write-Host 'FAILED_NATIVE_SOURCE=205e5fec6239443e0feb020eced3b8ea8399672f'
