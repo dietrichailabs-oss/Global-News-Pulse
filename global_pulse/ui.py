@@ -481,6 +481,10 @@ class MainWindow(SituationActions, QMainWindow):
         intel.layout.addLayout(intel_controls)
         self.intel_browser=QTextBrowser();self.intel_browser.setOpenExternalLinks(False);self.intel_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));self.intel_browser.setAccessibleName("Selected event evidence brief")
         self.intel_stack=QSplitter(Qt.Orientation.Vertical);self.intel_stack.setHandleWidth(3)
+        # A small bottom gutter gives ensureWidgetVisible() enough range to
+        # bring the final status card fully into the QScrollArea viewport.
+        # Without it the final card center can stay 5px offscreen in native Qt.
+        self.intel_stack.setContentsMargins(0,0,0,20)
         self.intel_stack.setMinimumWidth(0)
         self.intel_stack.setSizePolicy(
             QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
