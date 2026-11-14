@@ -4,13 +4,13 @@ on:
   push:
     branches: [eng/issue22-gdelt-revision-freshness-reintegration-20261114]
   pull_request:
-    branches: [eng/issue22-gdelt-revision-freshness-cooldown-20261114]
+    branches: [eng/issue22-nws-refusal-finite-cooldown-20261114]
 
 permissions:
   contents: read
 
 concurrency:
-  group: issue22-nws-refusal-finite
+  group: issue22-gdelt-checkpoint-reintegration
   cancel-in-progress: true
 
 jobs:
