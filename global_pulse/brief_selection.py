@@ -164,6 +164,7 @@ def overview_html(events, *, label="visible local feed"):
                                    item.get("publisher") or "Publisher unlisted")[:65])
             status = escape(str(item.get("verification") or "unverified")[:30])
             level = escape(str(item.get("severity") or "unassessed")[:30])
+            lifecycle = escape(str(item.get("status") or "unknown")[:30])
             time_label = _source_time_label(first, item)
             blocks.append(
                 "<p style='margin:0 0 9px'>"
@@ -171,7 +172,7 @@ def overview_html(events, *, label="visible local feed"):
                 identity + "'>" + title + "</a>"
                 "<br><span style='color:#8d9aad;font-size:10px'>" +
                 publisher + " · " + level + " · " + status +
-                "<br>" + time_label + "</span></p>"
+                " · " + lifecycle + "<br>" + time_label + "</span></p>"
             )
     if nonweather == 0:
         blocks.append("<p style='color:#e4b576'><b>Coverage gap:</b> "
