@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor e05fa657ebd3ad1bc5ba3703115a8f1b635d1271 HEAD
-          git diff --name-only 9346c3e90b9542308d61aa15a9783cf74380a197..HEAD | python -c "import sys; expected={'global_pulse/map_widget.py','tests/test_issue58_map_paint_cache.py','.github/workflows/issue59-map-hover-cache-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only e05fa657ebd3ad1bc5ba3703115a8f1b635d1271..HEAD | python -c "import sys; expected={'global_pulse/map_widget.py','tests/test_issue58_map_paint_cache.py','.github/workflows/issue59-map-hover-cache-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Compile
         shell: bash
         run: python -m compileall -q global_pulse
