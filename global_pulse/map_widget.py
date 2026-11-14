@@ -86,6 +86,11 @@ class WorldMap(QWidget):
         self.cluster_dialog = None
         self._countries = []
         self._hover_country = ""
+        # QPainterPaths are static Natural Earth geometry. Reproject only when
+        # the widget viewport/zoom/pan changes, not on every mouse hover or
+        # evidence-status repaint. Qt GUI-thread ownership is unchanged.
+        self._projected_view_key = None
+        self._projected_paths = ()
         self._load_map()
 
     def _load_map(self):
@@ -118,6 +123,15 @@ class WorldMap(QWidget):
                     path.closeSubpath()
             self._countries.append({"name": props.get("name", "Unknown"), "region": props.get("region", ""),
                                     "code": props.get("code", ""), "label": props.get("label"), "path": path})
+
+    def _mapped_country_paths(self):
+        """Cache projected geometry for the current view on the GUI thread."""
+        key = (self.width(), self.height(), self.zoom, self.pan_x, self.pan_y)
+        if key != self._projected_view_key or len(self._projected_paths) != len(self._countries):
+            transform = self._transform()
+            self._projected_paths = tuple(transform.map(c["path"]) for c in self._countries)
+            self._projected_view_key = key
+        return self._projected_paths
 
     @staticmethod
     def normalized(lon, lat):
@@ -548,12 +562,15 @@ class WorldMap(QWidget):
         groups = defaultdict(list)
         selected_categories = (None if self.categories is None else
                                {_map_category(c) for c in self.categories})
+        # A single frame can have 5,000 plotted records. Allocate QTransform
+        # once per collection pass instead of once for every source event.
+        transform = self._transform()
         for event in self.events:
             if (not self.has_location(event) or
                     (selected_categories is not None and
                      _map_category(event.get("category")) not in selected_categories)):
                 continue
-            p = self.point(event["longitude"], event["latitude"])
+            p = transform.map(self.normalized(event["longitude"], event["latitude"]))
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
                 groups[(round(p.x() / 27), round(p.y() / 27))].append((event, p))
         return list(groups.values())
@@ -563,18 +580,19 @@ class WorldMap(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#292a2d"))
         transform = self._transform()
+        projected_paths = self._mapped_country_paths()
         painter.setPen(QPen(QColor("#303135"), 1))
         for lon in range(-180, 181, 30):
             a, b = self.point(lon, 85), self.point(lon, -60)
             painter.drawLine(a, b)
         for lat in range(-60, 86, 30):
             painter.drawLine(self.point(-180, lat), self.point(180, lat))
-        for c in self._countries:
-            if c["name"] == "Antarctica":
+        viewport = QRectF(self.rect()).adjusted(-3, -3, 3, 3)
+        for c, mapped_path in zip(self._countries, projected_paths):
+            if c["name"] == "Antarctica" or not viewport.intersects(mapped_path.boundingRect()):
                 continue
             selected = c["name"] == self.selected_country
             hovered = c["name"] == self._hover_country
-            mapped_path = transform.map(c["path"])
             painter.setBrush(QColor("#3a2d50" if selected else "#243149" if hovered else "#161719"))
             painter.setPen(QPen(QColor("#9072b5" if selected else "#45464b"), 1 if selected else .65))
             painter.drawPath(mapped_path)
@@ -603,11 +621,11 @@ class WorldMap(QWidget):
             painter.setFont(QFont("Segoe UI", 7))
             painter.setPen(QColor("#6d7b90"))
             occupied = []
-            for c in self._countries:
+            for c, mapped_path in zip(self._countries, projected_paths):
                 label = c.get("label")
                 if not label or not all(_number(v) for v in label) or c["name"] == "Antarctica":
                     continue
-                bounds = transform.mapRect(c["path"].boundingRect())
+                bounds = mapped_path.boundingRect()
                 if bounds.width() * bounds.height() < 2300 and self.zoom < 3:
                     continue
                 p = self.point(*label)
