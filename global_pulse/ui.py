@@ -267,6 +267,9 @@ class MainWindow(SituationActions, QMainWindow):
         self.controller=controller
         self._close_handler=None
         self._selected_id=""
+        # User-cleared selection is distinct from an initially empty feed.
+        # Delayed headline/collector repaint must not silently re-star a row.
+        self._feed_explicitly_cleared=False
         self._events=[]
         self._historical=False
         self._history_at=None
@@ -453,13 +456,29 @@ class MainWindow(SituationActions, QMainWindow):
         media.layout.addWidget(self.media_scroll,1)
         self.lower_split.addWidget(media)
         intel=Panel("INTELLIGENCE BRIEF")
+        intel.setMinimumWidth(0)
+        # Keep mode/Star controls beneath the heading: putting three labels
+        # side-by-side forced the sidebar to 322px at the 960px minimum window.
+        intel_controls=QHBoxLayout()
+        intel_controls.setContentsMargins(0,0,0,0)
+        intel_controls.setSpacing(4)
         self.intelligence_mode=QComboBox()
         self.intelligence_mode.addItems(["World overview","Selected event"])
         self.intelligence_mode.setObjectName("intelligence_brief_mode")
         self.intelligence_mode.setAccessibleName("World intelligence overview or selected event evidence")
-        intel.heading.addWidget(self.intelligence_mode)
-        self.save_button=button("☆ Star",self._toggle_selected_situation,"Star the selected event in Situations",checkable=True);intel.heading.addWidget(self.save_button)
+        self.intelligence_mode.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.intelligence_mode.setMinimumContentsLength(5)
+        self.intelligence_mode.setMinimumWidth(0)
+        self.intelligence_mode.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed
+        )
+        intel_controls.addWidget(self.intelligence_mode,1)
+        self.save_button=button("☆ Star",self._toggle_selected_situation,"Star the selected event in Situations",checkable=True)
         self.save_button.setObjectName("situation_star")
+        intel_controls.addWidget(self.save_button)
+        intel.layout.addLayout(intel_controls)
         self.intel_browser=QTextBrowser();self.intel_browser.setOpenExternalLinks(False);self.intel_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));self.intel_browser.setAccessibleName("Selected event evidence brief")
         self.intel_stack=QSplitter(Qt.Orientation.Vertical);self.intel_stack.setHandleWidth(3)
         self.intel_stack.addWidget(self.intel_browser)
@@ -486,6 +505,9 @@ class MainWindow(SituationActions, QMainWindow):
         self.intel_scroll.setWidgetResizable(True)
         self.intel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.intel_scroll.setMinimumSize(0,0)
+        self.intel_scroll.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
         self.intel_scroll.setWidget(self.intel_stack)
         self.overview_browser=QTextBrowser()
         self.overview_browser.setObjectName("world_intelligence_overview")
@@ -497,6 +519,14 @@ class MainWindow(SituationActions, QMainWindow):
             "<p>World overview will appear when local reports are loaded.</p>"
         )
         self.intelligence_pages=QStackedWidget()
+        self.intelligence_pages.setMinimumWidth(0)
+        self.intelligence_pages.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
+        self.overview_browser.setMinimumWidth(0)
+        self.overview_browser.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
         self.intelligence_pages.addWidget(self.overview_browser)
         self.intelligence_pages.addWidget(self.intel_scroll)
         self.intelligence_mode.currentIndexChanged.connect(
@@ -774,7 +804,8 @@ class MainWindow(SituationActions, QMainWindow):
             order={"critical":4,"high":3,"moderate":2,"informational":1,"unassessed":0};events.sort(key=lambda e:(order.get(e.get("severity"),0),str(e.get("updated_at",""))),reverse=True)
         elif self.sort_combo.currentIndex()==2:events.sort(key=lambda e:int(e.get("report_count",0)),reverse=True)
         self.feed_list.blockSignals(True);self.feed_list.clear()
-        if not self._selected_id and events:self._selected_id=str(events[0].get("id",""))
+        if not self._selected_id and events and not self._feed_explicitly_cleared:
+            self._selected_id=str(events[0].get("id",""))
         selected_item=None
         for e in events:
             e=dict(e,_situation_starred=str(e.get("id","")) in saved_ids)
@@ -787,15 +818,45 @@ class MainWindow(SituationActions, QMainWindow):
         self.feed_empty.setVisible(not events);self.feed_list.setVisible(bool(events))
 
     def _refresh_translated_headlines(self):
-        # Presentation only: no collection, map reload, or media retuning.
-        feed_scroll=self.feed_list.verticalScrollBar().value()
-        brief_scroll=self.intel_browser.verticalScrollBar().value()
-        self._populate_feed()
+        """Refresh display text IN PLACE, preserving Qt row object ownership.
+
+        Language-worker notifications may arrive during a context-menu modal
+        event loop or Star/tab navigation. Clearing the list deletes its
+        QListWidgetItems and invalidates the row a pending click still owns.
+        This method never changes ordering, selection, media, evidence, or map.
+        """
+        if not hasattr(self,"feed_list"):
+            return
+        for index in range(self.feed_list.count()):
+            item=self.feed_list.item(index)
+            if item is None:
+                continue
+            event=item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(event,dict):
+                continue
+            view=(self.controller.headline_view(event,defer_language=True)
+                  if hasattr(self.controller,"headline_view")
+                  else {"title":str(event.get("title","Untitled event")),
+                        "original":str(event.get("title","")),
+                        "label":"Original headline"})
+            title=str(view["title"])
+            if title != item.text():
+                item.setText(title)
+            if event.get("_display_title") != title or event.get("_translation_label") != view["label"]:
+                item.setData(Qt.ItemDataRole.UserRole,dict(
+                    event,_display_title=title,_translation_label=view["label"]
+                ))
+                item.setToolTip(
+                    "<div style='white-space:pre-wrap'>" +
+                    esc(view["label"]+"\nOriginal: "+view["original"]+
+                        "\n"+str(event.get("recap",""))) + "</div>"
+                )
         if self._selected_id:
             event=self._selected_event()
-            if event:self._render_event(event,update_media=False)
-        self.feed_list.verticalScrollBar().setValue(feed_scroll)
-        self.intel_browser.verticalScrollBar().setValue(brief_scroll)
+            if event:
+                brief_scroll=self.intel_browser.verticalScrollBar().value()
+                self._render_event(event,update_media=False)
+                self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
     def _update_world_overview(self):
         """Format current bounded feed rows without new DB/map/network queries."""
@@ -885,11 +946,13 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _feed_selected(self,item,previous):
         if item:
+            self._feed_explicitly_cleared=False
             self.intelligence_mode.setCurrentIndex(1)
             e=item.data(Qt.ItemDataRole.UserRole);self._selected_id=str(e.get("id",""));self.world_map.select_event(self._selected_id);full=self._selected_event() or e;self._render_event(full)
         else:
-            # Clearing the highlighted feed row must clear its Brief/Star
-            # target too; a hidden archived event is not a user selection.
+            # Explicit deselection survives queued headline and source refresh.
+            # It must never silently bind the Star button to another event.
+            self._feed_explicitly_cleared=True
             self._selected_id=""
             self._render_empty_brief()
 
@@ -912,6 +975,7 @@ class MainWindow(SituationActions, QMainWindow):
             self.status_label.setText("This event is no longer in the local archive.")
             return
         self._selected_id = identity
+        self._feed_explicitly_cleared=False
         self.open_page(0)
         self.intelligence_mode.setCurrentIndex(1)
 
