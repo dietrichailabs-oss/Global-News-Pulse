@@ -1,0 +1,152 @@
+"""Owner map/startup integration: honest country-category circle rendering.
+
+Offline synthetic source records only. No live/independent location claims.
+"""
+from __future__ import annotations
+import inspect
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from datetime import datetime, timezone
+
+import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QPoint
+from PySide6.QtGui import QPixmap
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+from global_pulse.map_widget import WorldMap, CATEGORY_COLORS
+from global_pulse.__main__ import show_initializing
+
+
+@pytest.fixture(scope="session")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+def _record(identity, title, category, *, country="United States of America",
+            basis="provider_incident"):
+    now=datetime.now(timezone.utc).isoformat()
+    report={
+        "id":identity + "-report", "source_id":"test-publisher-" + identity,
+        "title":title,"country":country,"country_basis":basis,
+        "published_at":now,"publication_time_known":True,
+        "evidence_status":"active","official":False,"category":category,
+    }
+    return {
+        "id":identity,"title":title,"country":country,
+        "country_basis":basis,"category":category,"status":"active",
+        "synthetic":False,"latitude":None,"longitude":None,
+        "map_areas":[],"reports":[report],
+    }
+
+
+@pytest.fixture
+def map_widget(app):
+    world=WorldMap()
+    world.resize(1600,680)
+    world.show()
+    app.processEvents()
+    yield world
+    if world.country_dialog:
+        world.country_dialog.close()
+    world.close()
+    world.deleteLater()
+    QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
+def _render(world):
+    image=QPixmap(world.width(),world.height())
+    image.fill(Qt.GlobalColor.transparent)
+    world.render(image)
+    return image.toImage()
+
+
+def test_all_source_categories_get_distinct_circles_not_only_disaster(map_widget):
+    categories=(
+        ("Government","Regulatory policy notice"),
+        ("Economy","Quarterly statistical data release"),
+        ("Health","Hospital services announcement"),
+        ("Humanitarian","Food support program bulletin"),
+        ("Infrastructure","Transport engineering update"),
+        ("News","Local public information notice"),
+        ("Disaster","Flood watch with no exact affected-zone coordinates"),
+    )
+    rows=[_record(f"category-{i}",title,category)
+          for i,(category,title) in enumerate(categories)]
+    map_widget.set_events([],country_events=rows)
+    picture=_render(map_widget)
+    usa=[hit for hit in map_widget._country_badge_hits
+         if hit[2]=="United States of America"]
+    assert {hit[3] for hit in usa}=={c for c,_ in categories}
+    assert len({CATEGORY_COLORS[h[3]] for h in usa})==len(categories)
+    assert "0 points" in map_widget.coverage_summary()
+    assert map_widget.visible_clusters()==[]
+    for center,_,_,category,_ in usa:
+        color=picture.pixelColor(int(center.x()),int(center.y()))
+        assert color.alpha()>0, category
+    map_widget.categories={"Health"}
+    _render(map_widget)
+    usa=[hit for hit in map_widget._country_badge_hits
+         if hit[2]=="United States of America"]
+    assert {hit[3] for hit in usa}=={"Health"}
+
+
+def test_country_circle_click_opens_country_source_evidence(map_widget,app):
+    map_widget.set_events([],country_events=[
+        _record("gov","Government press announcement","Government")])
+    _render(map_widget)
+    hit=next(h for h in map_widget._country_badge_hits if h[3]=="Government")
+    selected=[]
+    map_widget.country_selected.connect(selected.append)
+    point=QPoint(round(hit[0].x()),round(hit[0].y()))
+    QTest.mouseClick(map_widget,Qt.MouseButton.LeftButton,pos=point)
+    app.processEvents()
+    assert selected==["United States of America"]
+    assert map_widget.country_dialog is not None
+
+
+def test_publisher_geography_alone_never_creates_country_circle(map_widget):
+    record=_record("unlocated","Routine publisher press notice","Government",
+                   basis="publisher_coverage")
+    map_widget.set_events([],country_events=[record])
+    _render(map_widget)
+    assert not map_widget._country_badge_hits
+    assert "0 points" in map_widget.coverage_summary()
+
+
+def test_dated_economic_observation_has_country_circle_not_crisis(map_widget):
+    map_widget.set_events([],country_events=[],observations=[{
+        "country_name":"United States of America","country_code":"USA",
+        "indicator_name":"GDP growth","observation_date":"2025",
+        "value":1.0
+    }])
+    _render(map_widget)
+    usa=[h for h in map_widget._country_badge_hits
+         if h[2]=="United States of America"]
+    assert len(usa)==1 and usa[0][3]=="Economy"
+    assert "dated economic observation" in usa[0][4]
+    assert "0 points" in map_widget.coverage_summary()
+    assert not map_widget.country_activity
+
+
+def test_official_pin_is_double_circular_ring_never_square_frame():
+    method=inspect.getsource(WorldMap.paintEvent)
+    assert "if verification == \"official\"" in method
+    assert "painter.drawRect(QRectF(center" not in method
+    assert "painter.drawEllipse(center, radius+5, radius+5)" in method
+
+
+def test_initializing_notice_survives_clicks_before_window_ready(app):
+    splash=show_initializing(app)
+    try:
+        assert splash.isVisible()
+        assert "INITIALIZING" in splash.message()
+        QTest.mouseClick(splash,Qt.MouseButton.LeftButton,pos=QPoint(10,10))
+        app.processEvents()
+        assert splash.isVisible()
+    finally:
+        splash.close()
+        splash.deleteLater()
+        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        app.processEvents()

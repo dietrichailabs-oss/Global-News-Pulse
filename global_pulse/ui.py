@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
 )
 
-from .map_widget import WorldMap
+from .map_widget import WorldMap, CATEGORY_COLORS
 from .situation_actions import SituationActions
 from .theme import STYLE, SEVERITY
 
@@ -317,8 +317,8 @@ class MainWindow(SituationActions, QMainWindow):
         # a normal interactive session. Coalesce them on the GUI event loop.
         self._collection_refresh_timer=QTimer(self)
         self._collection_refresh_timer.setSingleShot(True)
-        self._collection_refresh_timer.setInterval(200)
-        self._collection_refresh_timer.timeout.connect(self.refresh_data)
+        self._collection_refresh_timer.setInterval(500)
+        self._collection_refresh_timer.timeout.connect(self._refresh_source_status_ui)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
@@ -391,8 +391,24 @@ class MainWindow(SituationActions, QMainWindow):
         for key,title in (("critical","Critical"),("high","High"),("moderate","Moderate"),("informational","Info"),("unassessed","Unassessed")):
             w=label(f"● {title}");w.setStyleSheet(f"color:{SEVERITY[key]};font-size:10px;");legend.addWidget(w)
         legend.addStretch()
-        w=label("◌ Unverified   ◔ Developing   ○ Corroborated   □ Official source","Muted");w.setToolTip("Importance uses color. Evidence uses ring patterns. Official means an attributed statement or measurement, not blanket confirmation of underlying claims.");legend.addWidget(w)
+        w=label("◌ Unverified   ◔ Developing   ◎ Official","Muted")
+        w.setToolTip("Incident-pin color is importance; circular ring pattern is source status. Official is an attributed source, not independent corroboration.")
+        legend.addWidget(w)
         self.map_panel.layout.addLayout(legend)
+        country_legend=QHBoxLayout()
+        country_legend.setSpacing(8)
+        for kind in ("Government","Economy","Health","Humanitarian","Infrastructure","News"):
+            dot=label(f"● {kind}", "Muted")
+            dot.setStyleSheet(
+                f"color:{CATEGORY_COLORS[kind]};font-size:9px;"
+            )
+            dot.setToolTip(
+                "Country-colored circular badge: source reporting/observations "
+                "attributed to the country, NOT a precise incident coordinate."
+            )
+            country_legend.addWidget(dot)
+        country_legend.addStretch()
+        self.map_panel.layout.addLayout(country_legend)
         crisis_legend=QHBoxLayout();crisis_legend.setSpacing(8)
         for text,color in (("//// Conflict / war","#d84a52"),("//// Protest / unrest","#e3bd4d"),("==== Migration / displacement","#9a6748")):
             item=label(text);item.setStyleSheet(f"color:{color};font-size:9px;");crisis_legend.addWidget(item)
@@ -630,9 +646,21 @@ class MainWindow(SituationActions, QMainWindow):
         return filters
 
     def _schedule_collected_refresh(self):
-        """Merge status-only updates while preserving actual evidence refresh."""
+        """Merge provider-status-only updates, not event/news archive changes."""
         if not self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.start()
+
+    def _refresh_source_status_ui(self):
+        """A provider polling status is not a reason to reload 5k map events."""
+        self.last_label.setText(
+            "Last collection  " +
+            timestamp(getattr(self.controller,"last_collection",""))
+        )
+        # Source details are only needed if that tab is actually on screen.
+        # Actual report ingest still uses Controller.data_changed and the full
+        # event/map refresh. No stale incident location is fabricated here.
+        if self.pages.currentIndex()==3 and self.isVisible():
+            self._populate_sources()
 
     def refresh_data(self,*args):
         if self._refreshing:return
@@ -1161,10 +1189,12 @@ class MainWindow(SituationActions, QMainWindow):
     def closeEvent(self,event):
         if self._force_close or getattr(self.controller,"_closed",False):
             event.accept();return
-        self.save_layout()
         if self._close_handler and not self._force_close:
+            # Close-to-tray policy and one deferred settings save belong to
+            # bootstrap; avoid blocking the X click with duplicate SQLite IO.
             event.ignore();self._close_handler()
         else:
+            self.save_layout()
             if hasattr(self.media,"shutdown"):self.media.shutdown()
             event.accept()
 

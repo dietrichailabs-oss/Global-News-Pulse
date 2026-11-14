@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import json
 from pathlib import Path
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.controller import Controller
@@ -195,13 +195,25 @@ def test_all_map_layers_can_be_disabled_and_state_restored(qtapp):
 def test_close_handler_and_persisted_view(desktop,qtapp):
     window,controller=desktop
     calls=[]
-    window.set_close_handler(lambda:calls.append("close"))
+    # Bootstrap, not QWidget.closeEvent, owns one deferred save. Model that
+    # queued persistence without exercising a real OS tray in offscreen Qt.
+    window.set_close_handler(lambda:(calls.append("close"),QTimer.singleShot(0,window.save_layout)))
     window.world_map.zoom_by(2)
     window.close();qtapp.processEvents()
     assert calls==["close"]
     assert window.isVisible() # Bootstrap decides hide or exit; Qt did not destroy it.
     assert controller.get_setting("map_view")["zoom"]==2.0
     assert controller.get_setting("window_geometry")
+
+
+def test_close_handler_does_not_block_ui_with_layout_database_write(desktop):
+    window,_=desktop
+    calls=[]
+    window.save_layout=lambda:calls.append("unexpected synchronous save")
+    window.set_close_handler(lambda:calls.append("handler"))
+    window.close()
+    assert calls==["handler"]
+    assert window.isVisible()
 
 
 def test_small_window_map_stays_inside_panel(desktop,qtapp):
