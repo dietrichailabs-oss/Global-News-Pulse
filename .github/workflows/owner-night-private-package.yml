@@ -2,7 +2,7 @@ name: Windows Owner-Test Package - Owner Night Stability Map
 
 on:
   push:
-    branches: [eng/owner-night-stable-map-categories-20261113]
+    branches: [eng/owner-night-economy-badge-navigation-20261113]
     paths:
       - '.github/workflows/owner-night-private-package.yml'
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-owner-test-owner-night-stability
+  group: windows-owner-test-owner-night-stability-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -63,12 +63,12 @@ jobs:
       - name: Confirm QA-checked product head and workflow-only diff
         run: |
           $ErrorActionPreference = 'Stop'
-          git merge-base --is-ancestor e2c15a4104e71c096949303a25cac400568d30ee HEAD
+          git merge-base --is-ancestor 404c2cc60a884d10a5191d313b5f08f9f2199c52 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Frozen QA-reviewed product head absent' }
-          $changed = @(git diff --name-only e2c15a4104e71c096949303a25cac400568d30ee..HEAD)
+          $changed = @(git diff --name-only 404c2cc60a884d10a5191d313b5f08f9f2199c52..HEAD)
           $unexpected = @($changed | Where-Object { $_ -ne '.github/workflows/owner-night-private-package.yml' })
           if ($unexpected.Count -gt 0) { throw ('Unexpected runtime/product change after QA: ' + ($unexpected -join ', ')) }
-          Write-Host 'QA_TESTED_PRODUCT_HEAD=e2c15a4104e71c096949303a25cac400568d30ee'
+          Write-Host 'QA_TESTED_PRODUCT_HEAD=404c2cc60a884d10a5191d313b5f08f9f2199c52'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
