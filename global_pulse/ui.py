@@ -1011,16 +1011,30 @@ class MainWindow(SituationActions, QMainWindow):
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
 
     def _search_full_archive(self, phrase):
-        """Search locally across all source headlines, without inferred coordinates."""
+        """Search all local headlines with one refresh and no invented geography."""
         phrase=str(phrase or "").strip()[:200]
         if not phrase:
             return
         self.open_page(0)
-        self.search.setText(phrase)
-        # All-history search finds aviation and government stories omitted
-        # from country attribution, never fakes an incident location.
-        if self.time_range.currentIndex()!=3:
-            self.time_range.setCurrentIndex(3)
+        # Change the full-archive search dimensions atomically: the normal
+        # search timer and each combo callback would otherwise rebuild map
+        # evidence several times on one country-dialog click.
+        self.search_timer.stop()
+        for control, value in (
+            (self.search, phrase),
+            (self.category, 0),
+            (self.region, 0),
+            (self.time_range, 3),
+            (self.history_slider, 1000),
+        ):
+            blocked=control.blockSignals(True)
+            try:
+                if control is self.search:
+                    control.setText(value)
+                else:
+                    control.setCurrentIndex(value) if hasattr(control,"setCurrentIndex") else control.setValue(value)
+            finally:
+                control.blockSignals(blocked)
         self.refresh_data()
         self.status_label.setText(
             f"Full archive search: {phrase}. Results have no implied country coordinates."
