@@ -91,6 +91,10 @@ def _master_tail(client: httpx.Client) -> bytes:
             body.extend(part)
         if not body:
             raise GdeltBatchError("GDELT master-list tail is empty")
+        # Preserve the previously accepted PR16 transfer-framing guard.
+        # A complete-looking EXPORT line is not proof of a complete HTTP 206 range.
+        if len(body) != end - start + 1:
+            raise GdeltBatchError("GDELT master-list Content-Range body length mismatch")
         # Unless this range starts at byte zero, its first line can be partial.
         if start:
             split = body.find(b"\n")
