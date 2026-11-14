@@ -317,8 +317,8 @@ class MainWindow(SituationActions, QMainWindow):
         # a normal interactive session. Coalesce them on the GUI event loop.
         self._collection_refresh_timer=QTimer(self)
         self._collection_refresh_timer.setSingleShot(True)
-        self._collection_refresh_timer.setInterval(200)
-        self._collection_refresh_timer.timeout.connect(self.refresh_data)
+        self._collection_refresh_timer.setInterval(500)
+        self._collection_refresh_timer.timeout.connect(self._refresh_source_status_ui)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
@@ -646,9 +646,21 @@ class MainWindow(SituationActions, QMainWindow):
         return filters
 
     def _schedule_collected_refresh(self):
-        """Merge status-only updates while preserving actual evidence refresh."""
+        """Merge provider-status-only updates, not event/news archive changes."""
         if not self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.start()
+
+    def _refresh_source_status_ui(self):
+        """A provider polling status is not a reason to reload 5k map events."""
+        self.last_label.setText(
+            "Last collection  " +
+            timestamp(getattr(self.controller,"last_collection",""))
+        )
+        # Source details are only needed if that tab is actually on screen.
+        # Actual report ingest still uses Controller.data_changed and the full
+        # event/map refresh. No stale incident location is fabricated here.
+        if self.pages.currentIndex()==3 and self.isVisible():
+            self._populate_sources()
 
     def refresh_data(self,*args):
         if self._refreshing:return
