@@ -113,28 +113,23 @@ def test_archive_world_brief_star_tab_camera_and_media_latency(app, tmp_path, ar
         assert controller.store.situation_state(identity)["saved"] is False
         assert window._selected_id == identity
 
-        # Browsing inert webcam/TV entries must not start network or playback.
+        # The packaged app uses exactly one TV, one Radio and one Cameras
+        # tab, not the old tiled MediaPanel. Never start any stream here.
         window.media.set_event({
             "id": identity, "synthetic": True, "severity": "unassessed",
-            "media": [
-                {"id": "mock-cam", "title": "SYNTHETIC webcam", "type": "webcam",
-                 "url": "https://example.invalid/disabled-camera"},
-                {"id": "mock-video", "title": "SYNTHETIC video", "type": "video",
-                 "url": "https://example.invalid/disabled-video"},
-            ],
         })
         timings = []
         for _ in range(12):
             def media_browse():
-                window.media.category_buttons["Webcams"].click()
-                window.media.category_buttons["Video"].click()
-                window.media.category_buttons["All"].click()
-                window.media.bank_combo.setCurrentIndex(1)
-                window.media.bank_combo.setCurrentIndex(0)
+                window.media.tabs.setCurrentIndex(2)  # camera bank, no connect
+                window.media.tabs.setCurrentIndex(0)  # single TV, no Watch
+                window.media.tabs.setCurrentIndex(1)  # radio, no Play
+                window.media.tabs.setCurrentIndex(0)
             timings.append(_measure(app, media_browse))
-        results["camera_media_selector_roundtrip"] = _summary(timings)
+        results["camera_tv_radio_tab_roundtrip"] = _summary(timings)
+        assert window.media.tabs.count() == 3
         assert not window.media.auto_cameras
-        assert all(tile.camera is None for tile in window.media.tiles)
+        assert window.media.camera.camera is None
         window.media.stop()
 
         results["full_archive_refresh"] = _summary([
