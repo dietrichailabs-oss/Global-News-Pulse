@@ -20,7 +20,7 @@ from global_pulse.internet_radio import (
 from global_pulse.sdr_directory import public_receiver_url
 from global_pulse.single_media import Television
 from global_pulse.sources import load_media_catalog
-from global_pulse.media_widget import youtube_id
+from global_pulse.media_widget import youtube_id, youtube_player_navigation
 from global_pulse.ui import MainWindow
 
 
@@ -223,3 +223,42 @@ def test_native_tray_has_single_click_context_fallback():
     assert "menu.popup(QCursor.pos())" in source
     assert "tray.setContextMenu(menu)" in source
     assert "controller.notification_changed.emit()" in source
+
+
+def test_youtube_official_watch_mode_allows_only_selected_video(app):
+    identity="Hz1cNNgtLtM"
+    embed=f"https://www.youtube.com/embed/{identity}?autoplay=0"
+    watch=f"https://www.youtube.com/watch?v={identity}&t=30"
+    assert youtube_player_navigation(embed,identity)
+    assert not youtube_player_navigation(watch,identity)
+    assert youtube_player_navigation(watch,identity,full_watch=True)
+    assert not youtube_player_navigation(
+        "https://www.youtube.com/watch?v=Y4M0i8HT7mc",
+        identity,full_watch=True
+    )
+    assert not youtube_player_navigation(
+        "https://www.youtube.com/redirect?q=https://evil.example.org",
+        identity,full_watch=True
+    )
+    assert not youtube_player_navigation(
+        f"http://www.youtube.com/watch?v={identity}",
+        identity,full_watch=True
+    )
+    assert not youtube_player_navigation(
+        f"https://evil.example.org/watch?v={identity}",
+        identity,full_watch=True
+    )
+    assert not youtube_player_navigation(
+        f"https://www.youtube.com:8443/watch?v={identity}",
+        identity,full_watch=True
+    )
+    tv=Television()
+    try:
+        assert tv.full_watch_button is not None
+        assert "YouTube watch page" in tv.full_watch_button.text()
+        assert tv._requested is False
+    finally:
+        tv.stop()
+        tv.deleteLater()
+        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        app.processEvents()
