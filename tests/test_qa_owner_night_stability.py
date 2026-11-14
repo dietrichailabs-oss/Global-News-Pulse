@@ -137,7 +137,9 @@ def test_rapid_star_tab_and_status_bursts_do_not_rebuild_map(desktop,app,monkeyp
     monkeypatch.setattr(window.world_map,"set_events",prohibited)
     controller.last_collection="2026-11-13T19:00:00Z"
     started=time.monotonic()
-    for index in range(30):
+    # Exercise the owner's 100+ repeated Star→tab transitions on hosted Qt.
+    # This is not a physical Windows 11 event-loop-latency certification.
+    for index in range(120):
         window.open_page(0)
         window.save_button.click()
         window.open_page(1)
