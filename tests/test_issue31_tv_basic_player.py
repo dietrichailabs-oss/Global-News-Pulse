@@ -39,10 +39,10 @@ def test_no_green_or_playing_on_load_success_without_video_progress(app):
     try:
         tv._requested = True
         tv._tv_load_finished(True)
-        assert tv.tv_status.text() == "PLAYER LOADED · press Play"
+        assert tv.tv_status.text() == "PAGE LOADED · video NOT verified"
         assert "PLAYING" not in tv.tv_status.text()
         tv._observed(tv._generation, {"missing": True})
-        assert tv.tv_status.text() == "PLAYER LOADED · waiting for video"
+        assert tv.tv_status.text() == "PAGE LOADED · no video confirmed"
         tv._tv_load_finished(False)
         assert tv.tv_status.text().startswith("ERROR")
         assert "YouTube" in tv.tv_status.text()

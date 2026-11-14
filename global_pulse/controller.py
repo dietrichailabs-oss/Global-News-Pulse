@@ -32,6 +32,9 @@ class Controller(QObject):
     # Source health/status-only callbacks never re-query the entire map for
     # each provider ping. MainWindow coalesces this GUI-thread update.
     source_status_changed = Signal()
+    # Native notification delivery/status is NOT news ingest. Distinct signal
+    # avoids synchronous 500 feed + 5k map + 5k country refresh on each toast.
+    notification_changed = Signal()
     # Bookmark-only updates must not repaint the entire 5,000-record map.
     situation_changed = Signal(str, bool)
     status_changed = Signal(str)
