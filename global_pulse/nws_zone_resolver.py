@@ -37,7 +37,13 @@ def _eligible(report, now):
     if report.get('status','active') not in {'','active'} or report.get('evidence_status','active')!='active':return False
     published=_stamp(report.get('published_at'))
     expiry=_stamp(report.get('expires_at'))
-    return not report.get('future_dated') and not (published and published>now) and not (expiry and expiry<=now)
+    hazard_end=_stamp(report.get('ends_at'))
+    # NWS bulletin expiry and the provider's dated hazard end are distinct.
+    # Retain affected-zone evidence for a still-dated hazard even when its
+    # original bulletin has expired. This only resolves geometry: Store's CAP
+    # lifecycle must STILL mark an expired bulletin expired, never current.
+    expired_without_ongoing_hazard=bool(expiry and expiry<=now and not (hazard_end and hazard_end>now))
+    return not report.get('future_dated') and not (published and published>now) and not expired_without_ongoing_hazard
 
 
 def _retry_seconds(value, now):
