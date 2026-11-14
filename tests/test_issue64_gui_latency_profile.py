@@ -135,6 +135,38 @@ def test_archive_world_brief_star_tab_camera_and_media_latency(app, tmp_path, ar
         results["full_archive_refresh"] = _summary([
             _measure(app, window.refresh_data) for _ in range(3)
         ])
+        # Diagnostic attribution: record one additional *normal* refresh by
+        # timing its real database, feed, map and UI composition calls. This
+        # instrumentation never replaces, stubs, or suppresses those methods.
+        from contextlib import ExitStack
+        from unittest.mock import patch
+        phases = []
+        targets = [(controller, "events"), (controller.store, "list_observations"),
+                   (window.world_map, "set_events"),
+                   (window, "_populate_feed"), (window, "_populate_filter_options"),
+                   (window, "_update_world_overview"), (window, "_sync_map_controls")]
+        if window.gdelt_panel is not None:
+            targets.append((window.gdelt_panel, "refresh"))
+        with ExitStack() as patches:
+            for target, method_name in targets:
+                original = getattr(target, method_name)
+                def timed(*args, _original=original, _name=method_name, **kwargs):
+                    started = time.perf_counter()
+                    try:
+                        return _original(*args, **kwargs)
+                    finally:
+                        label = _name
+                        if _name == "events":
+                            label += ":" + ("country_map" if kwargs.get("map_evidence") else
+                                              "map" if kwargs.get("map_view") else "feed")
+                        phases.append({"phase": label, "ms": round(
+                            (time.perf_counter()-started)*1000, 3)})
+                patches.enter_context(patch.object(target, method_name, timed))
+            total = _measure(app, window.refresh_data)
+        print("PULSE_GUI_PHASES=" + json.dumps({
+            "archive_size": archive_size, "full_refresh_ms": round(total, 3),
+            "phases": phases}, sort_keys=True), flush=True)
+
         url = QUrl("pulse-event://open/" + quote(identity, safe=""))
         results["overview_story_link"] = _summary([
             _measure(app, lambda: window._open_overview_event(url)) for _ in range(5)
