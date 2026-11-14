@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 
 from global_pulse.map_evidence import (
-    normalize_geometry, wrapped_polygons, normalize_map_fields,
+    MAX_AREA_POINTS, normalize_geometry, wrapped_polygons, normalize_map_fields,
     nws_map_fields, valid_nws_zone, incident_country, event_areas,
 )
 
@@ -36,7 +36,10 @@ def test_bad_coordinate_rejected(coordinate):
 
 
 def test_point_budget_rejected_before_constructing_large_paths():
-    value = {'type': 'Polygon', 'coordinates': [ALASKA['coordinates'][0] * 2000]}
+    # Keep this fixture above the current bounded area limit; 2,000 copies
+    # (10,000 points) are valid under the accepted 16,384-point budget.
+    over_budget = MAX_AREA_POINTS // len(ALASKA['coordinates'][0]) + 1
+    value = {'type': 'Polygon', 'coordinates': [ALASKA['coordinates'][0] * over_budget]}
     with pytest.raises(ValueError, match='budget'):
         normalize_geometry(value)
 
@@ -74,7 +77,11 @@ def test_nws_zone_geocode_and_distinct_provider_times_retained():
         'effective': '2026-11-10T03:00:00-09:00',
     })
     assert fields['area_geometry'] == ALASKA
-    assert fields['affected_zones'] == ['https://api.weather.gov/zones/forecast/PKZ859']
+    # A hostile neighbor invalidates the COMPLETE explicit affectedZones list;
+    # the separate polygon supplied directly by NWS is still trusted.
+    assert fields['affected_zones'] == []
+    assert fields['area_status'] == 'provider_geometry'
+    assert 'area_zone_reference_basis' not in fields
     assert fields['area_geocodes'] == {'UGC': ['PKZ859'], 'SAME': ['002001']}
     assert fields['onset_at'] == '2026-11-10T13:00:00Z'
     assert fields['ends_at'] == '2026-11-11T14:00:00Z'
