@@ -100,3 +100,47 @@ def test_viewport_clipping_preserves_legitimate_event_hit_testing(world):
     world.pan_x=0.4
     world.grab()   # all offscreen polygons can be clipped, but no Qt exception
     assert world._mapped_country_paths() is not first
+
+
+def test_hover_and_selection_reuse_5000_point_clusters_without_reprojection(world,monkeypatch):
+    points=[{
+        "id":str(i),"latitude":15.0+(i%8)*0.02,
+        "longitude":-90.0+(i%8)*0.02,
+        "category":"Government" if i%2 else "Disaster",
+        "severity":"moderate","verification":"official"
+    } for i in range(5000)]
+    world.set_events(points)
+    old_transform=world._transform
+    count=[]
+    def track():
+        count.append("transform")
+        return old_transform()
+    monkeypatch.setattr(world,"_transform",track)
+    first=world.visible_clusters()
+    assert first and len(count)==1
+    for i in range(20):
+        world._hover_country="Canada" if i%2 else "France"
+        world.selected_event=str(i)
+        assert world.visible_clusters() is first
+    assert len(count)==1
+
+    world.categories={"Government"}
+    filtered=world.visible_clusters()
+    assert filtered is not first
+    assert sum(len(group) for group in filtered)==2500
+    assert len(count)==2
+
+    world.pan_x=0.03
+    moved=world.visible_clusters()
+    assert moved is not filtered
+    assert len(count)==3
+    world.zoom=1.4
+    zoomed=world.visible_clusters()
+    assert zoomed is not moved
+    assert len(count)==4
+
+    world.set_events(points[:25])
+    changed=world.visible_clusters()
+    assert changed is not zoomed
+    assert sum(len(group) for group in changed)==12
+    assert len(count)==5
