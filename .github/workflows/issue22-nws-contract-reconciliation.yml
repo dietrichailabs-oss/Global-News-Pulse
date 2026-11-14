@@ -1,0 +1,68 @@
+name: Issue22 NWS Historical Contract Reconciliation (Engineering Only)
+
+on:
+  push:
+    branches: [eng/issue22-nws-contract-reconcile-20261114]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-nws-contract-reconcile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTHONFAULTHANDLER: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact PR65 ancestry and tests-only delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor ac8a2ac3443f86f7197a0a145cfe9eebd3a40574 HEAD
+          git diff --name-only ac8a2ac3443f86f7197a0a145cfe9eebd3a40574..HEAD | python -c "import sys; wanted={'tests/test_eng_replay_nws_qa62.py','tests/test_map_evidence_geometry.py','tests/test_nws_zone_deadline.py','.github/workflows/issue22-nws-contract-reconciliation.yml'}; found={x.strip() for x in sys.stdin if x.strip()}; assert found==wanted,(found,wanted)"
+      - name: Compile original production source
+        shell: bash
+        run: python -m compileall -q global_pulse
+      - name: NWS originally failing assertions and accepted complete evidence path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_eng_replay_nws_qa62.py tests/test_map_evidence_geometry.py tests/test_nws_zone_deadline.py tests/test_nws_zone_resolution.py tests/test_issue64_intelligence_brief.py
+      - name: No tracked mutation
+        if: always()
+        shell: bash
+        run: git diff --exit-code

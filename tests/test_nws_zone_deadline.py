@@ -1,6 +1,6 @@
 """Slow-drip deadline check using actual httpx streaming, no network."""
 from datetime import datetime, timezone
-import math
+from global_pulse.nws_zone_resolver import MAX_REFUSAL_COOLDOWN_SECONDS
 import httpx
 from global_pulse.nws_zone_resolver import ZoneResolver, _retry_seconds
 
@@ -28,7 +28,10 @@ def test_slow_drip_checked_before_large_chunk_accumulates():
     assert not resolver.lock.locked()
 
 
-def test_large_retry_after_is_not_shortened():
+def test_large_retry_after_refusal_is_finite_and_recovery_can_be_scheduled():
+    # Accepted bounded-denial behavior: do not silently shorten a 2-hour
+    # refusal, but do not turn an overflowing value into an infinite lockout.
+    # A separate resolver/MockTransport test confirms recovery after 24h.
     now=datetime(2026,11,11,tzinfo=timezone.utc)
     assert _retry_seconds('7200',now)==7200
-    assert math.isinf(_retry_seconds('9'*200,now))
+    assert _retry_seconds('9'*200,now)==MAX_REFUSAL_COOLDOWN_SECONDS
