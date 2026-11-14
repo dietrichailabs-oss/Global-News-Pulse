@@ -23,7 +23,7 @@ class HeadlineTranslations(QObject):
     # source language form the key; no model, source evidence or HTML is cached.
     MAX_LANGUAGE_CACHE = 1024
     MAX_DEFERRED = 512
-    DEFERRED_NOTIFY_BATCH = 16
+    DEFERRED_NOTIFY_BATCH = 64
 
     def __init__(self, translator, worker, enabled, parent=None):
         super().__init__(parent)
