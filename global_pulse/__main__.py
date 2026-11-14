@@ -296,8 +296,6 @@ def main(argv=None):
         if shutting_down:
             return
         shutting_down = True
-        tray_refresh_timer.stop()
-        menu.hide()
         window.save_layout()
         for widget in window.findChildren(QWidget):
             if widget.__class__.__name__ == "MediaPanel":
@@ -319,6 +317,11 @@ def main(argv=None):
 
     # Imported here to avoid including a GUI object in the pure helper functions.
     from PySide6.QtWidgets import QWidget
+    # Keep GUI-only cleanup on the quit signal rather than adding
+    # more hidden closure dependencies to the native shutdown body.
+    # The latter also has an independent camera/consent lifecycle test.
+    controller.quit_requested.connect(tray_refresh_timer.stop)
+    controller.quit_requested.connect(menu.hide)
     controller.quit_requested.connect(shutdown)
 
     tray_save_pending = False
