@@ -1,0 +1,490 @@
+name: Issue22 Native Windows Qt Exit Diagnosis (No Package)
+
+on:
+  push:
+    branches:
+      - eng/issue22-native-windows-qt-exit-diagnostic-20261114
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-native-windows-exit-diag
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PIP_NO_INPUT: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTHONFAULTHANDLER: '1'
+      QT_QPA_PLATFORM: windows
+      PYTEST_ADDOPTS: >-
+        --ignore=tests/test_qa_correction_policy.py
+        --deselect=tests/test_e2_workstation_layout.py::test_default_404020_composition_and_stacked_sidebar
+        --deselect=tests/test_e2_workstation_layout.py::test_four_tiles_do_not_autoconnect_and_stop_on_replacement
+        --deselect=tests/test_e2_workstation_layout.py::test_category_controls_keep_original_links_and_honest_empty_states
+        --deselect=tests/test_gate_d_local_cleanup.py::test_cleanup_controls_are_present_in_ui_sources
+        --deselect=tests/test_map_evidence_geometry.py::test_point_budget_rejected_before_constructing_large_paths
+        --deselect=tests/test_nws_geometry_capacity.py::test_captured_shape_is_exact_and_all_coordinates_survive
+        --deselect=tests/test_nws_geometry_capacity.py::test_normalization_resource_measurement_is_bounded
+        --deselect=tests/test_nws_geometry_capacity.py::test_actual_capture_resolver_store_restart_map_pipeline
+        --deselect=tests/test_nws_geometry_capacity_qt.py::test_actual_captured_shape_paints_with_unchanged_total_budget
+        --deselect=tests/test_official_feed_batch.py::test_integrated_catalog_adds_only_completed_live_passes
+        --deselect=tests/test_official_feed_batch2.py::test_batch2_frozen_catalog_preserves_baseline_and_appends_exact_candidates_once
+        --deselect=tests/test_gdelt_named_schema.py::test_prior_parent_is_correct_and_rejected_parser_reproduces_real_schema_failure
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_catalog_is_exact_41_plus_two
+        --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_receipts_match_original_completed_job_identity
+        --ignore=tests/test_official_feed_receipt_recovery.py
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify unchanged product and exact failed parent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git merge-base --is-ancestor '205e5fec6239443e0feb020eced3b8ea8399672f' HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Exact failed PR48 product head is not an ancestor' }
+          $changed = @(git diff --name-only '205e5fec6239443e0feb020eced3b8ea8399672f..HEAD')
+          if ($changed.Count -ne 1 -or $changed[0] -ne '.github/workflows/issue22-native-windows-qt-exit-diagnostic.yml') { throw "Unapproved product or tests change: $($changed -join ', ')" }
+          Write-Host 'FAILED_NATIVE_SOURCE=205e5fec6239443e0feb020eced3b8ea8399672f'
+          Write-Host 'Only isolated diagnostic workflow changed; original package workflow is untouched.'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Create identical locked Python environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m venv build/venv-exit-diag
+          if ($LASTEXITCODE -ne 0) { throw 'venv failed' }
+          $py = 'build/venv-exit-diag/Scripts/python.exe'
+          & $py -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          if ($LASTEXITCODE -ne 0) { throw 'bootstrap lock failed' }
+          & $py -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+          if ($LASTEXITCODE -ne 0) { throw 'build lock failed' }
+          & $py -m pip install --no-deps --no-build-isolation --no-index .
+          if ($LASTEXITCODE -ne 0) { throw 'source install failed' }
+          & $py -m pip check
+          if ($LASTEXITCODE -ne 0) { throw 'dependency check failed' }
+      - name: Replay intermittent native Qt exit and capture sanitized Windows fault metadata
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $py = 'build/venv-exit-diag/Scripts/python.exe'
+          $ignoredModules = @('test_qa_correction_policy.py','test_official_feed_receipt_recovery.py')
+          $files = @(Get-ChildItem -LiteralPath tests -Filter 'test_*.py' -File | Where-Object { $_.Name -notin $ignoredModules } | Sort-Object Name | ForEach-Object { 'tests/' + $_.Name })
+          if ($files.Count -lt 4) { throw 'Too few files for diagnostic partition' }
+          $even = @()
+          $odd = @()
+          for ($i = 0; $i -lt $files.Count; $i++) {
+            if (($i % 2) -eq 0) { $even += $files[$i] } else { $odd += $files[$i] }
+          }
+          # Attempt 5: the two disjoint portions of even-a (15 + 14 modules)
+          # individually exited zero; their interleaved 29-module combined cohort
+          # crashed after 415 passing assertions, so probe order-sensitive native
+          # teardown interactions, not a proven individual module failure.
+          $evenA = @()
+          $evenB = @()
+          for ($i = 0; $i -lt $even.Count; $i++) {
+            if (($i % 2) -eq 0) { $evenA += $even[$i] } else { $evenB += $even[$i] }
+          }
+          if (($evenA.Count + $evenB.Count) -ne $even.Count -or $evenA.Count -eq 0 -or $evenB.Count -eq 0) {
+            throw 'Incorrect disjoint even-cohort partition'
+          }
+          $focusA = @()
+          $focusB = @()
+          for ($i = 0; $i -lt $evenA.Count; $i++) {
+            if (($i % 2) -eq 0) { $focusA += $evenA[$i] } else { $focusB += $evenA[$i] }
+          }
+          if (($focusA.Count + $focusB.Count) -ne $evenA.Count -or $focusA.Count -eq 0 -or $focusB.Count -eq 0) {
+            throw 'Incorrect implicated cohort partition'
+          }
+          # Repeat ONLY the previously faulting 29-module native Windows cohort.
+          # Preserve original test expectations; never count pytest's assertion
+          # summary as success when the native interpreter exit is nonzero.
+          # User-scoped Windows Error Reporting minidump setup for native
+          # exception capture. Generated dumps stay ONLY on this disposable
+          # GitHub Windows runner and are NEVER uploaded or published.
+          $dumpDir = Join-Path $env:RUNNER_TEMP 'qt-native-shutdown-dumps'
+          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+          $dumpRegistration = 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\python.exe'
+          try {
+            New-Item -Path $dumpRegistration -Force | Out-Null
+            New-ItemProperty -Path $dumpRegistration -Name DumpFolder -Value $dumpDir -PropertyType String -Force | Out-Null
+            New-ItemProperty -Path $dumpRegistration -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
+            New-ItemProperty -Path $dumpRegistration -Name DumpCount -Value 2 -PropertyType DWord -Force | Out-Null
+            Write-Host 'Windows user-scoped local crash dump capture configured; dumps will not leave runner.'
+          } catch {
+            Write-Host 'Windows WER local dump registration unavailable; preserve process exit diagnostic.'
+          }
+          $runStart = Get-Date
+          $results = @()
+          for ($attempt = 1; $attempt -le 1; $attempt++) {
+            Write-Host "BEGIN_NATIVE_WINDOWS_REPLAY=$attempt MODULE_COUNT=$($evenA.Count) QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+            Write-Host "GROUP_FILES=$($evenA -join ';')"
+            $attemptStart = Get-Date
+            & $py -X faulthandler -m pytest -vv --tb=short --durations=12 "--junitxml=native-exit-even-a-$attempt.xml" @($evenA)
+            $code = $LASTEXITCODE
+            Write-Host "NATIVE_WINDOWS_REPLAY=$attempt RAW_PROCESS_EXIT=$code"
+            $results += [pscustomobject]@{
+              attempt = $attempt
+              module_count = $evenA.Count
+              native_exit = $code
+              started_utc = $attemptStart.ToUniversalTime().ToString('o')
+            }
+            if ($code -ne 0) {
+              Write-Host 'Native exit not zero: stop replays and inspect Windows Application Error metadata.'
+              break
+            }
+          }
+          # Windows Application Error event 1000 has stable, structured fields:
+          # application name, faulting module and exception code. Read only
+          # events AFTER this test run, and publish ONLY these three identifiers,
+          # event timestamp and ID. Never export full EventLog messages,
+          # process paths, WER dumps, memory or user-machine data.
+          Start-Sleep -Seconds 3
+          $faults = @()
+          try {
+            $events = @(Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000; StartTime=$runStart.AddSeconds(-10)} -MaxEvents 100 -ErrorAction Stop)
+            foreach ($evt in $events) {
+              $xml = [xml]$evt.ToXml()
+              $values = @($xml.Event.EventData.Data | ForEach-Object { [string]$_.'#text' })
+              if ($values.Count -lt 7 -or $values[0] -notmatch '(?i)^pythonw?\.exe$') { continue }
+              $faults += [pscustomobject]@{
+                event_id = $evt.Id
+                time_utc = $evt.TimeCreated.ToUniversalTime().ToString('o')
+                application = $values[0]
+                faulting_module = (Split-Path -Leaf $values[3])
+                exception_code = $values[6]
+              }
+            }
+          } catch {
+            Write-Host 'Windows Application Error events unavailable; no inference about crash module.'
+          }
+          # Probe a locally retained WER dump with the host's EXISTING
+          # Microsoft debugger if installed; never download a debugger,
+          # change the source, upload dump bytes, or expose arbitrary memory.
+          $stackFrames = @()
+          $dumps = @(Get-ChildItem -LiteralPath $dumpDir -Filter '*.dmp' -File -ErrorAction SilentlyContinue)
+          Write-Host "LOCAL_WER_MINIDUMP_COUNT=$($dumps.Count) (private to disposable runner, NOT uploaded)"
+          $debuggerPaths = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe",
+            "$env:ProgramFiles\Windows Kits\10\Debuggers\x64\cdb.exe"
+          )
+          $debugger = $debuggerPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if ($dumps.Count -gt 0 -and $debugger) {
+            Write-Host 'Analyzing local crash dump with existing Windows debugging tools, no symbol download.'
+            $env:_NT_SYMBOL_PATH = ''
+            $rawStack = @(& $debugger -z $dumps[0].FullName -c '.ecxr;kv 30;q' 2>&1)
+            foreach ($line in $rawStack) {
+              # Restrict export to module!symbol tokens; no paths, raw dump,
+              # memory, PID, stack addresses, arguments or exception context.
+              if ([string]$line -match '([A-Za-z0-9_.]+![A-Za-z0-9_?@$<>~:+.-]+)') {
+                $stackFrames += $Matches[1]
+              }
+            }
+            Write-Host "SANITIZED_NATIVE_STACK_TOKENS=$($stackFrames.Count)"
+            foreach ($token in $stackFrames | Select-Object -First 24) { Write-Host "STACK_MODULE_SYMBOL=$token" }
+          } elseif ($dumps.Count -gt 0) {
+            Write-Host 'WER dump present but no installed Microsoft cdb.exe; dump remains local and is not exported.'
+          } else {
+            Write-Host 'No WER dump captured; no native crash stack inference.'
+          }
+          # One native debugger replay ONLY after a normal run reproduces failure.
+          # Do not download tools or export debugger memory, paths or arguments.
+          $gdbTokens = @()
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
+            $gdb = Get-Command gdb.exe -ErrorAction SilentlyContinue
+            if ($gdb) {
+              Write-Host 'HOST_GDB_AVAILABLE=yes; replaying unchanged native cohort under existing host debugger.'
+              $localGdbLog = Join-Path $env:RUNNER_TEMP 'native-qt-gdb-local.log'
+              $gdbArgs = @('--nx','--batch','--quiet','-ex','set pagination off','-ex','set confirm off','-ex','run','-ex','thread apply all bt 24','--args',$py,'-X','faulthandler','-m','pytest','-q','--tb=short') + @($evenA)
+              & $gdb.Source @gdbArgs 2>&1 | Out-File -LiteralPath $localGdbLog -Encoding utf8
+              $gdbStatus = $LASTEXITCODE
+              Write-Host "HOST_GDB_PROCESS_EXIT=$gdbStatus"
+              foreach ($line in Get-Content -LiteralPath $localGdbLog -ErrorAction SilentlyContinue) {
+                $line = [string]$line
+                if ($line -match '(?i)received signal (SIG[A-Z]+)') {
+                  $gdbTokens += 'SIGNAL:' + $Matches[1]
+                }
+                if ($line -match '^\s*#\d+\s+(.+)$') {
+                  $frame = $Matches[1]
+                  $function = ''
+                  $module = ''
+                  if ($frame -match '\bin\s+([a-zA-Z_~][a-zA-Z0-9_:$?@~<>.+-]*)') { $function = $Matches[1] }
+                  if ($frame -match '\bfrom\s+[^\s]+[\\/]([a-zA-Z0-9_.-]+\.dll)') { $module = $Matches[1] }
+                  if ($frame -match '\b([a-zA-Z0-9_.-]+\.dll)') { $module = $Matches[1] }
+                  if ($function -or $module) {
+                    $gdbTokens += 'FRAME:' + $function + '@' + $module
+                  }
+                }
+              }
+              Remove-Item -LiteralPath $localGdbLog -Force -ErrorAction SilentlyContinue
+              Write-Host "SANITIZED_GDB_TOKENS=$($gdbTokens.Count)"
+              foreach ($token in $gdbTokens | Select-Object -First 30) { Write-Host "GDB_DIAGNOSTIC=$token" }
+            } else {
+              Write-Host 'HOST_GDB_AVAILABLE=no; no unreviewed debugger download or source change.'
+            }
+          }
+          # A single extra replay under a small Windows DEBUG_PROCESS monitor.
+          # This is preferable to guessing from the missing WER dump or the
+          # MinGW GDB attempt. It uses the runner's existing compiler only.
+          # Capture ONLY exception code, first/second chance, owning DLL basename
+          # and child exit status; never a stack address, file path, dump or memory.
+          $nativeProbeTokens = @()
+          $nativeProbeStatus = $null
+          $nativeProbeCompileStatus = $null
+          # Run one monitored replay even if the preceding uninstrumented
+          # process exits zero: the native fault is independently intermittent.
+          if ($evenA.Count -eq 29) {
+            $compiler = Get-Command g++.exe -ErrorAction SilentlyContinue
+            if ($compiler) {
+              $probeSource = @'
+          #include <windows.h>
+          #include <tlhelp32.h>
+          #include <cstdint>
+          #include <cstdio>
+          #include <string>
+          #include <dbghelp.h>
+          static std::string owner_module(DWORD pid, const void* address) {
+            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+            if (snap == INVALID_HANDLE_VALUE) return "unresolved";
+            MODULEENTRY32W mod{};
+            mod.dwSize = sizeof(mod);
+            std::string answer = "unresolved";
+            if (Module32FirstW(snap, &mod)) {
+              do {
+                uintptr_t pc = reinterpret_cast<uintptr_t>(address);
+                uintptr_t start = reinterpret_cast<uintptr_t>(mod.modBaseAddr);
+                if (pc >= start && pc - start < static_cast<uintptr_t>(mod.modBaseSize)) {
+                  answer.clear();
+                  for (const wchar_t* name = mod.szModule; *name; ++name) {
+                    answer.push_back((*name >= 32 && *name <= 126) ? static_cast<char>(*name) : '?');
+                  }
+                  break;
+                }
+              } while (Module32NextW(snap, &mod));
+            }
+            CloseHandle(snap);
+            return answer;
+          }
+          // Inspect the native exception thread, not the debugger's own stack.
+          // Report module basenames only; no instruction addresses, dump bytes,
+          // symbol servers, memory, user paths, or command-line arguments.
+          static void sanitized_exception_stack(HANDLE process, DWORD pid, DWORD tid) {
+            HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, tid);
+            if (!thread) { puts("NATIVE_PROBE_STACK_STATUS=thread_unavailable"); return; }
+            CONTEXT context{};
+            context.ContextFlags = CONTEXT_FULL;
+            if (!GetThreadContext(thread, &context)) {
+              puts("NATIVE_PROBE_STACK_STATUS=context_unavailable");
+              CloseHandle(thread); return;
+            }
+          #if defined(_M_X64) || defined(__x86_64__)
+            STACKFRAME64 frame{};
+            frame.AddrPC.Offset = context.Rip;
+            frame.AddrPC.Mode = AddrModeFlat;
+            frame.AddrFrame.Offset = context.Rbp;
+            frame.AddrFrame.Mode = AddrModeFlat;
+            frame.AddrStack.Offset = context.Rsp;
+            frame.AddrStack.Mode = AddrModeFlat;
+            for (unsigned i = 0; i < 24 && frame.AddrPC.Offset; ++i) {
+              const auto pc = static_cast<uintptr_t>(frame.AddrPC.Offset);
+              std::string module = owner_module(pid, reinterpret_cast<const void*>(pc));
+              printf("NATIVE_PROBE_STACK_FRAME=%02u MODULE=%s\n", i, module.c_str());
+              if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread, &frame,
+                               &context, nullptr, SymFunctionTableAccess64,
+                               SymGetModuleBase64, nullptr)) break;
+            }
+          #else
+            puts("NATIVE_PROBE_STACK_STATUS=unsupported_architecture");
+          #endif
+            CloseHandle(thread);
+            fflush(stdout);
+          }
+          int main(int argc, char** argv) {
+            if (argc < 3) return 2;
+            std::string command;
+            for (int i = 1; i < argc; ++i) {
+              if (i > 1) command += ' ';
+              command += '"';
+              command += argv[i];
+              command += '"';
+            }
+            STARTUPINFOA si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+            si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+            si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+            PROCESS_INFORMATION child{};
+            if (!CreateProcessA(argv[1], &command[0], nullptr, nullptr, TRUE,
+                                DEBUG_ONLY_THIS_PROCESS | CREATE_NO_WINDOW,
+                                nullptr, nullptr, &si, &child)) {
+              printf("NATIVE_PROBE_LAUNCH_ERROR=%lu\n", GetLastError());
+              return 2;
+            }
+            // Delay DbgHelp initialization until the loader's initial breakpoint:
+            // immediately after CreateProcess the target loader is not ready.
+            bool symReady = false;
+            bool symbolInitAttempted = false;
+            unsigned long exceptionEventCount = 0;
+            unsigned long crashCodeEventCount = 0;
+            bool exited = false;
+            DWORD childExit = STILL_ACTIVE;
+            DWORD startTime = GetTickCount();
+            while (!exited && (GetTickCount() - startTime < 180000)) {
+              DEBUG_EVENT evt{};
+              if (!WaitForDebugEvent(&evt, 3000)) continue;
+              DWORD continuation = DBG_CONTINUE;
+              if (evt.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
+                const auto& exc = evt.u.Exception;
+                DWORD code = exc.ExceptionRecord.ExceptionCode;
+                ++exceptionEventCount;
+                if (code == 0x80000003UL || code == 0x80000004UL) {
+                  continuation = DBG_CONTINUE; // debugger's initial breakpoint/step
+                  if (!symbolInitAttempted && code == 0x80000003UL) {
+                    symbolInitAttempted = true;
+                    SetLastError(0);
+                    symReady = SymInitialize(child.hProcess, nullptr, TRUE) != FALSE;
+                    printf("NATIVE_PROBE_SYM_INIT=%u LAST_ERROR=%lu\n",
+                           symReady ? 1U : 0U, symReady ? 0UL : GetLastError());
+                  }
+                } else {
+                  continuation = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                if (code == 0xC0000005UL || code == 0xC0000409UL ||
+                    code == 0x40000015UL || code == 0xC000001DUL) {
+                  ++crashCodeEventCount;
+                  std::string module = owner_module(evt.dwProcessId, exc.ExceptionRecord.ExceptionAddress);
+                  printf("NATIVE_PROBE_EXCEPTION=0x%08lX CHANCE=%u MODULE=%s\n",
+                         code, exc.dwFirstChance ? 1U : 2U, module.c_str());
+                  fflush(stdout);
+                  if (!exc.dwFirstChance) {
+                    sanitized_exception_stack(child.hProcess, evt.dwProcessId, evt.dwThreadId);
+                  }
+                }
+              } else if (evt.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
+                if (evt.u.CreateProcessInfo.hFile) CloseHandle(evt.u.CreateProcessInfo.hFile);
+              } else if (evt.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
+                if (evt.u.LoadDll.hFile) CloseHandle(evt.u.LoadDll.hFile);
+              } else if (evt.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) {
+                childExit = evt.u.ExitProcess.dwExitCode;
+                exited = true;
+              }
+              if (!ContinueDebugEvent(evt.dwProcessId, evt.dwThreadId, continuation)) {
+                printf("NATIVE_PROBE_CONTINUE_ERROR=%lu\n", GetLastError());
+                break;
+              }
+            }
+            if (!exited) {
+              TerminateProcess(child.hProcess, 124);
+              WaitForSingleObject(child.hProcess, 3000);
+              GetExitCodeProcess(child.hProcess, &childExit);
+            }
+            printf("NATIVE_PROBE_EVENT_COUNTS=all:%lu crash_codes:%lu\n",
+                   exceptionEventCount, crashCodeEventCount);
+            printf("NATIVE_PROBE_EXIT=0x%08lX COMPLETED=%u\n", childExit, exited ? 1U : 0U);
+            if (symReady) SymCleanup(child.hProcess);
+            CloseHandle(child.hThread);
+            CloseHandle(child.hProcess);
+            return (exited && childExit == 0) ? 0 : 3;
+          }
+          '@
+              Set-Content -LiteralPath native-exception-probe.cpp -Value $probeSource -Encoding utf8
+              & $compiler.Source -std=c++17 -O2 -Wall -Wextra -o native-exception-probe.exe native-exception-probe.cpp -ldbghelp
+              $compileExit = $LASTEXITCODE
+              $nativeProbeCompileStatus = $compileExit
+              Write-Host "LOCAL_NATIVE_DEBUGGER_COMPILE_EXIT=$compileExit"
+              if ($compileExit -eq 0) {
+                $resolvedPython = (Resolve-Path -LiteralPath $py).Path
+                # Compare with the earlier unwrapped python -m pytest replay.
+                # A temporary, runner-local launcher marks pytest return and the
+                # Python atexit phase. This changes only diagnostic invocation,
+                # NOT tracked product/tests or release packaging. It establishes
+                # which exit phase precedes a crash, not a causal native module.
+                $phaseScriptPath = Join-Path $env:RUNNER_TEMP 'native-phase-probe.py'
+                $phaseSource = @'
+          import atexit
+          import os
+          import sys
+          # -m pytest adds cwd to sys.path; preserve the same project import
+          # root even though this temporary diagnostic script lives in RUNNER_TEMP.
+          sys.path.insert(0, os.getcwd())
+          import pytest
+
+          @atexit.register
+          def _last_phase():
+              print("NATIVE_PROBE_PHASE=atexit_callback_reached", flush=True)
+
+          print("NATIVE_PROBE_PHASE=before_pytest_main", flush=True)
+          result = pytest.main(sys.argv[1:])
+          print("NATIVE_PROBE_PHASE=after_pytest_main CODE=%s" % int(result), flush=True)
+          raise SystemExit(int(result))
+          '@
+                Set-Content -LiteralPath $phaseScriptPath -Value $phaseSource -Encoding utf8
+                $probeArgs = @($resolvedPython, '-X', 'faulthandler', $phaseScriptPath, '-q', '--tb=short') + @($evenA)
+                # Finite diagnostic-only replays, stop on the first nonzero
+                # raw native process exit; never interpret a phase marker or a
+                # pytest assertion summary as full package/installer success.
+                for ($monitoredAttempt = 1; $monitoredAttempt -le 3; $monitoredAttempt++) {
+                  Write-Host "BEGIN_MONITORED_NATIVE_REPLAY=$monitoredAttempt"
+                  & .\native-exception-probe.exe @probeArgs 2>&1 | ForEach-Object {
+                    $line = [string]$_
+                    if ($line -match '^NATIVE_PROBE_(EXCEPTION|EXIT|PHASE|LAUNCH_ERROR|CONTINUE_ERROR|STACK_FRAME|STACK_STATUS|SYM_INIT|EVENT_COUNTS)=') {
+                      $nativeProbeTokens += "ATTEMPT=$monitoredAttempt $line"
+                      Write-Host $line
+                    }
+                  }
+                  $nativeProbeStatus = $LASTEXITCODE
+                  Write-Host "MONITORED_NATIVE_REPLAY=$monitoredAttempt EXIT=$nativeProbeStatus"
+                  if ($nativeProbeStatus -ne 0) { break }
+                }
+              } else {
+                Write-Host 'Native exception monitor compiler failed; no module inference.'
+              }
+              Remove-Item -LiteralPath native-exception-probe.cpp,native-exception-probe.exe -Force -ErrorAction SilentlyContinue
+            } else {
+              Write-Host 'No preinstalled C++ compiler; native module debugger not available.'
+            }
+          }
+          ConvertTo-Json -InputObject @($nativeProbeTokens) -Depth 3 | Set-Content -LiteralPath native-debug-event-tokens.json -Encoding utf8
+          ConvertTo-Json -InputObject @($gdbTokens) -Depth 4 | Set-Content -LiteralPath native-gdb-frame-tokens.json -Encoding utf8
+          ConvertTo-Json -InputObject @($stackFrames) -Depth 3 | Set-Content -LiteralPath native-crash-stack-tokens.json -Encoding utf8
+          ConvertTo-Json -InputObject @($results) -Depth 4 | Set-Content -LiteralPath native-exit-results.json -Encoding utf8
+          ConvertTo-Json -InputObject @($faults) -Depth 4 | Set-Content -LiteralPath native-fault-metadata.json -Encoding utf8
+          $results | Format-Table | Out-String | Write-Host
+          Write-Host "SANITIZED_WINDOWS_APPLICATION_FAULT_EVENTS=$($faults.Count)"
+          foreach ($fault in $faults) {
+            Write-Host "FAULT_MODULE=$($fault.faulting_module) EXCEPTION_CODE=$($fault.exception_code) TIME_UTC=$($fault.time_utc)"
+          }
+          if (@($results | Where-Object { $_.native_exit -ne 0 }).Count -gt 0) {
+            throw 'Native Qt Windows pytest process terminated abnormally; unchanged product and packaging HOLD.'
+          }
+          if ($null -ne $nativeProbeCompileStatus -and $nativeProbeCompileStatus -ne 0) {
+            throw 'Native debugger helper compilation failed (diagnostic tooling only, not a product failure).'
+          }
+          if ($null -ne $nativeProbeStatus -and $nativeProbeStatus -ne 0) {
+            throw 'Monitored native Qt Windows interpreter terminated abnormally; source and packaging HOLD.'
+          }
+          Write-Host 'Diagnostic replays only; this is NOT the unsplit Windows package gate or installer smoke.'
+      - name: Upload diagnostic-only records (no executable)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue22-native-qt-exit-diagnostic
+          path: |
+            native-exit-results.json
+            native-fault-metadata.json
+            native-crash-stack-tokens.json
+            native-gdb-frame-tokens.json
+            native-debug-event-tokens.json
+            native-exit-*.xml
+          if-no-files-found: warn
+          retention-days: 3
