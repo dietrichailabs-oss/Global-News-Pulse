@@ -407,10 +407,21 @@ class _MediaTile(QFrame):
                 )
 
         class Page(QWebEnginePage):
+            allowed_video_id=""
+            full_watch_mode=False
+
             def createWindow(self, _):
                 return None
+
             def acceptNavigationRequest(self, url, kind, main):
-                return url.scheme() == "about" or (url.scheme() == "https" and url.host() in {"www.youtube-nocookie.com", "www.youtube.com"} and url.path().startswith("/embed/")) or not main
+                if not main:
+                    return True  # Resource interceptor still restricts hosts
+                if url.scheme()=="about":
+                    return True
+                return youtube_player_navigation(
+                    url.toString(),self.allowed_video_id,
+                    full_watch=self.full_watch_mode
+                )
 
         self.profile = QWebEngineProfile(self)
         self.profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
