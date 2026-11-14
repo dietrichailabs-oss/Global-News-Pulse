@@ -481,6 +481,10 @@ class MainWindow(SituationActions, QMainWindow):
         intel.layout.addLayout(intel_controls)
         self.intel_browser=QTextBrowser();self.intel_browser.setOpenExternalLinks(False);self.intel_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));self.intel_browser.setAccessibleName("Selected event evidence brief")
         self.intel_stack=QSplitter(Qt.Orientation.Vertical);self.intel_stack.setHandleWidth(3)
+        self.intel_stack.setMinimumWidth(0)
+        self.intel_stack.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
         self.intel_stack.addWidget(self.intel_browser)
         self.evidence_status=Panel("EVIDENCE STATUS")
         self.evidence_status_text=QTextBrowser();self.evidence_status_text.setPlainText("No event selected");self.evidence_status_text.setStyleSheet("font-size:10px;")
@@ -490,13 +494,23 @@ class MainWindow(SituationActions, QMainWindow):
         self.change_status_text=QTextBrowser();self.change_status_text.setPlainText("Select a source-linked situation.");self.change_status_text.setStyleSheet("font-size:10px;")
         self.change_status.layout.addWidget(self.change_status_text)
         self.intel_stack.addWidget(self.change_status)
+        # A QTextBrowser's native minimumSizeHint defaults to about 256px.
+        # Nested under two scroll/splitter layers that kept 960px windows at
+        # a 257px minimum right pane, exceeding the original <25% contract.
+        # Keep *height* readable while allowing text to wrap at narrow widths.
+        for panel in (self.evidence_status,self.change_status):
+            panel.setMinimumWidth(0)
+            panel.setSizePolicy(
+                QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+            )
         # Every expanded card must have real text space. A splitter alone can
         # shrink the nested panel headers until its text viewport is zero.
         # Keep a readable minimum and scroll the whole stack on small windows;
         # do not grow the main window or distort the reference's 40/40/20 split.
         for browser in (self.intel_browser,self.evidence_status_text,self.change_status_text):
             browser.ensurePolished()
-            browser.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+            browser.setMinimumWidth(0)
+            browser.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding)
             browser.setMinimumHeight(3 * browser.fontMetrics().lineSpacing() + 24)
         self.intel_stack.setChildrenCollapsible(False)
         self.intel_stack.setSizes([220,100,100])
