@@ -159,3 +159,47 @@ def test_pending_geometry_does_not_get_stuck_behind_304():
     result=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=r).collect({'etag':'old','last_modified':'yesterday','nws_zones_pending':True})
     assert 'if-none-match' not in calls[0].headers and 'if-modified-since' not in calls[0].headers
     assert result['state']['nws_zones_pending'] is False
+
+@pytest.mark.parametrize('length_delta', [-1, 1])
+def test_nws_zone_200_length_mismatch_never_admits_partial_transfer(length_delta):
+    """Valid JSON with incorrect HTTP framing must not become official map evidence."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    claimed = len(payload) + length_delta
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(claimed)}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1
+    assert stats['lookup_failures'] == 1
+    assert stats['unresolved_alerts'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
+
+@pytest.mark.parametrize('bad_length', ['not-a-number', '-42', '1, 2'])
+def test_nws_zone_malformed_http_length_cannot_become_official_zone_evidence(bad_length):
+    """Ambiguous/invalid framing is not accepted as a complete publisher polygon."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': bad_length}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['lookup_failures'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
+def test_nws_zone_matching_200_length_still_admits_valid_offshore_area():
+    """Correctly framed official zone transfers keep working with the same parser."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(len(payload))}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['resolved_alerts'] == 1
+    assert result[0]['area_zone_sources'][0]['url'] == ZONE
+    assert event_areas(result)[0]['basis'] == 'provider_affected_zone_geometry'
+    assert len(list(wrapped_polygons(result[0]['area_geometry']))) == 2

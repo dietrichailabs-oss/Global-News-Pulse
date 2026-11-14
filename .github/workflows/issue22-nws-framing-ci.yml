@@ -1,0 +1,61 @@
+name: Issue22 NWS Framing Carryforward CI
+
+on:
+  push:
+    branches: [eng/issue22-nws-framing-carryforward-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue22-nws-carryforward-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tv-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Compile
+        shell: bash
+        run: python -m compileall -q global_pulse
+      - name: Offline map UI, media and NWS transport regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_owner_night_stability_map.py tests/test_ui_desktop.py tests/test_issue37_country_owner_video.py tests/test_issue22_situation_stars.py tests/test_issue22_filtered_star_binding.py tests/test_issue31_tv_basic_player.py tests/test_tv_pending_timeout.py tests/test_issue22_country_only_retest.py tests/test_issue22_map_pipeline.py tests/test_single_media.py tests/test_issue21_sdr_owner_controls.py tests/test_nws_zone_resolution.py
+      - name: Verify tests preserve source
+        if: always()
+        shell: bash
+        run: git diff --exit-code
