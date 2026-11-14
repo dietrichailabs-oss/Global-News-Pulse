@@ -313,9 +313,17 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # A burst of status-only callbacks (one per collector) can overwhelm
+        # a normal interactive session. Coalesce them on the GUI event loop.
+        self._collection_refresh_timer=QTimer(self)
+        self._collection_refresh_timer.setSingleShot(True)
+        self._collection_refresh_timer.setInterval(200)
+        self._collection_refresh_timer.timeout.connect(self.refresh_data)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        if hasattr(controller, "source_status_changed"):
+            controller.source_status_changed.connect(self._schedule_collected_refresh)
         if hasattr(controller, "situation_changed"):
             controller.situation_changed.connect(self._situation_state_changed)
         controller.status_changed.connect(self._status_update)
@@ -621,8 +629,17 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    def _schedule_collected_refresh(self):
+        """Merge status-only updates while preserving actual evidence refresh."""
+        if not self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.start()
+
     def refresh_data(self,*args):
         if self._refreshing:return
+        # An evidence/user-triggered refresh already includes latest status;
+        # cancel its redundant queued status-only repaint.
+        if self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
             filters=self.events_filters()
