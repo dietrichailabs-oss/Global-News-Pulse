@@ -11,6 +11,7 @@ import json
 from uuid import uuid4
 from PySide6.QtCore import QObject, QTimer, Signal
 from .translation import language_of
+from .language_codes import normalize_language
 
 
 class HeadlineTranslations(QObject):
@@ -21,6 +22,8 @@ class HeadlineTranslations(QObject):
     # Per-window bounded routing results. The original/title and declared
     # source language form the key; no model, source evidence or HTML is cached.
     MAX_LANGUAGE_CACHE = 1024
+    MAX_DEFERRED = 512
+    DEFERRED_NOTIFY_BATCH = 16
 
     def __init__(self, translator, worker, enabled, parent=None):
         super().__init__(parent)
@@ -29,6 +32,15 @@ class HeadlineTranslations(QObject):
         self.enabled = enabled
         self.cache = OrderedDict()
         self.language_cache = OrderedDict()
+        # First-paint UI previews enqueue only unknown headline-language routing.
+        # Each GUI event-loop tick resolves at most one headline, preventing
+        # a 500-row cold archive from blocking the Windows event loop for seconds.
+        # This queue is session-only; it does not contain article bodies.
+        self.deferred = OrderedDict()
+        self.deferred_completed = 0
+        self.deferred_timer = QTimer(self)
+        self.deferred_timer.setInterval(1)
+        self.deferred_timer.timeout.connect(self._drain_deferred)
         self.pending = {}
         self.keys = set()
         self.closed = False
@@ -63,10 +75,35 @@ class HeadlineTranslations(QObject):
             self.language_cache.popitem(last=False)
         return code
 
-    def view(self, event):
+    def _drain_deferred(self):
+        if self.closed or self.enabled() is not True:
+            self.deferred_timer.stop()
+            self.deferred.clear()
+            self.deferred_completed = 0
+            return
+        if not self.deferred:
+            self.deferred_timer.stop()
+            return
+        (title, declared), _ = self.deferred.popitem(last=False)
+        if (title, declared) not in self.language_cache:
+            self._headline_language(title, declared)
+            self.deferred_completed += 1
+        if not self.deferred:
+            self.deferred_timer.stop()
+        # Repaint the feed in bounded batches, not once per title; each
+        # repaint uses only cached codes and rechecks live model consent.
+        if self.deferred_completed >= self.DEFERRED_NOTIFY_BATCH or not self.deferred:
+            self.deferred_completed = 0
+            self._notify()
+
+    def view(self, event, *, defer_language=False):
         title = str(event.get("title") or "Untitled event")
         result = {"title": title, "original": title, "state": "original", "label": "Original headline"}
         if self.closed or self.enabled() is not True:
+            if self.deferred:
+                self.deferred_timer.stop()
+                self.deferred.clear()
+                self.deferred_completed = 0
             return result
         # Never apply an unrelated report's language to the derived event title.
         report = next((r for r in event.get("reports", []) if isinstance(r, dict)
@@ -77,7 +114,25 @@ class HeadlineTranslations(QObject):
         if report is None:
             result["label"] = "Original · headline language unconfirmed"
             return result
-        code = self._headline_language(title, report.get("language", ""))
+        declared = report.get("language", "")
+        key = (title, str(declared))
+        # A publisher-declared language does not need expensive statistical
+        # inference: route it immediately so established worker/consent and
+        # missing-model behavior stays responsive and unchanged. Only unknown
+        # declarations are deferred past first paint.
+        normalized = normalize_language(declared)
+        unknown_declaration = not normalized or normalized in {"und", "unknown", "auto"}
+        if defer_language and unknown_declaration and key not in self.language_cache:
+            self.deferred[key] = None
+            self.deferred.move_to_end(key)
+            while len(self.deferred) > self.MAX_DEFERRED:
+                self.deferred.popitem(last=False)
+            if not self.deferred_timer.isActive():
+                self.deferred_timer.start()
+            result.update(state="detecting",
+                          label="Original · identifying headline language locally")
+            return result
+        code = self._headline_language(title, declared)
         if code == "en":
             result["label"] = "Original English headline"
             return result
@@ -153,6 +208,9 @@ class HeadlineTranslations(QObject):
         return True
 
     def cancel_pending(self):
+        self.deferred_timer.stop()
+        self.deferred.clear()
+        self.deferred_completed = 0
         identities = list(self.pending)
         self.pending.clear()
         self.keys.clear()
@@ -162,6 +220,9 @@ class HeadlineTranslations(QObject):
     def close(self):
         self.closed = True
         self.notify.stop()
+        self.deferred_timer.stop()
+        self.deferred.clear()
+        self.deferred_completed = 0
         self.cancel_pending()
         self.cache.clear()
         self.language_cache.clear()

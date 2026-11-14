@@ -1,0 +1,79 @@
+name: Issue64 Engineering Nonblocking Cold Headline Routing
+
+on:
+  push:
+    branches: [eng/issue64-nonblocking-cold-headlines-20261114]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue64-nonblocking-cold-headlines
+  cancel-in-progress: true
+
+jobs:
+  cold-headlines:
+    name: Cold headline GUI and original evidence (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Guard frozen PR69 exact source and only six scoped paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor b658efcb283201b28775370984c27449ba81456e HEAD
+          git diff --name-only b658efcb283201b28775370984c27449ba81456e..HEAD | python -c "import sys; expected={'global_pulse/headline_translation.py','global_pulse/controller.py','global_pulse/ui.py','tests/test_issue64_deferred_cold_headlines.py','tests/test_issue64_cold_paint_attribution.py','.github/workflows/issue64-nonblocking-cold-headlines.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Compile full application and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse
+          python -m py_compile tests/test_issue64_deferred_cold_headlines.py tests/test_issue64_cold_paint_attribution.py
+      - name: Headline routing and World Brief regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q -s --tb=short tests/test_issue64_deferred_cold_headlines.py tests/test_issue64_bounded_headline_routing.py tests/test_source_capacity_headlines.py tests/test_headline_desktop_flow.py tests/test_issue22_unknown_language.py tests/test_issue64_intelligence_brief.py
+      - name: Measure real cold Qt first paint on identical 180 and 820 row archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fresh interpreters for each dataset; do not mute native process exits.
+          # Diagnostic only: the full unsplit Windows package suite remains mandatory.
+          python -m pytest -q -s --tb=short tests/test_issue64_cold_paint_attribution.py -k 180
+          python -m pytest -q -s --tb=short tests/test_issue64_cold_paint_attribution.py -k 820
+      - name: Check tracked source remains unchanged
+        if: always()
+        shell: bash
+        run: git diff --exit-code

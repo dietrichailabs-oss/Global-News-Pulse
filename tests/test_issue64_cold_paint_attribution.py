@@ -45,7 +45,8 @@ def test_first_paint_cpu_attribution_uses_real_qt_feed_and_original_evidence(tmp
     app = QApplication.instance() or QApplication([])
     controller = Controller(tmp_path, demo=True)
     window = None
-    phases = {"lang_calls": 0, "lang_ms": 0., "feed_calls": 0, "feed_ms": 0.,
+    phases = {"lang_calls": 0, "lang_ms": 0., "feed_lang_calls": 0,
+              "feed_calls": 0, "feed_ms": 0.,
               "refresh_calls": 0, "refresh_ms": 0.}
     try:
         started = time.perf_counter()
@@ -65,9 +66,11 @@ def test_first_paint_cpu_attribution_uses_real_qt_feed_and_original_evidence(tmp
 
         def feed(self, *args, **kwargs):
             t = time.perf_counter()
+            before = phases["lang_calls"]
             try:
                 return original_feed(self, *args, **kwargs)
             finally:
+                phases["feed_lang_calls"] += phases["lang_calls"] - before
                 phases["feed_calls"] += 1
                 phases["feed_ms"] += (time.perf_counter()-t)*1000
 
@@ -97,10 +100,22 @@ def test_first_paint_cpu_attribution_uses_real_qt_feed_and_original_evidence(tmp
         assert all(e["title"].startswith("SYNTHETIC UI profile") for e in window._events)
         assert phases["feed_calls"] >= 1 and phases["refresh_calls"] >= 1
         assert phases["lang_calls"] >= 1, "Cold route instrumentation did not cover language_of"
-        assert 0 <= phases["lang_ms"] <= phases["feed_ms"] <= first_paint_ms + 10
+        # Pre-deferred builds performed all 500 language detections INSIDE
+        # feed population. Now the Qt event loop performs separate bounded
+        # tasks, so language time must NOT be claimed as part of feed time.
+        # Preserve both independent timings instead of weakening this to a
+        # no-op or hiding timer work from the first-paint measurement.
+        assert 0 <= phases["feed_ms"] <= first_paint_ms + 10
+        assert 0 <= phases["lang_ms"] <= first_paint_ms + 10
+        assert phases["feed_lang_calls"] <= 1, (
+            "Feed preview is still doing synchronous headline detection",
+            phases,
+        )
+        assert len(controller._headlines.deferred) <= controller._headlines.MAX_DEFERRED
         print("PULSE_COLD_PAINT=" + json.dumps({
             "size": size, "ingest_ms_excluded": round(ingest_ms, 3),
             "first_paint_ms": round(first_paint_ms, 3),
+            "deferred_remaining_after_first_paint": len(controller._headlines.deferred),
             **{k: round(v, 3) if k.endswith("_ms") else v for k, v in phases.items()}
         }, sort_keys=True), flush=True)
     finally:
