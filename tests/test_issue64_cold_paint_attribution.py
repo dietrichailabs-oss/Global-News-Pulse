@@ -28,7 +28,7 @@ def _archive(size):
                   "Economy", "Humanitarian", "Infrastructure", "News")
     return [
         {"id": f"issue64-cold-{i}", "event_key": f"issue64-cold:{i}",
-         "title": f"SYNTHETIC cold paint {categories[i % len(categories)]} record {i} without verified claims",
+         "title": f"SYNTHETIC UI profile {categories[i % len(categories)]} #{i}",
          "summary": "Offline fictional archive record, not a real incident",
          "source_id": "offline-cold-paint", "publisher": "Synthetic Test Publisher",
          "url": f"https://example.invalid/cold/{i}",
@@ -94,7 +94,7 @@ def test_first_paint_cpu_attribution_uses_real_qt_feed_and_original_evidence(tmp
         assert not controller.monitoring
         assert not window.media.auto_cameras
         assert window.media.camera.camera is None
-        assert all(e["title"].startswith("SYNTHETIC cold paint") for e in window._events)
+        assert all(e["title"].startswith("SYNTHETIC UI profile") for e in window._events)
         assert phases["feed_calls"] >= 1 and phases["refresh_calls"] >= 1
         assert phases["lang_calls"] >= 1, "Cold route instrumentation did not cover language_of"
         assert 0 <= phases["lang_ms"] <= phases["feed_ms"] <= first_paint_ms + 10
