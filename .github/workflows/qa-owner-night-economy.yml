@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 404c2cc60a884d10a5191d313b5f08f9f2199c52 HEAD
-          unexpected="$(git diff --name-only 404c2cc60a884d10a5191d313b5f08f9f2199c52..HEAD | grep -v -E '^(tests/test_qa_owner_night_stability.py|\.github/workflows/qa-owner-night-stability.yml)$' || true)"
+          unexpected="$(git diff --name-only 404c2cc60a884d10a5191d313b5f08f9f2199c52..HEAD | grep -v -E '^(tests/test_qa_owner_night_stability.py|tests/test_qa_owner_night_economy_click.py|\.github/workflows/qa-owner-night-economy.yml)$' || true)"
           if [ -n "$unexpected" ]; then
             echo "QA branch changed product/runtime: $unexpected" >&2
             exit 1
