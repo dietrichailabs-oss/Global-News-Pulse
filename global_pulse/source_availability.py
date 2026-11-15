@@ -46,6 +46,32 @@ def enabled_ids(catalog: list[dict], preference: object) -> set[str]:
     return available & requested
 
 
+def migrate_all_available_sources_once(store, catalog: list[dict]) -> bool:
+    """Once per installed profile, honor the owner's enable-all upgrade request.
+
+    Preserve the previous setting for recovery, and never repeat the reset:
+    subsequent per-provider user opt-outs must survive restart. This touches
+    only local settings; it neither starts monitoring nor fetches a provider.
+    Excluded/duplicated/unintegrated entries remain unavailable.
+    """
+    marker = "source_enable_all_upgrade_v1"
+    backup = "enabled_sources_before_enable_all_v1"
+    if store.get_setting(marker, False) is True:
+        return False
+
+    previous = store.get_setting("enabled_sources", None)
+    if previous is not None:
+        # Back up before changing the active list. On a partial migration,
+        # preserve the FIRST original values and re-apply the desired set.
+        if store.get_setting(backup, None) is None:
+            store.set_setting(backup, previous)
+        store.set_setting("enabled_sources", sorted(available_ids(catalog)))
+    # A None preference already means all eligible and needs no list rewrite.
+    # Write completion LAST so interrupted upgrades retry on next startup.
+    store.set_setting(marker, True)
+    return previous is not None
+
+
 def source_link(source: dict) -> tuple[str, str]:
     """Prefer the real homepage; do not label an RSS document as a website."""
     for field, title in (("homepage", "Open website"), ("url", "Open feed" if capability(source)[0] else "Open website")):
