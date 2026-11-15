@@ -4,7 +4,9 @@
 
 ## What is enabled
 
-The installation has 14 enabled public source configurations, including USGS, NASA EONET, NWS, NOAA SWPC, GDACS, UK FCDO, ECB, Japan MOF, SAnews, Global Voices, India PIB, and three World Bank series. They require no API key. The 14 other catalog entries are disabled or manual; the application must not let a checkbox override `access_status=review_required`.
+**Current Issue82 candidate (2026-11-15):** The application has 170 catalog entries, of which 127 are presently capability-eligible for scheduled collection and **enabled by default on fresh profiles**. The other 43 include manual-only, review/credential-gated, duplicate, unavailable or disallowed configurations. Existing explicitly saved opt-outs are preserved. **Settings → Enable all available sources → Save** opts an existing profile into all eligible entries only. A checkbox must never override `access_status=review_required`, missing credentials, denied provider access or other admission guards. Runtime Source status may change independently from capability eligibility.
+
+**Historical inventory notice:** The per-source table below is the original, frozen **2026-11-08** 28-entry review, not a complete/current 170-entry capability or rights ledger. Its historical “Enabled” column describes that earlier reviewed route; for the active catalog and actual settings, consult the in-app **Sources** and **Settings** pages and the current reviewed catalog source. In particular, the legacy ECB alias is deduplicated in favor of `ecb_press` and the India PIB route observed HTTP 403, so neither should be counted as an automatically available duplicate/working feed.
 
 The app fetches public metadata, headlines, and bounded feed excerpts. It does not download complete publisher articles, photographs, account data, or video/audio files. Feed text is treated as untrusted plain text. Source attribution, author/byline where supplied, original URL, source-license text, publication date, retrieval date, and source update time travel with the record. A missing publication time remains explicitly unknown. An official statement confirms attribution, not all its claims. EONET and GDACS reuse external reporting and are not automatically independent corroboration.
 
@@ -14,7 +16,7 @@ Collection intervals are at least 10 minutes by default, 5 minutes only where co
 
 “Enabled” means a reviewed public access route was implemented. It does not guarantee uptime, current publication frequency, full national coverage, or independent verification of the reports.
 
-| ID / source | Default | Access / scope | Rights, attribution, and evidence | Limitation |
+| ID / source (historical) | Default (2026-11-08 review) | Access / scope | Rights, attribution, and evidence | Limitation |
 |---|---|---|---|---|
 | `usgs` — USGS Earthquake Hazards | Enabled | [usgs](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson) · 5 min floor | USGS public data; cite USGS and contributing networks. No agency endorsement. [Provider documentation](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php) | Only available feed fields; no guarantee of completeness. |
 | `eonet` — NASA EONET | Enabled | [eonet](https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=100&days=30) · 10 min floor | NASA event metadata; retain linked original source attribution. Third-party media excluded. [Provider documentation](https://eonet.gsfc.nasa.gov/docs/v3) | Only available feed fields; no guarantee of completeness. |
