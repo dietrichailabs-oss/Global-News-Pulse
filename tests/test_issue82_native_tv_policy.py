@@ -69,6 +69,13 @@ def test_webview2_source_installs_resource_and_permission_guards_before_navigate
     assert 'FrameAllowed(e.Uri,videoId,fullWatch)' in source
     assert 'PolicySelfTest()' in source
     assert 'CleanupPrivateProfileAfterExit()' in source
+    assert 'RejectWebView2Overrides();' in source
+    assert 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS' in source
+    assert 'WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER' in source
+    assert 'Registry.LocalMachine, Registry.CurrentUser' in source
+    assert 'environment.UserDataFolder' in source
+    assert source.index('RejectWebView2Overrides();') < source.index('CoreWebView2Environment.CreateAsync(')
+    assert 'ExclusiveUserDataFolderAccess = true' in source
 
 
 def test_native_host_quick_stop_restarts_leave_no_stale_watchdog(monkeypatch):
