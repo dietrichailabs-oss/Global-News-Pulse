@@ -11,7 +11,7 @@ import math
 import sys
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import Qt, Signal, Slot, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QPainter, QPen, QFont, QKeySequence, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton,
@@ -319,6 +319,13 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # Collector events may arrive in bursts while the user is switching
+        # tabs. Start the first-due timer once (never restart on every signal).
+        # No widgets or QTimer are touched from the collector's worker thread.
+        self._evidence_refresh_timer=QTimer(self)
+        self._evidence_refresh_timer.setSingleShot(True)
+        self._evidence_refresh_timer.setInterval(160)
+        self._evidence_refresh_timer.timeout.connect(self.refresh_data)
         # A burst of status-only callbacks (one per collector) can overwhelm
         # a normal interactive session. Coalesce them on the GUI event loop.
         self._collection_refresh_timer=QTimer(self)
@@ -328,6 +335,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        controller.evidence_changed.connect(self._schedule_evidence_refresh)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
         if hasattr(controller, "source_status_changed"):
@@ -750,6 +758,18 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    @Slot()
+    def _schedule_evidence_refresh(self):
+        """Batch real collector changes; keep explicit filter/user refresh immediate.
+
+        The first signal fixes the deadline: a continuous source burst cannot
+        starve the UI by continually pushing that deadline into the future.
+        """
+        if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        if not self._evidence_refresh_timer.isActive():
+            self._evidence_refresh_timer.start()
+
     def _schedule_collected_refresh(self):
         """Merge provider-status-only updates, not event/news archive changes."""
         if not self._collection_refresh_timer.isActive():
@@ -763,14 +783,23 @@ class MainWindow(SituationActions, QMainWindow):
             timestamp(getattr(self.controller,"last_collection",""))
         )
         # Source details are only needed if that tab is actually on screen.
-        # Actual report ingest still uses Controller.data_changed and the full
-        # event/map refresh. No stale incident location is fabricated here.
+        # Actual material report ingest uses Controller.evidence_changed and a
+        # bounded, coalesced full event/map refresh. No location is invented.
         if self.pages.currentIndex()==3 and self.isVisible():
             self._populate_sources()
             self._dirty_pages.discard(3)
 
     def refresh_data(self,*args):
-        if self._refreshing:return
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        if self._refreshing:
+            # A newer revision arrived during a reentrant Qt paint. Never
+            # drop it; run one more coalesced refresh after this pass.
+            self._schedule_evidence_refresh()
+            return
+        # Explicit user/filter refresh subsumes a pending collector refresh.
+        if self._evidence_refresh_timer.isActive():
+            self._evidence_refresh_timer.stop()
         # An evidence/user-triggered refresh already includes latest status;
         # cancel its redundant queued status-only repaint.
         if self._collection_refresh_timer.isActive():
