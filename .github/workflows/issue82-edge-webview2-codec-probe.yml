@@ -68,12 +68,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Offline codec probe process failed' }
           if (-not (Test-Path -LiteralPath $report)) { throw 'No report file' }
           Get-Content -LiteralPath $report
+      - name: Compare existing QtWebEngine codecs offline
+        run: |
+          $ErrorActionPreference='Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'ISSUE82_OFFLINE_QTWEBENGINE_CODEC_PROBE.json'
+          python scripts/issue82_webview2_codec_probe.py --backend qtwebengine --output $report
+          if ($LASTEXITCODE -ne 0) { throw 'QtWebEngine codec probe process failed' }
+          if (-not (Test-Path -LiteralPath $report)) { throw 'No QtWebEngine report file' }
+          Get-Content -LiteralPath $report
       - name: Upload research report (no installer, no release)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: issue82-offline-webview2-codec-probe
-          path: ${{ runner.temp }}/ISSUE82_OFFLINE_WEBVIEW2_CODEC_PROBE.json
+          path: |
+            ${{ runner.temp }}/ISSUE82_OFFLINE_WEBVIEW2_CODEC_PROBE.json
+            ${{ runner.temp }}/ISSUE82_OFFLINE_QTWEBENGINE_CODEC_PROBE.json
           if-no-files-found: warn
           retention-days: 7
       - name: Confirm git checkout remains unchanged
