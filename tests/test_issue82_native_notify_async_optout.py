@@ -3,6 +3,8 @@
 Offline synthetic QProcess contract, not evidence of native Windows toast delivery.
 """
 from collections import deque
+import sys
+import time
 
 from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import QApplication
@@ -120,5 +122,44 @@ def test_no_queued_restart_after_final_application_stop(monkeypatch):
         notifier._finished()
         assert notifier.process is None
     finally:
+        notifier.deleteLater()
+        app.processEvents()
+
+
+def test_actual_qprocess_optout_is_nonblocking_and_writes_exit_frame():
+    """Hosted Qt subprocess evidence, still NOT a packaged Windows SDK helper."""
+    app = QApplication.instance() or QApplication([])
+    notifier = NativeNotifications(enabled=True)
+    child = QProcess(notifier)
+    # Worker reads one line then exits only for the exact newline-delimited
+    # bridge exit frame. Incorrect literal backslash-n would hang here.
+    script = (
+        "import sys\n"
+        "frame=sys.stdin.buffer.readline()\n"
+        "raise SystemExit(0 if frame == b'{\"command\":\"exit\"}\\n' else 7)\n"
+    )
+    ended = []
+    child.finished.connect(lambda code, _status: ended.append(code))
+    child.finished.connect(notifier._finished)
+    child.start(sys.executable, ["-u", "-c", script])
+    try:
+        assert child.waitForStarted(5000), "The synthetic local child did not launch"
+        notifier.process = child
+        beginning = time.monotonic()
+        notifier.disable_nonblocking()
+        assert time.monotonic() - beginning < 1.0, (
+            "Settings/tray OFF must not synchronously wait for process exit"
+        )
+        end_time = time.monotonic() + 4
+        while not ended and time.monotonic() < end_time:
+            app.processEvents()
+            time.sleep(0.005)
+        assert ended == [0], "The exact exit frame must retire the real Qt child"
+        assert notifier._stopped
+        assert notifier.process is None
+    finally:
+        if child.state() != QProcess.ProcessState.NotRunning:
+            child.kill()
+            child.waitForFinished(1000)
         notifier.deleteLater()
         app.processEvents()
