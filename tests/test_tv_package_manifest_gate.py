@@ -69,7 +69,7 @@ def test_complete_runtime_requires_tv_exe_loader_notices_and_self_contained_core
         assert path in message
 
 
-def test_ref_only_tv_dependency_and_dual_pinned_sdk_notice_are_accepted(tmp_path: Path):
+def _tv_reference_notice_fixture(tmp_path: Path):
     native = tmp_path / "tv"
     ledger = native / "licenses"
     ledger.mkdir(parents=True)
@@ -81,32 +81,88 @@ def test_ref_only_tv_dependency_and_dual_pinned_sdk_notice_are_accepted(tmp_path
             "GlobalPulse.TV/1.0.0": {"type": "project"},
         }
     }), encoding="utf-8")
-    receipt = {
-        "packages": [{
+    records = []
+    notice_paths = []
+    for name in ("Microsoft.Web.WebView2.Core", "Microsoft.Web.WebView2.WinForms",
+                 "Microsoft.Web.WebView2.Wpf"):
+        folder = ledger / (name + "-1.0.4314.35")
+        folder.mkdir()
+        notice = folder / "LICENSE.txt"
+        notice.write_text("reviewed fixture for " + name, encoding="utf-8")
+        notice_paths.append(notice)
+        records.append({
+            "package": name,
+            "version": "1.0.4314.35",
             "type": "reference",
             "notice_source_package": manifest.TV_PARENT,
             "notice_source_lock_sha512": manifest.TV_NUGET_CONTENT_SHA512,
             "notice_source_archive_sha512": manifest.TV_ARCHIVE_SHA512,
-            "notice_files": [{"sha256": "synthetic"}],
-        }]
-    }
+            "notice_files": [{
+                "packaged_relative": "licenses/" + folder.name + "/LICENSE.txt",
+                "bytes": notice.stat().st_size,
+                "sha256": manifest.digest(notice),
+            }],
+        })
+    receipt = {"packages": records}
     ledger_file = ledger / "NATIVE_PACKAGE_NOTICES.json"
     ledger_file.write_text(json.dumps(receipt), encoding="utf-8")
+    return ledger_file, receipt, notice_paths
+
+
+def test_ref_only_tv_dependency_and_all_three_dual_pinned_notices_are_accepted(tmp_path: Path):
+    ledger, receipt, paths = _tv_reference_notice_fixture(tmp_path)
+    # The rest of the whole-program fixture is intentionally missing; the
+    # exact native TV reference/notice identities themselves must not fail.
     with pytest.raises(ValueError) as incomplete:
         manifest.scan(tmp_path, require_complete=True)
     assert "Native television lacks exact reviewed WebView2 assembly identities" not in str(incomplete.value)
     assert "Native television lacks dual-pinned WebView2 SDK notice proof" not in str(incomplete.value)
+    assert "exact native TV notice bytes differ" not in str(incomplete.value)
+    assert "not recorded by exact native TV notice ledger" not in str(incomplete.value)
     manifest.sbom(tmp_path)
-    sbom=json.loads((tmp_path / "SBOM.cdx.json").read_text(encoding="utf-8"))
-    sdk=[item for item in sbom["components"]
-         if item.get("bom-ref")=="pkg:nuget/Microsoft.Web.WebView2@1.0.4314.35"]
-    assert len(sdk)==1, "Exact parent SDK must appear from dual-hash notice provenance"
-    assert not any(item.get("bom-ref")=="pkg:nuget/Microsoft.Web.WebView2.Core@1.0.4314.35"
+    sbom = json.loads((tmp_path / "SBOM.cdx.json").read_text(encoding="utf-8"))
+    sdk = [item for item in sbom["components"]
+           if item.get("bom-ref") == "pkg:nuget/Microsoft.Web.WebView2@1.0.4314.35"]
+    assert len(sdk) == 1
+    assert not any(item.get("bom-ref") == "pkg:nuget/Microsoft.Web.WebView2.Core@1.0.4314.35"
                    for item in sbom["components"])
-    receipt["packages"][0]["notice_source_archive_sha512"] = "TAMPERED"
-    ledger_file.write_text(json.dumps(receipt), encoding="utf-8")
-    with pytest.raises(ValueError, match="Native television lacks dual-pinned WebView2 SDK notice proof"):
+
+
+@pytest.mark.parametrize("violation,expected", [
+    ("missing_wpf_alias", "Native television lacks dual-pinned WebView2 SDK notice proof"),
+    ("tampered_archive_pin", "Native television lacks dual-pinned WebView2 SDK notice proof"),
+    ("tampered_notice_copy", "exact native TV notice bytes differ"),
+    ("missing_notice_copy", "exact native TV notice bytes differ"),
+    ("notice_path_traversal", "Native television has unsafe notice path"),
+    ("unlisted_notice", "not recorded by exact native TV notice ledger"),
+])
+def test_tv_notice_ledger_rejects_incomplete_or_tampered_copy(tmp_path: Path, violation, expected):
+    ledger, receipt, notices = _tv_reference_notice_fixture(tmp_path)
+    if violation == "missing_wpf_alias":
+        receipt["packages"].pop()
+    elif violation == "tampered_archive_pin":
+        receipt["packages"][0]["notice_source_archive_sha512"] = "TAMPERED"
+    elif violation == "tampered_notice_copy":
+        notices[0].write_text("tampered contents", encoding="utf-8")
+    elif violation == "missing_notice_copy":
+        notices[0].unlink()
+    elif violation == "notice_path_traversal":
+        receipt["packages"][0]["notice_files"][0]["packaged_relative"] = "licenses/../outside.txt"
+    elif violation == "unlisted_notice":
+        (ledger.parent / "extra" / "UNLISTED.txt").parent.mkdir()
+        (ledger.parent / "extra" / "UNLISTED.txt").write_text("not in receipt")
+    ledger.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match=expected):
         manifest.scan(tmp_path, require_complete=True)
+
+
+@pytest.mark.parametrize("name", ["evil.exe", "payload.dll"])
+def test_tv_license_subtree_rejects_executable_payloads(tmp_path: Path, name):
+    folder = tmp_path / "tv" / "licenses" / "Unexpected-1.0"
+    folder.mkdir(parents=True)
+    (folder / name).write_bytes(b"never ship an executable inside notices")
+    with pytest.raises(ValueError, match="unreviewed native TV license payload"):
+        manifest.scan(tmp_path, require_complete=False)
 
 
 def test_tv_dependency_is_recorded_once_in_cyclonedx_sbom(tmp_path: Path):
