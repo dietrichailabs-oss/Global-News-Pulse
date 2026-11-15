@@ -833,13 +833,17 @@ class RadioPanel(QWidget):
                     if not self._load_receiver_url(url,host,require_consent=True):
                         return False
                 else:
-                    self.receiver_view.load(QUrl(url))
-                    self.receiver_view.show()
+                    # A same-origin Tune is still a new asynchronous page load.
+                    # Route it through the same pending/error/timeout lifecycle as
+                    # initial Connect, rather than leaving ON while a fresh
+                    # receiver navigation may fail silently.
+                    if not self._load_receiver_url(url, host):
+                        return False
             value=self._frequency_value(self.frequency.text() if frequency is None else frequency)
             self.frequency.setText(f"{value:g}")
             self.ham_note.setText(
-                f"SDR TUNED · {value:g} kHz {str(self.mode.currentText())} · provider waterfall/spectrum · "
-                "Receiver Off destroys the session"
+                f"SDR TUNING · {value:g} kHz {str(self.mode.currentText())} · "
+                "receiver page and audio not yet verified; Off ends the session"
             )
             return True
         except (ImportError,RuntimeError,ValueError,OSError) as error:
