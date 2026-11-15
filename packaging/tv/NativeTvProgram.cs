@@ -208,7 +208,19 @@ internal sealed class TvForm : Form
         // A duplicated or encoded v key makes the actual selected video
         // ambiguous. Approve one canonical literal v=ID and reject every
         // second spelling, even when one copy matches the consented ID.
-        var videoParameters = candidate.Query.TrimStart('?')
+        // System.Uri can normalize percent escapes in Query, which would
+        // turn an encoded key (%76) into the literal key (v) before this
+        // equality gate. Preserve the original spelling for the canonical
+        // consented video parameter while still decoding names to detect
+        // duplicates/aliases.
+        string original = candidate.OriginalString;
+        int question = original.IndexOf('?');
+        if (question < 0) return false;
+        int fragment = original.IndexOf('#', question + 1);
+        string rawQuery = fragment < 0
+            ? original[(question + 1)..]
+            : original[(question + 1)..fragment];
+        var videoParameters = rawQuery
             .Split('&', StringSplitOptions.RemoveEmptyEntries)
             .Where(pair => {
                 string key = pair.Split('=', 2)[0];
@@ -249,6 +261,7 @@ internal sealed class TvForm : Form
             ("https://www.youtube.com/watch?v=b0ZhJhN_Sn8&v=YE7VzlLtp-4", false, true),
             ("https://www.youtube.com/watch?v=YE7VzlLtp-4&%76=b0ZhJhN_Sn8", false, true),
             ("https://www.youtube.com/watch?%76=YE7VzlLtp-4", false, true),
+            ("https://www.youtube.com/watch?%56=YE7VzlLtp-4", false, true),
             ("https://www.youtube.com/embed/b0ZhJhN_Sn8", false, true),
             ("https://accounts.google.com/", false, true),
             ("https://youtube.com.bad.example/embed/YE7VzlLtp-4", false, true),
