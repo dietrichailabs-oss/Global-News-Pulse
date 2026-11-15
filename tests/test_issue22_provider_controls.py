@@ -181,9 +181,11 @@ def test_clicked_action_uses_provider_identity_not_selected_row(desktop):
     assert controller.get_setting("enabled_sources") == ["feed", "second"]
     feed_action.click()
     assert controller.get_setting("enabled_sources") == ["feed"]
-    assert "paused" in window.status_label.text()
-    feed_action.click()
+    assert "disabled" in window.status_label.text()
+    # Re-acquire after a UI update in case the source table was rebuilt.
+    window.source_table.cellWidget(row_for(window.source_table, "second"), 8).click()
     assert controller.get_setting("enabled_sources") == ["feed", "second"]
+    assert "paused" in window.status_label.text()
 
 
 def test_browser_action_uses_homepage_without_enabling_collection(desktop, monkeypatch):
