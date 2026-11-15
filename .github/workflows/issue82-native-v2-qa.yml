@@ -4,6 +4,7 @@ on:
   push:
     branches: [eng/issue82-owner-tab-render-video-20261115]
     paths:
+      - 'global_pulse/core.py'
       - 'global_pulse/ui.py'
       - 'global_pulse/__main__.py'
       - 'global_pulse/single_media.py'
@@ -23,6 +24,7 @@ on:
     branches: [eng/issue82-owner-optin-sources-tab-responsiveness-20261115]
     paths:
       - '.github/workflows/issue82-native-v2-qa.yml'
+      - 'global_pulse/core.py'
       - 'global_pulse/ui.py'
       - 'global_pulse/__main__.py'
       - 'global_pulse/single_media.py'
