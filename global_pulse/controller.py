@@ -99,9 +99,13 @@ class Controller(QObject):
     def _apply_sources(self):
         from .source_availability import enabled_ids
         enabled = enabled_ids(self.catalog, self.get_setting("enabled_sources", None))
-        self.scheduler.set_sources([dict(source, enabled=source["id"] in enabled and not (
-            self.get_setting("gdelt_batches_enabled", False) is True and source.get("adapter") == "gdelt_doc"))
-                                    for source in self.catalog])
+        gdelt_batched = self.get_setting("gdelt_batches_enabled", False) is True
+        effective = [dict(source, enabled=source["id"] in enabled and not (
+            gdelt_batched and source.get("adapter") == "gdelt_doc")) for source in self.catalog]
+        self.scheduler.set_sources(effective)
+        # Native tray must reflect the SAME capability-filtered/owner-selected
+        # sources actually passed to Scheduler, not stale catalog defaults.
+        self._enabled_collection_ids = frozenset(s["id"] for s in effective if s["enabled"])
 
     def set_source_enabled(self, source_id, enabled):
         """Explicit provider-ID action; never starts monitoring or bypasses due times."""
@@ -295,11 +299,12 @@ class Controller(QObject):
             if not self._closed and self.monitoring:
                 from .archive_storage import StorageBlocked
                 try:
-                    self.store.put_observations(observations)
+                    changed = self.store.put_observations(observations)
                 except StorageBlocked as error:
                     self.storage_problem.emit(str(error))
                     return
-                self.evidence_changed.emit()
+                if changed:
+                    self.evidence_changed.emit()
 
     def _watched(self, event, previous=None, *, reason=None):
         # Persisted/imported JSON can bypass the Settings UI's list validation.
