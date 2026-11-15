@@ -119,12 +119,8 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     window._refresh_evidence_when_idle()
     assert called == [1], "Once idle, the pending collector revision is applied"
     controller.data_changed.emit()
-    assert called == [1], "Controller signals must not synchronously rebuild the map"
-    assert window._evidence_refresh_timer.isActive()
-    window._evidence_refresh_timer.stop()
-    window._last_full_refresh_at=time.monotonic()-6
-    window._refresh_evidence_when_idle()
-    assert called == [1,1], "The coalesced settings revision must still become visible"
+    assert called == [1,1], "Explicit user/settings revisions remain immediate"
+    assert not window._evidence_refresh_timer.isActive()
 
 
 def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, monkeypatch):
@@ -135,7 +131,6 @@ def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, mon
     window._last_navigation_at=time.monotonic()-10
     window._last_full_refresh_at=time.monotonic()
     for _ in range(120):
-        controller.data_changed.emit()
         controller.evidence_changed.emit()
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
@@ -145,6 +140,22 @@ def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, mon
     window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
     assert len(calls)==1
+
+
+def test_multi_field_settings_save_repaints_once(desktop, monkeypatch):
+    """A form Save is one user action, not one 5k-map redraw per changed key."""
+    window, controller = desktop
+    assert window.prepare_initial_workspaces()
+    counts=[]
+    monkeypatch.setattr(window.world_map,"set_events",lambda *a,**kw:counts.append(1))
+    original_close=window.setting_close.isChecked()
+    original_quiet=window.setting_quiet.isChecked()
+    window.setting_close.setChecked(not original_close)
+    window.setting_quiet.setChecked(not original_quiet)
+    window._save_settings()
+    assert controller.get_setting("close_to_tray",False)==(not original_close)
+    assert controller.get_setting("quiet_enabled",False)==(not original_quiet)
+    assert len(counts)==1, "Multiple saved preferences must produce one redraw"
 
 
 def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monkeypatch):
