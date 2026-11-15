@@ -102,6 +102,17 @@ jobs:
           $deps=Join-Path $env:RUNNER_TEMP 'globalpulse-tv-native-probe/GlobalPulse.TV.deps.json'
           $nuget=Join-Path $env:USERPROFILE '.nuget/packages'
           $output=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_NOTICES'
+          $sdk=Join-Path $nuget 'microsoft.web.webview2/1.0.4314.35'
+          Write-Host ('NUGET_SDK_CACHE_EXISTS=' + (Test-Path -LiteralPath $sdk))
+          if (Test-Path -LiteralPath $sdk) {
+            Get-ChildItem -LiteralPath $sdk -File | Where-Object { $_.Name -like '*.sha512' -or $_.Name -like '*.nupkg' -or $_.Name -match '(?i)license|notice' } |
+              ForEach-Object {
+                Write-Host ('SDK_CACHE_FILE=' + $_.Name + ';bytes=' + $_.Length)
+                if ($_.Name -like '*.sha512') { Write-Host ('SDK_CACHE_HASH_VALUE=' + (Get-Content -LiteralPath $_.FullName -Raw).Trim()) }
+              }
+          }
+          $lock=Get-Content -LiteralPath 'packaging/tv/packages.lock.json' -Raw | ConvertFrom-Json
+          Write-Host ('SDK_LOCK_HASH=' + $lock.dependencies.'net10.0-windows10.0.19041/win-x64'.'Microsoft.Web.WebView2'.contentHash)
           python scripts/collect_dotnet_notices.py --deps $deps --nuget-root $nuget --output $output
           if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 notice provenance failed closed' }
           $receipt=Get-Content -LiteralPath (Join-Path $output 'NATIVE_PACKAGE_NOTICES.json') -Raw | ConvertFrom-Json
