@@ -430,7 +430,7 @@ class Television(_MediaTile):
         if summary and summary!=self._last_decode_info:
             self._last_decode_info=summary
             self.tv_diagnostics.setText(summary+" · Picture/audio not yet proven")
-            self.note.setText("Decoder details shown below the player")
+            self.note.setText(summary+" · Picture/audio not yet proven")
         if isinstance(value,dict) and value.get("provider_error"):
             # A displayed provider error is stronger evidence than loadFinished.
             # Never treat a dead live-video recording as a playing channel.
