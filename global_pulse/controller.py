@@ -64,7 +64,9 @@ class Controller(QObject):
         self._bundled_source_ids = {source["id"] for source in bundled}
         self.catalog = bundled + self.get_setting("user_feeds", [])
         from .source_availability import migrate_all_available_sources_once
-        self._enabled_sources_migrated = migrate_all_available_sources_once(self.store, self.catalog)
+        # Synthetic training profiles must keep their explicit fixture source selection.
+        self._enabled_sources_migrated = (not demo and
+            migrate_all_available_sources_once(self.store, self.catalog))
         self.media_catalog = load_media_catalog()
         self.monitoring = False
         self.notification_status = "Native pop-up notifications off · enable in Settings (alerts remain in history)"
