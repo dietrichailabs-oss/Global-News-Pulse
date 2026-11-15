@@ -155,10 +155,11 @@ def show_initializing(app):
 
 
 def prepare_initial_dashboard(app, splash, window, controller):
-    """Finish bounded LOCAL UI startup work before showing the dashboard.
+    """Finish bounded LOCAL UI startup work before enabling the dashboard.
 
-    First load has already queried the local archive and painted the map
-    while MainWindow was constructed. Cold headlines deliberately queue
+    First load has already queried the local archive while MainWindow
+    was constructed. The real-size first Map/Economy paints are primed under
+    splash below. Cold headlines deliberately queue
     language identification after the first paint; drain that finite queue
     while the non-dismissable splash remains visible, rather than running
     500 Qt ticks against the newly interactive main window. Pre-populate
@@ -173,7 +174,8 @@ def prepare_initial_dashboard(app, splash, window, controller):
     )
     app.processEvents()
     if hasattr(window, "prepare_initial_workspaces"):
-        window.prepare_initial_workspaces()
+        if window.prepare_initial_workspaces() is not True:
+            raise RuntimeError("Initial local workspace prewarming did not complete")
     headlines = getattr(controller, "_headlines", None)
     if headlines is not None and not getattr(headlines, "closed", False):
         pending = getattr(headlines, "deferred", None)
@@ -199,6 +201,16 @@ def prepare_initial_dashboard(app, splash, window, controller):
             raise RuntimeError("Initial local headline queue did not settle")
         headlines.deferred_timer.stop()
     app.processEvents()
+    if hasattr(window, "prime_initial_paint_caches"):
+        splash.showMessage(
+            "INITIALIZING GLOBAL PULSE\n"
+            "Preparing full-size map, chart, and table frames...",
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            QColor("#eee8f7"),
+        )
+        app.processEvents()
+        if window.prime_initial_paint_caches(app, splash) is not True:
+            raise RuntimeError("Initial full-size map/Economy paint caches did not initialize")
     splash.showMessage(
         "GLOBAL PULSE READY\n"
         "Local archive, workspaces and headline queue prepared.\n"
