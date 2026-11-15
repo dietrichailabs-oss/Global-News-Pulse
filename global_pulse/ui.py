@@ -452,9 +452,11 @@ class MainWindow(SituationActions, QMainWindow):
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        # Worker-sourced data changes are never a synchronous 5,000-event
-        # redraw. A queued revision can wait while the owner is navigating.
-        controller.data_changed.connect(self._schedule_evidence_refresh)
+        # User settings, translations and explicit requests must remain
+        # immediate (existing desktop contract); only worker-origin evidence
+        # is deferred while the owner switches tabs. Controller emits the
+        # distinct evidence_changed signal on collector ingest.
+        controller.data_changed.connect(self.refresh_data)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
