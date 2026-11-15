@@ -67,7 +67,7 @@ def test_initial_paused_video_does_not_rearm_deadline(app, monkeypatch):
         assert tv._had_playback is False
         # Playback progression is the only proof of actual in-app playing.
         tv._observed(tv._generation, {"time": 1.0, "paused": False, "ready": 4})
-        assert tv.tv_status.text() == "PLAYING"
+        assert tv.tv_status.text() == "VIDEO TIME ADVANCING · picture unverified"
         assert tv._had_playback is True
         assert tv._progress_at == 135.0
     finally:
