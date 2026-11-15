@@ -392,6 +392,7 @@ class MainWindow(SituationActions, QMainWindow):
         self._background_warm_enabled=False
         self._last_navigation_at=0.0
         self._last_full_refresh_at=0.0
+        self._last_rendered_monitoring=None
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -1610,11 +1611,18 @@ class MainWindow(SituationActions, QMainWindow):
     @Slot(str)
     def _status_update(self,text):
         monitoring=bool(getattr(self.controller,"monitoring",False))
-        self.titlebar.status.setText("MONITORING" if monitoring else "PAUSED")
-        self.pause_button.setText("Pause" if monitoring else "Resume")
-        self.titlebar.status.setStyleSheet("color:#7fdbb2;background:#173029;border:1px solid #284d40;border-radius:9px;padding:3px 9px;font-size:10px;" if monitoring else "color:#d3bd8f;background:#30291e;border:1px solid #514532;border-radius:9px;padding:3px 9px;font-size:10px;")
-        self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
+        changed=monitoring!=self._last_rendered_monitoring
+        if changed:
+            # Style-sheet reparsing on each provider status used to invalidate
+            # every child widget in the main Qt window during live collection.
+            self.titlebar.status.setText("MONITORING" if monitoring else "PAUSED")
+            self.pause_button.setText("Pause" if monitoring else "Resume")
+            self.titlebar.status.setStyleSheet("color:#7fdbb2;background:#173029;border:1px solid #284d40;border-radius:9px;padding:3px 9px;font-size:10px;" if monitoring else "color:#d3bd8f;background:#30291e;border:1px solid #514532;border-radius:9px;padding:3px 9px;font-size:10px;")
+            self._last_rendered_monitoring=monitoring
+        last="Last collection  "+timestamp(getattr(self.controller,"last_collection",""))
+        if self.last_label.text()!=last:self.last_label.setText(last)
         if text:self.status_label.setText(str(text)[:250])
+        if not text and not changed:return
         self._dirty_pages.add(3)
         if self._background_warm_enabled:
             self._schedule_workspace_warm()
