@@ -161,6 +161,33 @@ def test_multi_field_settings_save_repaints_once(desktop, monkeypatch):
     assert len(counts)==1, "Multiple saved preferences must produce one redraw"
 
 
+def test_observation_history_is_batch_read_without_n_plus_one_sql(desktop):
+    window, controller=desktop
+    records=observations(820)
+    for i,record in enumerate(records):
+        record.update(country=f"C{i:04d}",date="2025",synthetic=True)
+    assert controller.store.put_observations(records)==820
+    previous=records[0]["value"]
+    assert controller.store.put_observations([dict(records[0],value=previous+2)])==1
+    revision_queries=[]
+    def trace(sql):
+        if sql.strip().upper().startswith("SELECT OBSERVATION_ID,BODY FROM OBSERVATION_REVISIONS"):
+            revision_queries.append(1)
+    with controller.store._lock:
+        controller.store._conn.set_trace_callback(trace)
+    try:
+        rows=controller.store.list_observations()
+    finally:
+        with controller.store._lock:
+            controller.store._conn.set_trace_callback(None)
+    assert len(rows)==820
+    assert len(revision_queries)==3, "820 observations must use three bounded revision queries"
+    corrected=next(row for row in rows if row["country"]=="C0000")
+    assert corrected["revision_count"]==2
+    assert corrected["previous_value"]==previous
+    assert corrected["value"]==previous+2
+
+
 def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monkeypatch):
     """Actual SQLite read plus 6,400 persisted records, then fast tab paints.
 
@@ -328,6 +355,8 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
     print("PULSE_OVERLAP_PHASES="+json.dumps({name:{"calls":len(ms),
         "sum_ms":round(sum(ms),1),"max_ms":round(max(ms),1)}
         for name,ms in sorted(phase_ms.items())},sort_keys=True),flush=True)
+    assert len(phase_ms.get("list_observations",[]))==1, (
+        "A map+Economy refresh must reuse the same revision-complete snapshot")
     assert heartbeat
     assert max(durations)<0.7, "A tab click synchronously rebuilt a costly workspace"
     assert maximum<0.9, "Actual deferred collector refresh stalled the Qt event loop"
