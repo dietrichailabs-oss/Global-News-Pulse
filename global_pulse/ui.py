@@ -787,7 +787,9 @@ class MainWindow(SituationActions, QMainWindow):
         self.setting_categories=QLineEdit(", ".join(self.controller.get_setting("categories",[])));self.setting_categories.setPlaceholderText("All categories; or comma-separated topics");qform.addRow("Topic watchlist",self.setting_categories)
         grid.addWidget(quiet,0,1);layout.addLayout(grid)
         sources_group=QGroupBox("Source preferences");sg=QVBoxLayout(sources_group)
-        sg.addWidget(label("Every available, approved collector is enabled for new profiles. Restricted, duplicate and website-only entries cannot be auto-collected. Muting affects alerts, not collection.","Muted",True))
+        sg.addWidget(label("Every available, approved collector is enabled by default, including a one-time enable-all upgrade of existing profiles. You can later turn off individual sources; restricted, duplicate and website-only entries cannot be collected.","Muted",True))
+        if getattr(self.controller, "_enabled_sources_migrated", False):
+            sg.addWidget(label("Upgrade applied: all eligible feeds are now on. Your previous selections were preserved locally; you can disable individual feeds and save new choices.","Muted",True))
         self.enable_all_sources_button=button("Enable all available sources",self._enable_all_available_sources)
         self.enable_all_sources_button.setToolTip("Select every currently collectable provider; press Save settings to apply. Does not bypass access or retry limits.")
         sg.addWidget(self.enable_all_sources_button,0,Qt.AlignmentFlag.AlignLeft)
