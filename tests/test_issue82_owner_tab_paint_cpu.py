@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import os
 import statistics
+import threading
 import time
+from datetime import datetime, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -208,3 +210,80 @@ def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monk
     # CI threshold; measured owner hardware latency remains unverified.
     assert max(durations) < 0.5, f"A fast tab switch stalled {max(durations):.3f}s"
     assert statistics.median(durations) < 0.1
+
+
+def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
+    """A real SQLite/map revision must settle without a GUI second-long stall.
+
+    Unlike the cached-only test above, no refresh_data/store calls are mocked.
+    Source, country and observation records are synthetic and entirely offline;
+    CI timing is a regression diagnostic, not owner Win11 playback evidence.
+    """
+    window, controller = desktop
+    now=datetime.now(timezone.utc).isoformat()
+
+    def report(i):
+        return dict(id=f"nav-{i}",event_key=f"nav-event-{i}",source_id="offline",
+                    publisher="Offline fixture",title=f"Navigation fixture {i}",
+                    summary="Synthetic offline report",synthetic=True,
+                    url=f"https://example.invalid/nav/{i}",published_at=now,
+                    retrieved_at=now,country="Testland",region="Test Region",
+                    category="News",severity="informational",independence="original")
+
+    for offset in range(0,900,300):
+        controller.store.ingest([report(i) for i in range(offset,offset+300)],now=now)
+    series=observations(3200)
+    for i,record in enumerate(series):
+        record.update(country=f"C{i%200:03d}",date=str(1980+i//200),synthetic=True)
+    for offset in range(0,3200,1600):
+        controller.store.put_observations(series[offset:offset+1600])
+    window.refresh_data()
+    assert window.prepare_initial_workspaces()
+
+    heartbeat=[];durations=[];workers=[]
+    pulse=QTimer(window);pulse.setInterval(16)
+    pulse.timeout.connect(lambda:heartbeat.append(time.perf_counter()))
+    steps=[0,2,1,2,3,2,4,2,5,2]*12
+    navigator=QTimer(window);navigator.setInterval(40)
+
+    def next_tab():
+        index=len(durations)
+        if index>=len(steps):
+            navigator.stop();return
+        start=time.perf_counter()
+        window.open_page(steps[index])
+        durations.append(time.perf_counter()-start)
+        if index==36:
+            worker=threading.Thread(target=lambda:controller._on_reports(
+                [report(9001)],allow_synthetic=True,now=now),daemon=True)
+            workers.append(worker);worker.start()
+
+    navigator.timeout.connect(next_tab)
+    pulse.start();navigator.start()
+    try:
+        deadline=time.monotonic()+15
+        while navigator.isActive() and time.monotonic()<deadline:
+            QTest.qWait(25)
+        assert len(durations)==120, "All 120 navigation callbacks must arrive"
+        for worker in workers:
+            worker.join(timeout=3)
+            assert not worker.is_alive(), "Offline collector fixture must complete"
+        deadline=time.monotonic()+7
+        while time.monotonic()<deadline:
+            app.processEvents()
+            if any(e.get("title")=="Navigation fixture 9001" for e in window._events):
+                break
+            QTest.qWait(40)
+        assert any(e.get("title")=="Navigation fixture 9001" for e in window._events), (
+            "Latest material collector revision must become visible after navigation settles")
+    finally:
+        navigator.stop();pulse.stop()
+    gaps=[b-a for a,b in zip(heartbeat,heartbeat[1:])]
+    maximum=max(gaps,default=0)
+    print("\nOffline 900-event/3.2k-observation real overlap: "
+          f"max_click_ms={max(durations)*1000:.1f}, "
+          f"median_click_ms={statistics.median(durations)*1000:.1f}, "
+          f"max_heartbeat_gap_ms={maximum*1000:.1f}, ticks={len(heartbeat)}")
+    assert heartbeat
+    assert max(durations)<0.7, "A tab click synchronously rebuilt a costly workspace"
+    assert maximum<0.9, "Actual deferred collector refresh stalled the Qt event loop"
