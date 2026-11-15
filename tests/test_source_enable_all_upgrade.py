@@ -130,11 +130,11 @@ def test_zero_eligible_sources_does_not_invent_provider_access():
 
 def test_actual_sqlite_controller_upgrade_restart_and_later_opt_out(tmp_path):
     """Exercise the real live Controller/Store without starting monitoring."""
-    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWidgets import QApplication
     from global_pulse.controller import Controller
     from global_pulse.core import Store
 
-    app = QCoreApplication.instance() or QCoreApplication([])
+    app = QApplication.instance() or QApplication([])
     profile = tmp_path / "live-profile"
     profile.mkdir()
     store = Store(profile / "global-pulse.sqlite3", mode="live")
@@ -171,11 +171,11 @@ def test_actual_sqlite_controller_upgrade_restart_and_later_opt_out(tmp_path):
 
 
 def test_actual_synthetic_controller_does_not_rewrite_demo_selection(tmp_path):
-    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWidgets import QApplication
     from global_pulse.controller import Controller
     from global_pulse.core import Store
 
-    app = QCoreApplication.instance() or QCoreApplication([])
+    app = QApplication.instance() or QApplication([])
     profile = tmp_path / "synthetic-profile"
     profile.mkdir()
     store = Store(profile / "synthetic.sqlite3", mode="synthetic")
