@@ -205,3 +205,27 @@ def test_live_country_category_circle_preserves_searchable_source_reports(tmp_pa
             widget.close()
             widget.deleteLater()
             app.processEvents()
+
+
+def test_single_ordered_candidate_cursor_reads_three_pages_without_resorting(tmp_path):
+    with Store(tmp_path / "one-pass.sqlite3", mode="synthetic") as store:
+        assert len(store.ingest([report(i) for i in range(513)], now=T0)) == 513
+        candidate_queries = []
+        store._conn.set_trace_callback(
+            lambda sql: candidate_queries.append(sql)
+            if sql.startswith("SELECT id,body FROM events WHERE") else None
+        )
+        try:
+            actual = store.list_events(map_evidence=True, limit=513)
+        finally:
+            store._conn.set_trace_callback(None)
+        assert len(actual) == 513
+        assert len(candidate_queries) == 1, (
+            "One Store-locked ordered cursor must fetch multiple 256-row pages "
+            "without repeating the full event search/sort"
+        )
+        assert " LIMIT " not in candidate_queries[0].upper(), (
+            "The candidate cursor must not limit the SQL before verifying "
+            "pending warning eligibility"
+        )
+        compare_all_to_original(store, limit=513)
