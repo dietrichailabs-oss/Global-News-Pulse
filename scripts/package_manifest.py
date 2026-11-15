@@ -80,6 +80,8 @@ TOP_DIRECTORIES = {"_internal", "notifications", "tv", "licenses"}
 # The TV subtree must not admit arbitrary nested folders or executable content.
 TV_LOCALE_FOLDER = re.compile(r"^[a-z]{2}(?:-[A-Za-z]{2,5})?$")
 TV_PUBLISHED_EXES = {"GlobalPulse.TV.exe", "createdump.exe"}
+TV_LICENSE_SUFFIXES = {".txt", ".md", ".rst", ".json", ".xml"}
+TV_LICENSE_BARE_NAMES = {"LICENSE", "NOTICE", "COPYING"}
 TV_REFERENCE_IDENTITIES = {
     "microsoft.web.webview2.core/1.0.4314.35",
     "microsoft.web.webview2.winforms/1.0.4314.35",
@@ -168,9 +170,12 @@ def scan(root, *, require_complete=True):
     root=Path(root).resolve()
     if not root.is_dir():raise ValueError("Runtime package directory does not exist")
     errors=[];count=0;total=0
+    tv_license_files=set()
     for path,relative in files(root):
         parts=PurePosixPath(relative).parts
         folded={p.lower() for p in parts}
+        if relative.startswith("tv/licenses/"):
+            tv_license_files.add(relative)
         if len(parts)==1 and parts[0] not in TOP_FILES:errors.append(relative+": root file is not allowlisted")
         if len(parts)>1 and parts[0] not in TOP_DIRECTORIES:errors.append(relative+": root directory is not allowlisted")
         if parts[0] == "tv" and len(parts) > 1:
@@ -183,7 +188,12 @@ def scan(root, *, require_complete=True):
                         })):
                     errors.append(relative+": unreviewed native TV root file")
             elif parts[1] == "licenses":
-                pass  # The exact copied notice ledger is checked below.
+                if not (
+                    (len(parts) == 3 and parts[2] == "NATIVE_PACKAGE_NOTICES.json")
+                    or (len(parts) == 4 and (path.suffix.lower() in TV_LICENSE_SUFFIXES
+                                            or path.name.upper() in TV_LICENSE_BARE_NAMES))
+                ):
+                    errors.append(relative+": unreviewed native TV license payload")
             elif parts == ("tv", "runtimes", "win-x64", "native", "WebView2Loader.dll"):
                 pass
             elif (len(parts) == 3 and TV_LOCALE_FOLDER.fullmatch(parts[1])
@@ -241,16 +251,52 @@ def scan(root, *, require_complete=True):
         if notice_ledger.is_file():
             receipt=json.loads(notice_ledger.read_text(encoding="utf-8-sig"))
             records=receipt.get("packages") or []
-            if not any(
-                isinstance(record,dict)
-                and record.get("type")=="reference"
-                and record.get("notice_source_package")==TV_PARENT
-                and record.get("notice_source_lock_sha512")==TV_NUGET_CONTENT_SHA512
-                and record.get("notice_source_archive_sha512")==TV_ARCHIVE_SHA512
-                and record.get("notice_files")
-                for record in records
-            ):
-                errors.append("Native television lacks dual-pinned WebView2 SDK notice proof")
+            if not isinstance(records,list):
+                errors.append("Native television has invalid notice ledger records")
+                records=[]
+            for alias in sorted(TV_REFERENCE_IDENTITIES):
+                matching=[
+                    record for record in records
+                    if isinstance(record,dict) and
+                    (str(record.get("package",""))+"/"+str(record.get("version",""))).lower()==alias
+                    and record.get("type")=="reference"
+                ]
+                if (len(matching)!=1
+                        or matching[0].get("notice_source_package")!=TV_PARENT
+                        or matching[0].get("notice_source_lock_sha512")!=TV_NUGET_CONTENT_SHA512
+                        or matching[0].get("notice_source_archive_sha512")!=TV_ARCHIVE_SHA512
+                        or not isinstance(matching[0].get("notice_files"),list)
+                        or not matching[0]["notice_files"]):
+                    errors.append("Native television lacks dual-pinned WebView2 SDK notice proof: "+alias)
+            expected={"tv/licenses/NATIVE_PACKAGE_NOTICES.json"}
+            for record in records:
+                if not isinstance(record,dict):
+                    errors.append("Native television has malformed notice ledger record")
+                    continue
+                entries=record.get("notice_files") or []
+                if not isinstance(entries,list):
+                    errors.append("Native television has malformed notice ledger entries")
+                    continue
+                for item in entries:
+                    if not isinstance(item,dict) or not isinstance(item.get("packaged_relative"),str):
+                        errors.append("Native television has malformed notice file entry")
+                        continue
+                    rel=item["packaged_relative"]
+                    parts=PurePosixPath(rel).parts
+                    if (len(parts)!=3 or parts[0]!="licenses"
+                            or any(part in ("..",".") for part in parts)
+                            or rel.startswith("/")):
+                        errors.append("Native television has unsafe notice path")
+                        continue
+                    name="tv/"+"/".join(parts)
+                    expected.add(name)
+                    target=root/name
+                    if (not target.is_file() or not isinstance(item.get("bytes"),int)
+                            or target.stat().st_size!=item["bytes"]
+                            or digest(target)!=item.get("sha256")):
+                        errors.append(name+": exact native TV notice bytes differ")
+            for name in sorted(tv_license_files-expected):
+                errors.append(name+": not recorded by exact native TV notice ledger")
     if errors:raise ValueError("Runtime package rejected:\n"+"\n".join(errors[:100]))
     return {"status":"PASS","files":count,"bytes":total,"scope":"Allowlist, required native payload, filenames, and selected embedded-secret patterns; not a complete security audit"}
 
