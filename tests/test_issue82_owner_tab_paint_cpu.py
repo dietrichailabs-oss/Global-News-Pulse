@@ -5,6 +5,7 @@ Synthetic/offline Qt: this does not claim a native Windows timing witness.
 from __future__ import annotations
 
 import os
+import json
 import statistics
 import threading
 import time
@@ -212,7 +213,7 @@ def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monk
     assert statistics.median(durations) < 0.1
 
 
-def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
+def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monkeypatch):
     """A real SQLite/map revision must settle without a GUI second-long stall.
 
     Unlike the cached-only test above, no refresh_data/store calls are mocked.
@@ -239,6 +240,36 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
         controller.store.put_observations(series[offset:offset+1600])
     window.refresh_data()
     assert window.prepare_initial_workspaces()
+
+    # Preserve all real computations while attributing synchronous UI costs.
+    # This is a timing spy, never a stub, and only wraps work after prewarm.
+    phase_ms={}
+    def trace(obj,method):
+        original=getattr(obj,method)
+        def measured(*args,**kwargs):
+            began=time.perf_counter()
+            try:return original(*args,**kwargs)
+            finally:
+                name=method
+                if method=="events":
+                    name+="_"+("country_map" if kwargs.get("map_evidence") else
+                              "map" if kwargs.get("map_view") else "feed")
+                phase_ms.setdefault(name,[]).append((time.perf_counter()-began)*1000)
+        monkeypatch.setattr(obj,method,measured)
+    for target,name in [(window,"refresh_data"),(controller,"events"),
+                        (controller,"headline_view"),
+                        (controller.store,"list_observations"),
+                        (window.world_map,"set_events"),(window,"_populate_feed"),
+                        (window,"_populate_filter_options"),
+                        (window,"_update_world_overview"),(window,"_sync_map_controls"),
+                        (window,"_populate_economy"),(window,"_populate_sources"),
+                        (window,"_populate_situations"),(window,"_populate_alerts"),
+                        (window,"_generate_brief")]:
+        trace(target,name)
+    if window.gdelt_panel is not None:
+        trace(window.gdelt_panel,"refresh")
+    from importlib import import_module
+    trace(import_module("global_pulse.headline_translation"),"language_of")
 
     heartbeat=[];durations=[];workers=[]
     pulse=QTimer(window);pulse.setInterval(16)
@@ -294,6 +325,9 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
           f"max_click_ms={max(durations)*1000:.1f}, "
           f"median_click_ms={statistics.median(durations)*1000:.1f}, "
           f"max_heartbeat_gap_ms={maximum*1000:.1f}, ticks={len(heartbeat)}")
+    print("PULSE_OVERLAP_PHASES="+json.dumps({name:{"calls":len(ms),
+        "sum_ms":round(sum(ms),1),"max_ms":round(max(ms),1)}
+        for name,ms in sorted(phase_ms.items())},sort_keys=True),flush=True)
     assert heartbeat
     assert max(durations)<0.7, "A tab click synchronously rebuilt a costly workspace"
     assert maximum<0.9, "Actual deferred collector refresh stalled the Qt event loop"
