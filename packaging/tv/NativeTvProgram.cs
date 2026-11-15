@@ -205,8 +205,16 @@ internal sealed class TvForm : Form
         if (!watch || (host != "www.youtube.com" && host != "youtube.com")
             || candidate.AbsolutePath != "/watch")
             return false;
-        return candidate.Query.TrimStart('?').Split('&',StringSplitOptions.RemoveEmptyEntries)
-            .Any(pair => pair == "v=" + id);
+        // A duplicated or encoded v key makes the actual selected video
+        // ambiguous. Approve one canonical literal v=ID and reject every
+        // second spelling, even when one copy matches the consented ID.
+        var videoParameters = candidate.Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(pair => {
+                string key = pair.Split('=', 2)[0];
+                return Uri.UnescapeDataString(key).Equals("v", StringComparison.OrdinalIgnoreCase);
+            }).ToArray();
+        return videoParameters.Length == 1 && videoParameters[0] == "v=" + id;
     }
 
     private static bool InternalResource(string url)
@@ -237,6 +245,10 @@ internal sealed class TvForm : Form
             ("https://www.youtube.com/watch?v=YE7VzlLtp-4", true, true),
             ("https://www.youtube.com/watch?v=YE7VzlLtp-4", false, false),
             ("https://www.youtube.com/watch?v=b0ZhJhN_Sn8", false, true),
+            ("https://www.youtube.com/watch?v=YE7VzlLtp-4&v=b0ZhJhN_Sn8", false, true),
+            ("https://www.youtube.com/watch?v=b0ZhJhN_Sn8&v=YE7VzlLtp-4", false, true),
+            ("https://www.youtube.com/watch?v=YE7VzlLtp-4&%76=b0ZhJhN_Sn8", false, true),
+            ("https://www.youtube.com/watch?%76=YE7VzlLtp-4", false, true),
             ("https://www.youtube.com/embed/b0ZhJhN_Sn8", false, true),
             ("https://accounts.google.com/", false, true),
             ("https://youtube.com.bad.example/embed/YE7VzlLtp-4", false, true),
