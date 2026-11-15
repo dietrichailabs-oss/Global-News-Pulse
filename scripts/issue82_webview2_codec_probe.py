@@ -50,7 +50,7 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
     # Set the backend before QtWebView.initialize(), which must run before QApplication.
     os.environ["QT_WEBVIEW_PLUGIN"] = "webview2"
     from PySide6.QtWebView import QWebView, QtWebView
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, QUrl
     from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
 
     QtWebView.initialize()
@@ -60,6 +60,19 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
     webview = QWebView()
     layout.addWidget(QWidget.createWindowContainer(webview, host))
     host.resize(400, 240)
+    report["loading_transitions"] = []
+
+    def track_loading(info: object) -> None:
+        try:
+            report["loading_transitions"].append({
+                "status": str(info.status()),
+                "error": str(info.errorString()),
+                "url": str(info.url().toString()),
+            })
+        except Exception as exc:
+            report["loading_transitions"].append({"signal_error": str(exc)})
+
+    webview.loadingChanged.connect(track_loading)
 
     finished = {"value": False}
 
@@ -99,6 +112,13 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
 
     def evaluate() -> None:
         try:
+            report["reported_page"] = webview.url().toString()
+            report["is_loading"] = webview.isLoading()
+            report["load_progress"] = webview.loadProgress()
+            webview.runJavaScript(
+                "40+2",
+                lambda value: report.update({"arithmetic_callback": repr(value)}),
+            )
             webview.runJavaScript(
                 javascript,
                 lambda value: finish(
@@ -110,11 +130,11 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
             report["error"] = f"{type(exc).__name__}: {exc}"
             finish("javascript_exception")
 
-    QTimer.singleShot(3000, evaluate)
+    QTimer.singleShot(6000, evaluate)
     QTimer.singleShot(18000, lambda: finish("native_webview2_timeout"))
     host.show()
     # Offline and deliberately not a YouTube page; this only tests decoder advertising.
-    webview.loadHtml("<!doctype html><html><head><title>Offline codec probe</title></head><body>Codec probe</body></html>")
+    webview.setUrl(QUrl("about:blank"))
     app.exec()
     return report
 
