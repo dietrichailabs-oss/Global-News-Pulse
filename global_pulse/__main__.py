@@ -8,7 +8,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
@@ -32,6 +32,23 @@ def _tray_health_state(controller):
     # unavailable old source error must not color the live tray icon red.
     return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
             else "active")
+
+
+class _TrayRefreshBridge(QObject):
+    """GUI-affine slot: collector threads never start a tray QTimer directly."""
+
+    def __init__(self, timer: QTimer, controller):
+        super().__init__(timer)
+        self.timer = timer
+        self.controller = controller
+        self.stopping = False
+
+    @Slot()
+    def schedule(self):
+        if self.stopping or self.controller._closed:
+            return
+        if not self.timer.isActive():
+            self.timer.start()
 
 
 def pulse_icon(state="active", size=64):
@@ -364,12 +381,7 @@ def main(argv=None):
     tray_refresh_timer.setSingleShot(True)
     tray_refresh_timer.setInterval(700)
     tray_refresh_timer.timeout.connect(update_tray)
-
-    def schedule_tray(*_):
-        if shutting_down or controller._closed:
-            return
-        if not tray_refresh_timer.isActive():
-            tray_refresh_timer.start()
+    tray_refresh_bridge = _TrayRefreshBridge(tray_refresh_timer, controller)
 
     def menu_hidden():
         nonlocal tray_pending_menu
@@ -378,20 +390,21 @@ def main(argv=None):
         tray_pending_menu = False
         # Defer beyond menu.hide()'s synchronous quit signal. Shutdown may be
         # called next; schedule_tray checks it before any Store access.
-        QTimer.singleShot(0, schedule_tray)
+        QTimer.singleShot(0, tray_refresh_bridge.schedule)
 
     menu.aboutToHide.connect(menu_hidden)
-    controller.data_changed.connect(schedule_tray)
-    controller.evidence_changed.connect(schedule_tray)
-    controller.source_status_changed.connect(schedule_tray)
-    controller.notification_changed.connect(schedule_tray)
-    controller.alert_received.connect(schedule_tray)
+    controller.data_changed.connect(tray_refresh_bridge.schedule)
+    controller.evidence_changed.connect(tray_refresh_bridge.schedule)
+    controller.source_status_changed.connect(tray_refresh_bridge.schedule)
+    controller.notification_changed.connect(tray_refresh_bridge.schedule)
+    controller.alert_received.connect(tray_refresh_bridge.schedule)
 
     def shutdown():
         nonlocal shutting_down
         if shutting_down:
             return
         shutting_down = True
+        tray_refresh_bridge.stopping = True
         window.save_layout()
         for widget in window.findChildren(QWidget):
             if widget.__class__.__name__ == "MediaPanel":
@@ -401,6 +414,7 @@ def main(argv=None):
             controller.close()
         except RuntimeError as error:
             shutting_down = False
+            tray_refresh_bridge.stopping = False
             window.show()
             QMessageBox.critical(window, "Full exit not completed", str(error) + ". The window remains available; retry Exit Completely.")
             return
