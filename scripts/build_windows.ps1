@@ -211,7 +211,11 @@ try {
     Copy-Item -LiteralPath $tvRoot -Destination (Join-Path $packageRoot 'tv') -Recurse
     Copy-Item -LiteralPath 'global_pulse\resources\pulse.png' -Destination (Join-Path $packageRoot 'notifications\pulse.png')
     # The compiler's .pdb debugging symbols are engineering artifacts, not runtime.
-    Get-ChildItem -LiteralPath (Join-Path $packageRoot 'notifications') -Filter '*.pdb' -Recurse | Remove-Item -Force
+    # Generated symbols for either self-contained helper are engineering-only.
+    # Retain the global package scanner's .pdb prohibition (do not allowlist them).
+    foreach ($helperDir in @('notifications','tv')) {
+        Get-ChildItem -LiteralPath (Join-Path $packageRoot $helperDir) -Filter '*.pdb' -File -Recurse | Remove-Item -Force
+    }
     $userDocuments = [ordered]@{
         'docs\PRIVATE_TEST_GUIDE.md' = 'README.md'
         'docs\USER_GUIDE.md' = 'USER_GUIDE.md'
