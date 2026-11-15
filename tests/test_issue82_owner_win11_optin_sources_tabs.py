@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton
+from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton, QLabel
 
 from global_pulse.controller import Controller
 from global_pulse.source_availability import available_ids, capability, enabled_ids
@@ -160,3 +160,36 @@ def test_source_registry_live_health_update_reuses_expensive_table_widgets(deskt
     assert window.source_table.item(row, 0) is before_item
     assert window.source_table.cellWidget(row, 8) is before_action
     assert "Last check succeeded" in window.source_table.item(row, 3).text()
+
+
+def test_same_id_capability_change_rebuilds_controls_even_after_sorting(desktop):
+    window, controller = desktop
+    window.open_page(3)
+    window.source_table.setSortingEnabled(True)
+    window.source_table.sortItems(0, Qt.SortOrder.DescendingOrder)
+    source = next(s for s in controller.catalog if capability(s)[0])
+    source_id = source["id"]
+
+    def row_for_id():
+        return next(i for i in range(window.source_table.rowCount())
+                    if (window.source_table.item(i, 0).data(Qt.ItemDataRole.UserRole) or {}).get("id") == source_id)
+
+    row = row_for_id()
+    assert isinstance(window.source_table.cellWidget(row, 8), QPushButton)
+    original_status = source.get("status")
+    try:
+        # A catalog revision can preserve the same ID and row count while
+        # revoking the collector. Never show its old Enable button.
+        source["status"] = "disabled"
+        window._populate_sources()
+        row = row_for_id()
+        assert isinstance(window.source_table.cellWidget(row, 8), QLabel)
+        assert not window.source_table.cellWidget(row, 8).isEnabled() or (
+            window.source_table.cellWidget(row, 8).text() == "Unavailable"
+        )
+        assert window.source_table.item(row, 0).data(Qt.ItemDataRole.UserRole)["status"] == "disabled"
+    finally:
+        source["status"] = original_status
+    window._populate_sources()
+    row = row_for_id()
+    assert isinstance(window.source_table.cellWidget(row, 8), QPushButton)
