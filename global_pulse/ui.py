@@ -703,6 +703,7 @@ class MainWindow(SituationActions, QMainWindow):
         elif index==5:self._generate_brief()
         self._dirty_pages.discard(index)
 
+    @Slot()
     def _notification_status_only(self):
         """Refresh the Alerts view only, never the 5,000-event world map."""
         self._dirty_pages.add(4)
@@ -902,6 +903,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.feed_list.blockSignals(False)
         self.feed_empty.setVisible(not events);self.feed_list.setVisible(bool(events))
 
+    @Slot()
     def _refresh_translated_headlines(self):
         """Refresh display text IN PLACE, preserving Qt row object ownership.
 
@@ -1138,6 +1140,7 @@ class MainWindow(SituationActions, QMainWindow):
             self.status_label.setText("Translating available source text locally…")
             self.controller.translate_report(report)
 
+    @Slot(str, str)
     def _translation_done(self,report_id,text):
         self.status_label.setText("Translation request completed.")
         box=QMessageBox(self);box.setWindowTitle("English translation");box.setTextFormat(Qt.TextFormat.PlainText);box.setText(str(text));box.setIcon(QMessageBox.Icon.Information);box.exec()
@@ -1304,6 +1307,7 @@ class MainWindow(SituationActions, QMainWindow):
     def _toggle_monitoring(self):
         self.controller.pause() if self.controller.monitoring else self.controller.resume();self._status_update("")
 
+    @Slot(str)
     def _status_update(self,text):
         monitoring=bool(getattr(self.controller,"monitoring",False))
         self.titlebar.status.setText("MONITORING" if monitoring else "PAUSED")
@@ -1318,6 +1322,7 @@ class MainWindow(SituationActions, QMainWindow):
         else:
             self._dirty_pages.add(3)
 
+    @Slot(dict)
     def _on_alert(self,alert):
         self.status_label.setText("New alert saved in Alerts.")
         self._dirty_pages.add(4)
