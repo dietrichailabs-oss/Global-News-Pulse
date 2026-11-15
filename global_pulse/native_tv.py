@@ -129,11 +129,20 @@ class NativeTvHost(QWidget):
         if process is not None:
             if process.state() != QProcess.ProcessState.NotRunning:
                 process.write(b"STOP\n")
-                process.terminate()
-                # Never call waitForFinished() on the UI thread.
-                QTimer.singleShot(
-                    800,
-                    lambda p=process: p.kill() if p.state() != QProcess.ProcessState.NotRunning else None
+                # Give the helper time to dispose its private browser profile.
+                # The UI hides immediately and never blocks on that cleanup.
+                # An unresponsive child is killed after the finite deadline.
+                # Timer lifetime is owned by this exact child QProcess.
+                # A global singleShot callback captured a Python wrapper
+                # after deleteLater() had destroyed its native Qt object
+                # during rapid Stop/Watch cycles.
+                watchdog=QTimer(process)
+                watchdog.setSingleShot(True)
+                watchdog.timeout.connect(
+                    lambda p=process: p.kill()
+                    if p.state() != QProcess.ProcessState.NotRunning else None
                 )
+                process.finished.connect(watchdog.stop)
+                watchdog.start(3000)
             process.finished.connect(lambda *_args, p=process: p.deleteLater())
         self.hide()
