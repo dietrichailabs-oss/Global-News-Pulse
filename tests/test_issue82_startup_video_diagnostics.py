@@ -192,6 +192,7 @@ def test_splash_primes_real_size_first_economy_paint_before_interaction(
             "date": str(1990 + (i // 200)),
             "value": float(i % 500) / 10,
             "previous_value": None,
+            "synthetic": True,
             "source_id": "wb_inflation",
             "url": f"https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG?locations={i % 200}",
         } for i in range(6400)]
@@ -212,6 +213,7 @@ def test_splash_primes_real_size_first_economy_paint_before_interaction(
         assert prepare_initial_dashboard(app, splash, w, c)
         assert w.isVisible() and splash.isVisible()
         assert w.pages.currentIndex() == 0
+        assert w._initial_painted_pages == set(range(7))
         assert len(w._observations) >= 6400
         assert w.economy_model.rowCount() >= 6400
         assert paints, "Full-size Economy raster must be painted during startup"
