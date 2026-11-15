@@ -1314,21 +1314,26 @@ class Store:
                 # of hiding later eligible areas behind a larger arbitrary cap.
                 result = []
                 page_size = min(256, max(32, limit))
-                offset = 0
-                while len(result) < limit:
-                    page = self._conn.execute(sql + " LIMIT ? OFFSET ?",
-                                              [*params, page_size, offset]).fetchall()
-                    if not page:
-                        break
-                    offset += len(page)
-                    for event in self._map_evidence_page_unlocked(page):
-                        if event and (event.get("status") == "active" or
-                                      event.get("map_history_incomplete") is True):
-                            result.append(event)
-                            if len(result) >= limit:
-                                break
-                    if len(page) < page_size:
-                        break
+                # One ordered, Store-locked cursor avoids re-sorting/re-reading
+                # every earlier candidate for each subsequent OFFSET page. A
+                # bounded fetchmany keeps materialized rows capped at 256 while
+                # the original accepted-only limit and warning checks remain.
+                cursor = self._conn.execute(sql, params)
+                try:
+                    while len(result) < limit:
+                        page = cursor.fetchmany(page_size)
+                        if not page:
+                            break
+                        for event in self._map_evidence_page_unlocked(page):
+                            if event and (event.get("status") == "active" or
+                                          event.get("map_history_incomplete") is True):
+                                result.append(event)
+                                if len(result) >= limit:
+                                    break
+                        if len(page) < page_size:
+                            break
+                finally:
+                    cursor.close()
             else:
                 result = [(json.loads(row[0]) if map_view else self._get_event_unlocked(row[0]))
                           for row in self._conn.execute(sql + " LIMIT ?", [*params, limit])]
