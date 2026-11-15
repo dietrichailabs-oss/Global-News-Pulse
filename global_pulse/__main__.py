@@ -364,9 +364,8 @@ def main(argv=None):
             mute.blockSignals(was_blocked)
         window.setting_notify.setChecked(enabled)
         if not enabled:
-            notifier.status_changed.emit(
-                "Windows pop-up notifications off · alerts remain in Pulse history"
-            )
+            # Retire the opted-out native bridge asynchronously; no tab/tray wait.
+            notifier.disable_nonblocking()
             return
         if args.demo:
             notifier.status_changed.emit("Synthetic review · Windows notifications disabled")
