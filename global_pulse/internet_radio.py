@@ -45,6 +45,23 @@ def _owner_legacy_websdr(info, kind):
     return (url.scheme == "http" and url.hostname == "na5b.com"
             and url.port == 8901 and not url.username and not url.password)
 
+def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
+    """Compare actual URL scheme/host/effective port, not QUrl's caller default.
+
+    QUrl.port(default_port) returns the *supplied* default for absent ports,
+    which previously accepted implicit HTTP/80 or WS/80 as though they
+    explicitly targeted owner-consented NA5B HTTP/8901. HTTPS/WSS default
+    to 443; only the exact reviewed origin is allowed for each protocol.
+    """
+    actual_scheme = str(url.scheme()).lower()
+    if actual_scheme not in ({scheme} if main else {scheme, ws_scheme}):
+        return False
+    explicit_port = url.port(-1)
+    effective_port = (explicit_port if explicit_port != -1 else
+                      443 if actual_scheme in {"https", "wss"} else 80)
+    return effective_port == port and url.host().lower().rstrip(".") == host
+
+
 HAM_DIRECTORIES = (
     {"id":"websdr","name":"WebSDR public receivers","url":"https://websdr.org/","note":"Manual ham-band tuning on public receiver pages; provider controls availability."},
     {"id":"kiwisdr","name":"KiwiSDR public receivers","url":"https://kiwisdr.com/public/","note":"Manual ham/shortwave tuning on public receiver pages; provider controls availability."},
@@ -968,11 +985,9 @@ class RadioPanel(QWidget):
                 url=info.requestUrl()
                 if url.scheme() in {"about","data","blob"}:
                     return
-                info.block(
-                    url.scheme() not in {self.scheme,self.ws_scheme}
-                    or url.port(self.port)!=self.port
-                    or url.host().lower().rstrip(".")!=self.allowed_host
-                )
+                info.block(not _receiver_origin_matches(
+                    url, self.allowed_host, self.scheme, self.ws_scheme, self.port
+                ))
 
         class ReceiverPage(QWebEnginePage):
             def __init__(self,profile,view,allowed_host,scheme,port):
@@ -984,10 +999,8 @@ class RadioPanel(QWidget):
                 return None
             def acceptNavigationRequest(self,url,kind,main):
                 if not main:return True
-                return url.scheme()=="about" or (
-                    url.scheme()==self.scheme
-                    and url.port(self.port)==self.port
-                    and url.host().lower().rstrip(".")==self.allowed_host
+                return url.scheme()=="about" or _receiver_origin_matches(
+                    url, self.allowed_host, self.scheme, "", self.port, main=True
                 )
 
         self.receiver_host=host
