@@ -22,6 +22,18 @@ def data_directory():
     return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "global-pulse"
 
 
+def _tray_health_state(controller):
+    """Preserve alerts > paused > active-source errors > active precedence."""
+    if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
+        return "alerts"
+    if not controller.monitoring:
+        return "paused"
+    # _apply_sources caches the exact IDs passed to Scheduler. A disabled or
+    # unavailable old source error must not color the live tray icon red.
+    return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
+            else "active")
+
+
 def pulse_icon(state="active", size=64):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -337,10 +349,7 @@ def main(argv=None):
             tray_pending_menu = True
             return
         tray_pending_menu = False
-        unread = any(not a.get("read", False) for a in controller.store.list_alerts(limit=50))
-        enabled = (s["id"] for s in controller.catalog if s.get("enabled"))
-        errors = controller.store.any_source_error(enabled)
-        state = "alerts" if unread else "paused" if not controller.monitoring else "error" if errors else "active"
+        state = _tray_health_state(controller)
         if state != tray_last_state:
             tray.setIcon(pulse_icon(state))
             tray_last_state = state
