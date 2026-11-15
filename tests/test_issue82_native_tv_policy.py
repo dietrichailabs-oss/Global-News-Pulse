@@ -42,6 +42,16 @@ def test_native_windows_process_only_launches_after_existing_consent_gate():
     assert "watchdog=QTimer(process)" in inspect.getsource(NativeTvHost.stop)
 
 
+def test_foreign_video_window_uses_qt_scrolling_container_with_pid_validation():
+    source = inspect.getsource(NativeTvHost._attach_window)
+    assert "GetWindowThreadProcessId" in source
+    assert "owner_pid.value != int(process.processId())" in source
+    assert "QWindow.fromWinId(hwnd)" in source
+    assert "QWidget.createWindowContainer(foreign, self)" in source
+    assert "MoveWindow" not in source
+    assert "self._release_window()" in inspect.getsource(NativeTvHost.stop)
+
+
 def test_webview2_source_installs_resource_and_permission_guards_before_navigate():
     source = (Path(__file__).resolve().parents[1] /
               "packaging" / "tv" / "NativeTvProgram.cs").read_text(encoding="utf-8")
@@ -76,6 +86,10 @@ def test_webview2_source_installs_resource_and_permission_guards_before_navigate
     assert 'environment.UserDataFolder' in source
     assert source.index('RejectWebView2Overrides();') < source.index('CoreWebView2Environment.CreateAsync(')
     assert 'ExclusiveUserDataFolderAccess = true' in source
+    assert 'SetHighDpiMode(HighDpiMode.PerMonitorV2)' in source
+    assert 'GetParent(Handle) != parentHwnd' in source
+    assert '"--probe-embed"' in source
+    assert '"embed_probe_ready"' in source
 
 
 def test_native_host_quick_stop_restarts_leave_no_stale_watchdog(monkeypatch):
