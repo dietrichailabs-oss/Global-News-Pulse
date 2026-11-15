@@ -12,6 +12,7 @@ import platform
 import statistics
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -91,6 +92,42 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
         assert len(window._events) == 500, "Exercise the actual 500-row feed cap"
         assert len(window.world_map.events) == 5000, "Exercise all 5k map entries"
 
+        # Time actual production calls and preserve their output. This is
+        # instrumentation, not a stub: every SQLite read, feed item and map
+        # composition still runs.
+        phase_times = defaultdict(list)
+        def instrument(target, method, label):
+            original = getattr(target, method)
+            def timed(*args, **kwargs):
+                at = time.perf_counter()
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    phase_times[label].append((time.perf_counter() - at) * 1000)
+            setattr(target, method, timed)
+
+        actual_events = controller.events
+        def measured_events(*args, **kwargs):
+            label = ("country_projection" if kwargs.get("map_evidence") else
+                     "point_map_query" if kwargs.get("map_view") else "feed_query")
+            at = time.perf_counter()
+            try:
+                return actual_events(*args, **kwargs)
+            finally:
+                phase_times[label].append((time.perf_counter() - at) * 1000)
+        controller.events = measured_events
+        for target, method, label in (
+            (controller.store, "list_observations", "observations_query"),
+            (controller, "headline_view", "headline_view"),
+            (window, "_populate_feed", "feed_row_build"),
+            (window, "_populate_filter_options", "filter_options"),
+            (window, "_update_world_overview", "overview_html"),
+            (window, "_sync_map_controls", "map_controls"),
+            (window, "_populate_sources", "source_tab_build"),
+            (window, "_populate_economy", "economy_tab_build"),
+        ):
+            instrument(target, method, label)
+
         map_times = []
         original_map = window.world_map.set_events
         def measured_map(*args, **kwargs):
@@ -122,6 +159,7 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
         pages.setInterval(120)
         pages.timeout.connect(switch_page)
 
+        writer_call_times = []
         def write_real_revisions():
             try:
                 for index in range(10):
@@ -134,9 +172,11 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
                         "title": "SYNTHETIC active revision during Qt soak",
                         "summary": f"Synthetic revised local value {index}",
                     }
+                    call_started = time.perf_counter()
                     controller._on_reports(
                         [source], allow_synthetic=True, now=evidence_time
                     )
+                    writer_call_times.append((time.perf_counter() - call_started) * 1000)
                     time.sleep(0.1)
             except Exception as error:
                 writer_errors.append(f"{type(error).__name__}: {error}")
@@ -164,6 +204,11 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
         metrics["heartbeat_gap"] = distribution(gaps)
         metrics["tab_switch_time"] = distribution(tab_times)
         metrics["map_set_events_time"] = distribution(map_times)
+        metrics["worker_ingest_call_time"] = distribution(writer_call_times)
+        metrics["phases"] = {
+            name: {**distribution(values), "total_ms": round(sum(values), 2)}
+            for name, values in sorted(phase_times.items())
+        }
         metrics["map_count_after"] = len(window.world_map.events)
         metrics["feed_count_after"] = len(window._events)
         with controller.store._lock:
