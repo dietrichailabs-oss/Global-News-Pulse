@@ -8,7 +8,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
@@ -20,6 +20,36 @@ def data_directory():
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "DietrichAILabs" / "GlobalPulse"
     return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "global-pulse"
+
+
+def _tray_health_state(controller):
+    """Preserve alerts > paused > active-source errors > active precedence."""
+    if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
+        return "alerts"
+    if not controller.monitoring:
+        return "paused"
+    # _apply_sources caches the exact IDs passed to Scheduler. A disabled or
+    # unavailable old source error must not color the live tray icon red.
+    return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
+            else "active")
+
+
+class _TrayRefreshBridge(QObject):
+    """GUI-affine slot: collector threads never start a tray QTimer directly."""
+
+    def __init__(self, timer: QTimer, controller, should_stop=None):
+        super().__init__(timer)
+        self.timer = timer
+        self.controller = controller
+        self.stopping = False
+        self.should_stop = should_stop or (lambda: False)
+
+    @Slot()
+    def schedule(self):
+        if self.stopping or self.should_stop() or self.controller._closed:
+            return
+        if not self.timer.isActive():
+            self.timer.start()
 
 
 def pulse_icon(state="active", size=64):
@@ -322,29 +352,54 @@ def main(argv=None):
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray.show()
 
-    def update_tray(*_):
-        unread = any(not a.get("read", False) for a in controller.store.list_alerts(limit=50))
-        errors = any(controller.store.get_source_state(s["id"]).get("status") in {"error", "rate_limited", "failed"} for s in controller.catalog if s.get("enabled"))
-        state = "alerts" if unread else "paused" if not controller.monitoring else "error" if errors else "active"
-        tray.setIcon(pulse_icon(state))
-        tray.setToolTip("Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused"))
+    shutting_down = False
+    tray_last_state = None
+    tray_last_tip = None
+    tray_pending_menu = False
 
-    # Source health and incoming alerts arrive in bursts. A store scan and
-    # tray icon replacement for every signal competes with native popup events.
+    def update_tray(*_):
+        nonlocal tray_last_state, tray_last_tip, tray_pending_menu
+        if shutting_down or controller._closed:
+            return
+        # Replacing Explorer's icon while its native context popup is open
+        # can make right-click/Exit Completely appear unreliable.
+        if menu.isVisible():
+            tray_pending_menu = True
+            return
+        tray_pending_menu = False
+        state = _tray_health_state(controller)
+        if state != tray_last_state:
+            tray.setIcon(pulse_icon(state))
+            tray_last_state = state
+        tip = "Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused")
+        if tip != tray_last_tip:
+            tray.setToolTip(tip)
+            tray_last_tip = tip
+
+    # Collector events, source health and native alerts arrive in bursts.
+    # Never restart a pending first-due refresh or scan per enabled source.
     tray_refresh_timer = QTimer(tray)
     tray_refresh_timer.setSingleShot(True)
     tray_refresh_timer.setInterval(700)
     tray_refresh_timer.timeout.connect(update_tray)
+    tray_refresh_bridge = _TrayRefreshBridge(tray_refresh_timer, controller,
+                                            should_stop=lambda: shutting_down)
 
-    def schedule_tray(*_):
-        if not tray_refresh_timer.isActive():
-            tray_refresh_timer.start()
+    def menu_hidden():
+        nonlocal tray_pending_menu
+        if not tray_pending_menu:
+            return
+        tray_pending_menu = False
+        # Defer beyond menu.hide()'s synchronous quit signal. Shutdown may be
+        # called next; schedule_tray checks it before any Store access.
+        QTimer.singleShot(0, tray_refresh_bridge.schedule)
 
-    controller.data_changed.connect(schedule_tray)
-    controller.source_status_changed.connect(schedule_tray)
-    controller.notification_changed.connect(schedule_tray)
-    controller.alert_received.connect(schedule_tray)
-    shutting_down = False
+    menu.aboutToHide.connect(menu_hidden)
+    controller.data_changed.connect(tray_refresh_bridge.schedule)
+    controller.evidence_changed.connect(tray_refresh_bridge.schedule)
+    controller.source_status_changed.connect(tray_refresh_bridge.schedule)
+    controller.notification_changed.connect(tray_refresh_bridge.schedule)
+    controller.alert_received.connect(tray_refresh_bridge.schedule)
 
     def shutdown():
         nonlocal shutting_down

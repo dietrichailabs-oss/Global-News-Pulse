@@ -1317,6 +1317,39 @@ class Store:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()
             return json.loads(row[0]) if row else {}
 
+    def any_source_error(self, source_ids: Iterable[str]) -> bool:
+        """One bounded, consistent source-state scan for the native tray icon.
+
+        Query only explicitly enabled identities. A malformed stored state is
+        conservatively considered an error; never silently report healthy.
+        SQLite's parameter limit is respected for catalogs over 400 sources.
+        """
+        identities = list(source_ids)
+        if any(not isinstance(item, str) or not item for item in identities):
+            return True
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            return False
+        statuses = {"error", "rate_limited", "failed"}
+        with self._lock:
+            for start in range(0, len(identities), 400):
+                batch = identities[start:start + 400]
+                sql = ("SELECT body FROM source_states WHERE source_id IN (" +
+                       ",".join("?" for _ in batch) + ")")
+                for row in self._conn.execute(sql, batch):
+                    try:
+                        state = json.loads(row[0])
+                    except (ValueError, TypeError):
+                        return True
+                    if not isinstance(state, dict):
+                        return True
+                    status = state.get("status")
+                    if "status" in state and not isinstance(status, str):
+                        return True  # Malformed list/dict/null cannot crash native tray.
+                    if status in statuses:
+                        return True
+        return False
+
     def set_source_state(self, source_id: str, state: dict) -> None:
         encoded = _json(state)
         if len(encoded) > 100_000:
@@ -1455,8 +1488,14 @@ class Store:
                 body["delivery_status"] = plain_text(status, 500)
                 self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
 
-    def put_observations(self, observations: Iterable[dict]) -> None:
+    def put_observations(self, observations: Iterable[dict]) -> int:
+        """Store valid indicator revisions; return the count of material changes.
+
+        A repeated fingerprint may advance retrieved_at for custody without
+        rebuilding the full GUI map. New or corrected values remain visible.
+        """
         stamp = utcnow()
+        changed = 0
         with self._lock, write_transaction(self._conn, self.path):
             for index, raw in enumerate(observations):
                 if index >= 5000:
@@ -1501,8 +1540,10 @@ class Store:
                     else:
                         self._conn.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?)", (identity, source, indicator, country, date, stamp, retrieved, fingerprint, _json(body)))
                     self._conn.execute("INSERT INTO observation_revisions(observation_id,at,fingerprint,body) VALUES(?,?,?,?)", (identity, stamp, fingerprint, _json(body)))
+                    changed += 1
                 except (ValueError, TypeError):
                     continue
+        return changed
 
     def list_observations(self, indicator: str = "", country: str = "") -> list[dict]:
         where, params = [], []
