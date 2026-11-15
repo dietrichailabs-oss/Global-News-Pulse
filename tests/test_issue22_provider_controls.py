@@ -178,7 +178,10 @@ def test_clicked_action_uses_provider_identity_not_selected_row(desktop):
     window.source_table.selectRow(row_for(window.source_table, "website"))
     # Both collectable sources start on; SECOND toggles off even when a
     # manual WEBSITE row is selected. Toggle again to verify identity.
-    assert controller.get_setting("enabled_sources") == ["feed", "second"]
+    # Fresh profiles enable all eligible sources effectively without writing
+    # a preference; only an explicit click persists the new selection.
+    assert controller.get_setting("enabled_sources") is None
+    assert {s["id"] for s in controller.scheduler.sources if s["enabled"]} == {"feed", "second"}
     feed_action.click()
     assert controller.get_setting("enabled_sources") == ["feed"]
     assert "disabled" in window.status_label.text()
