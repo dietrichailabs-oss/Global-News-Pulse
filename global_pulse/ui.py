@@ -770,8 +770,11 @@ class MainWindow(SituationActions, QMainWindow):
         if not self._evidence_refresh_timer.isActive():
             self._evidence_refresh_timer.start()
 
+    @Slot()
     def _schedule_collected_refresh(self):
-        """Merge provider-status-only updates, not event/news archive changes."""
+        """Queue worker-origin source status to this GUI QObject thread."""
+        if self._force_close or getattr(self.controller, "_closed", False):
+            return
         if not self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.start()
 
