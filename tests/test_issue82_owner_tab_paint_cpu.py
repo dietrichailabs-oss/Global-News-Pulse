@@ -115,10 +115,36 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     assert window._evidence_refresh_timer.isActive()
     window._evidence_refresh_timer.stop()
     window._last_navigation_at=time.monotonic()-2
+    window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
     assert called == [1], "Once idle, the pending collector revision is applied"
     controller.data_changed.emit()
-    assert len(called) == 2, "Explicit user/settings changes still refresh immediately"
+    assert called == [1], "Controller signals must not synchronously rebuild the map"
+    assert window._evidence_refresh_timer.isActive()
+    window._evidence_refresh_timer.stop()
+    window._last_full_refresh_at=time.monotonic()-6
+    window._refresh_evidence_when_idle()
+    assert called == [1,1], "The coalesced settings revision must still become visible"
+
+
+def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, monkeypatch):
+    window, controller = desktop
+    assert window.prepare_initial_workspaces()
+    calls=[]
+    monkeypatch.setattr(window,"refresh_data",lambda:calls.append(time.monotonic()))
+    window._last_navigation_at=time.monotonic()-10
+    window._last_full_refresh_at=time.monotonic()
+    for _ in range(120):
+        controller.data_changed.emit()
+        controller.evidence_changed.emit()
+    window._evidence_refresh_timer.stop()
+    window._refresh_evidence_when_idle()
+    assert calls==[], "Fast collector bursts must not force repeated GUI work"
+    assert window._evidence_refresh_timer.isActive()
+    window._evidence_refresh_timer.stop()
+    window._last_full_refresh_at=time.monotonic()-6
+    window._refresh_evidence_when_idle()
+    assert len(calls)==1
 
 
 def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monkeypatch):
