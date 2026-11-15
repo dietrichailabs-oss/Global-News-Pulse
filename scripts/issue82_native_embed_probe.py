@@ -155,7 +155,17 @@ def run_in_app(helper: Path) -> int:
         timer=None
         try:
             window=MainWindow(controller)
-            window.resize(1440,940)
+            # A Windows Actions interactive desktop may be smaller than the
+            # requested 1440x940 owner workstation. Keep the *real* app fully
+            # on the actual screen, then separately record the tested size.
+            screen=app.primaryScreen()
+            desktop=screen.availableGeometry()
+            target_w=min(1440,desktop.width()-32)
+            target_h=min(940,desktop.height()-64)
+            if target_w<700 or target_h<520:
+                raise RuntimeError(f"Windows desktop too small for visual media QA: {desktop}")
+            window.resize(target_w,target_h)
+            window.move(desktop.x()+16,desktop.y()+32)
             window.show()
             app.processEvents()
             television=window.media.tv
@@ -204,47 +214,64 @@ def run_in_app(helper: Path) -> int:
                 if not host._window_container.isVisible():
                     raise AssertionError(f"{label}: Qt did not keep video container visible")
                 viewport=window.media_scroll.viewport()
-                surface=QRect(host.mapToGlobal(QPoint(0,0)),host.size())
+                # The native video child, not the outer host placeholder, is
+                # the rectangle we must prove is painted in the actual app.
+                surface=QRect(host._window_container.mapToGlobal(QPoint(0,0)),
+                              host._window_container.size())
                 clip=QRect(viewport.mapToGlobal(QPoint(0,0)),viewport.size())
-                visible=surface.intersected(clip).intersected(
-                    QRect(window.mapToGlobal(QPoint(0,0)),window.size()))
-                if not host.isVisible() or visible.width()<80 or visible.height()<60:
-                    raise AssertionError(f"{label}: video clipped out of real scroll viewport: {visible}")
+                frame=QRect(window.mapToGlobal(QPoint(0,0)),window.size())
                 screen=host.screen()
-                image=screen.grabWindow(0).toImage()
+                screenshot=screen.grabWindow(0)
+                image=screenshot.toImage()
                 if image.isNull():
                     raise RuntimeError("Windows desktop image unavailable")
+                ratio=screenshot.devicePixelRatio()
+                if ratio<=0:
+                    raise RuntimeError("Invalid Windows screenshot device pixel ratio")
+                screen_bounds=QRect(screen.geometry().x(),screen.geometry().y(),
+                                    int(image.width()/ratio),int(image.height()/ratio))
+                visible=surface.intersected(clip).intersected(frame).intersected(screen_bounds)
+                geometry={"window":[frame.x(),frame.y(),frame.width(),frame.height()],
+                          "surface":[surface.x(),surface.y(),surface.width(),surface.height()],
+                          "viewport":[clip.x(),clip.y(),clip.width(),clip.height()],
+                          "screen":[screen_bounds.x(),screen_bounds.y(),screen_bounds.width(),screen_bounds.height()],
+                          "desktop_pixels":[image.width(),image.height()],"dpr":ratio,
+                          "visible":[visible.x(),visible.y(),visible.width(),visible.height()]}
+                if not host.isVisible() or visible.width()<80 or visible.height()<60:
+                    raise AssertionError(f"{label}: native video not visible in Qt viewport/screen: {geometry}")
                 ratios=[(.2,.2),(.5,.2),(.5,.5),(.8,.5),(.8,.8)]
                 pixels=[]
                 matches=0
                 for fx,fy in ratios:
-                    x=int(visible.x()+visible.width()*fx-screen.geometry().x())
-                    y=int(visible.y()+visible.height()*fy-screen.geometry().y())
+                    x=int((visible.x()+visible.width()*fx-screen_bounds.x())*ratio)
+                    y=int((visible.y()+visible.height()*fy-screen_bounds.y())*ratio)
                     if x<0 or y<0 or x>=image.width() or y>=image.height():
-                        raise AssertionError(f"{label}: sampling coordinate outside desktop")
+                        raise AssertionError(f"{label}: native sample ({x},{y}) outside screenshot: {geometry}")
                     color=image.pixelColor(x,y)
                     rgb=[color.red(),color.green(),color.blue()]
                     pixels.append(rgb)
                     matches+=max(abs(v-w) for v,w in zip(rgb,(242,26,154)))<=30
                 if matches<3:
                     raise AssertionError(f"{label}: blank/clipped in-app media surface: {pixels}")
-                return {"case":label,"visible_rect":[visible.x(),visible.y(),visible.width(),visible.height()],
+                return {"case":label,"geometry":geometry,
                         "samples":pixels,"matching_pixels":matches}
 
-            result["cases"]=[visible_marker("default_splitters_1440x940")]
+            result["tested_window_size"]=[window.width(),window.height()]
+            result["desktop_available"]=[desktop.width(),desktop.height()]
+            result["cases"]=[visible_marker("default_splitters_screen_fit")]
             window.vertical_split.setSizes([180,720])
             window.lower_split.setSizes([250,850,250])
-            result["cases"].append(visible_marker("expanded_1440x940"))
+            result["cases"].append(visible_marker("expanded_screen_fit"))
             window.open_page(1)
             app.processEvents()
             if host.isVisible():
                 raise AssertionError("Switching away left native video visible on another tab")
             window.open_page(0)
             result["cases"].append(visible_marker("returned_to_monitor"))
-            window.resize(960,640)
-            result["cases"].append(visible_marker("resized_960x640"))
-            window.resize(1440,940)
-            result["cases"].append(visible_marker("resized_1440x940"))
+            window.resize(min(960,target_w),min(640,target_h))
+            result["cases"].append(visible_marker("resized_compact_screen_fit"))
+            window.resize(target_w,target_h)
+            result["cases"].append(visible_marker("resized_back_to_screen_fit"))
             user32=ctypes.WinDLL("user32",use_last_error=True)
             user32.GetParent.argtypes=(ctypes.c_void_p,)
             user32.GetParent.restype=ctypes.c_void_p
