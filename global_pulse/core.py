@@ -1170,16 +1170,34 @@ class Store:
         Called only while the Store lock is held.
         """
         saved = [(row, json.loads(row["body"])) for row in page]
-        common = [
-            row["id"] for row, event in saved
-            if (event.get("status") == "active"
-                and type(event.get("evidence_policy_version")) is int
-                and 2 <= event["evidence_policy_version"] <= 3
-                and not event.get("merged_source_events")
-                and not event.get("map_areas")
-                and isinstance(event.get("report_count"), int)
-                and event["report_count"] <= 64)
-        ]
+        common = []
+        expected_counts = {}
+        remaining_reports = 8192  # Finite aggregate memory budget per page.
+        for row, event in saved:
+            count = event.get("report_count")
+            if (event.get("status") != "active"
+                    or type(event.get("evidence_policy_version")) is not int
+                    or not 2 <= event["evidence_policy_version"] <= 3
+                    or event.get("merged_source_events")
+                    or event.get("map_areas")
+                    or type(count) is not int or not 0 <= count <= 64
+                    or count > remaining_reports):
+                continue
+            common.append(row["id"])
+            expected_counts[row["id"]] = count
+            remaining_reports -= count
+        if common:
+            placeholders = ",".join("?" for _ in common)
+            # A tampered/stale event report_count must not cause an unbounded
+            # group load or silently omit evidence. First verify the true
+            # indexed row counts before fetching source bodies.
+            actual_counts = {
+                row["event_id"]: row["n"] for row in self._conn.execute(
+                    "SELECT event_id,COUNT(*) AS n FROM reports WHERE event_id IN ("
+                    + placeholders + ") GROUP BY event_id", common)
+            }
+            common = [identity for identity in common
+                      if actual_counts.get(identity, 0) == expected_counts[identity]]
         common_ids = set(common)
         grouped = defaultdict(list)
         if common:
