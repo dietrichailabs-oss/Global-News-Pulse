@@ -21,6 +21,9 @@ internal static class Program
         try
         {
             bool probe = args.Length == 1 && args[0] == "--probe";
+            // A separate offline visual-composition probe is used only by
+            // Windows QA. It never opens YouTube or makes a network request.
+            bool probeEmbed = args.Length == 2 && args[0] == "--probe-embed";
             bool policySelfTest = args.Length == 1 && args[0] == "--self-test-policy";
             if (policySelfTest)
             {
@@ -28,13 +31,15 @@ internal static class Program
                 return TvForm.PolicySelfTest();
             }
             // Video ID, parent window, and watch mode are the *only* inputs.
-            if (!probe && (args.Length < 2 || args.Length > 3 || !VideoId.IsMatch(args[0])))
+            if (!probe && !probeEmbed && (args.Length < 2 || args.Length > 3 || !VideoId.IsMatch(args[0])))
                 return 2;
             long parent = 0;
-            if (!probe && (!long.TryParse(args[1], out parent) || parent < 0))
+            if (probeEmbed && (!long.TryParse(args[1], out parent) || parent <= 0))
                 return 2;
-            bool fullWatch = !probe && args.Length == 3 && args[2] == "--watch";
-            if (!probe && args.Length == 3 && !fullWatch)
+            if (!probe && !probeEmbed && (!long.TryParse(args[1], out parent) || parent < 0))
+                return 2;
+            bool fullWatch = !probe && !probeEmbed && args.Length == 3 && args[2] == "--watch";
+            if (!probe && !probeEmbed && args.Length == 3 && !fullWatch)
                 return 2;
             Console.SetIn(new StreamReader(Console.OpenStandardInput()));
             Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
@@ -44,7 +49,8 @@ internal static class Program
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            using var form = new TvForm(probe ? "YE7VzlLtp-4" : args[0], new IntPtr(parent), fullWatch, probe);
+            using var form = new TvForm(probe || probeEmbed ? "YE7VzlLtp-4" : args[0],
+                new IntPtr(parent), fullWatch, probe || probeEmbed, probeEmbed);
             Application.Run(form);
             // The WebView2 instance is already gone. Exact-owned profile
             // cleanup may wait briefly in THIS helper process, never Pulse UI.
@@ -103,6 +109,7 @@ internal sealed class TvForm : Form
     private readonly IntPtr parentHwnd;
     private readonly bool fullWatch;
     private readonly bool offlineProbe;
+    private readonly bool visibleOfflineProbe;
     private readonly string privateFolder;
     private bool initialized;
     private bool pollPending;
@@ -114,12 +121,14 @@ internal sealed class TvForm : Form
     private double previousTime = -1;
     private DateTime started = DateTime.UtcNow;
 
-    internal TvForm(string videoId, IntPtr parentHwnd, bool fullWatch, bool offlineProbe)
+    internal TvForm(string videoId, IntPtr parentHwnd, bool fullWatch,
+                    bool offlineProbe, bool visibleOfflineProbe)
     {
         this.videoId = videoId;
         this.parentHwnd = parentHwnd;
         this.fullWatch = fullWatch;
         this.offlineProbe = offlineProbe;
+        this.visibleOfflineProbe = visibleOfflineProbe;
         privateFolder = Path.Combine(Path.GetTempPath(), "GlobalPulse-TV-" + Guid.NewGuid().ToString("N"));
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -354,6 +363,19 @@ internal sealed class TvForm : Form
                 var first = await Task.WhenAny(done.Task, Task.Delay(10000));
                 if (first != done.Task || !await done.Task)
                     throw new InvalidOperationException("Offline HTML failed");
+                if (visibleOfflineProbe)
+                {
+                    // Inspect a pixel in the real Qt-hosted window, not a
+                    // decoder clock or JS frame counter. This static color
+                    // exposes Win32 parent/compositor clipping failures.
+                    await web.ExecuteScriptAsync(
+                        "document.documentElement.style.backgroundColor='#f21a9a';" +
+                        "document.body.style.backgroundColor='#f21a9a';" +
+                        "document.body.style.margin='0';" +
+                        "document.body.style.minHeight='100vh';");
+                    Reply(new { type="embed_probe_ready", network="none", marker="f21a9a" });
+                    return; // Wait for STOP from the exact test-owned pipe.
+                }
                 var encoded = await web.ExecuteScriptAsync(
                     "document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E,mp4a.40.2\"')");
                 Reply(new {
