@@ -75,9 +75,14 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
     try:
         now = datetime.now(timezone.utc).isoformat()
         started = time.perf_counter()
-        changed = controller.store.ingest([fixture_report(i, now) for i in range(5000)])
+        changed = []
+        # Each source callback is bounded at MAX_BATCH=2000 by the real Store.
+        for offset in range(0, 5000, 2000):
+            changed.extend(controller.store.ingest(
+                [fixture_report(i, now) for i in range(offset, min(offset + 2000, 5000))]
+            ))
         metrics["seed_sqlite_ms"] = round((time.perf_counter() - started) * 1000, 2)
-        assert len(changed) == 5000, "Seed must represent 5k distinct real Store events"
+        assert len(changed) == 5000, "Admission-safe batches must seed 5k events"
         started = time.perf_counter()
         window = MainWindow(controller)
         window.show()
@@ -142,39 +147,49 @@ def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
         started = time.perf_counter()
         worker.start()
         QTest.qWait(4500)
-        pages.stop()
-        heartbeat.stop()
-        worker.join(timeout=60)
-        metrics["soak_plus_writer_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        # Continue pumping GUI timers during any slow writer tail instead of
+        # blocking the main thread for up to 60 seconds in worker.join().
+        deadline = time.perf_counter() + 60
+        while worker.is_alive() and time.perf_counter() < deadline:
+            QTest.qWait(50)
+        worker.join(timeout=0)
         assert not worker.is_alive(), "Bounded worker must finish and release archive"
         assert not writer_errors, writer_errors
         QTest.qWait(700)
+        pages.stop()
+        heartbeat.stop()
         app.processEvents()
+        metrics["soak_plus_writer_ms"] = round((time.perf_counter() - started) * 1000, 2)
 
         metrics["heartbeat_gap"] = distribution(gaps)
         metrics["tab_switch_time"] = distribution(tab_times)
         metrics["map_set_events_time"] = distribution(map_times)
         metrics["map_count_after"] = len(window.world_map.events)
         metrics["feed_count_after"] = len(window._events)
-        metrics["visible_live_source"] = any(
-            report.get("source_id") == "offline-qt-live-burst"
-            for event in window.world_map.events
-            for report in event.get("reports", [])
-        )
         with controller.store._lock:
             row = controller.store._conn.execute(
-                "SELECT body FROM reports WHERE source_id=?",
+                "SELECT event_id,body FROM reports WHERE source_id=?",
                 ("offline-qt-live-burst",),
             ).fetchone()
         assert row, "Actual background report must reach SQLite"
         actual = json.loads(row["body"])
         assert actual["summary"] == "Synthetic revised local value 9"
+        stored_event = controller.store.get_event(row["event_id"])
+        mapped_event = next(
+            (event for event in window.world_map.events
+             if event.get("id") == row["event_id"]), None
+        )
+        metrics["live_event_revision_stored"] = stored_event.get("revision") if stored_event else None
+        metrics["live_event_revision_visible"] = mapped_event.get("revision") if mapped_event else None
+        assert mapped_event and stored_event
+        assert mapped_event.get("revision") == stored_event.get("revision") == 10, (
+            "Last worker revision must reach the real map projection"
+        )
         assert len(gaps) >= 2, "The GUI heartbeat must actually run"
         assert len(tab_times) >= 2, "Tab navigation must actually execute"
         assert map_times, "Real evidence must cause a real map recomposition"
         assert metrics["map_count_after"] == 5000
         assert metrics["feed_count_after"] == 500
-        assert metrics["visible_live_source"], "Latest source revision must reach visible map"
         print("PULSE_5000_CONCURRENT_GUI_SOAK=" + json.dumps(metrics, sort_keys=True), flush=True)
     finally:
         heartbeat.stop()
