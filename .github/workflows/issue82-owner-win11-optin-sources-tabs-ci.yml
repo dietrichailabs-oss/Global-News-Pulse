@@ -1,0 +1,71 @@
+name: Issue82 Owner Win11 Opt-In Sources Tabs - Windows Linux CI
+
+on:
+  push:
+    branches: [eng/issue82-owner-optin-sources-tab-responsiveness-20261115]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue82-owner-optin-sources-tabs
+  cancel-in-progress: true
+
+jobs:
+  focused-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install reviewed locked requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Guard exact PR102 parent and 13-path owner-fix plus legacy regression scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 5676c7be5d20c512d9bbfd0f4a866bf53086202e HEAD
+          git diff --name-only 5676c7be5d20c512d9bbfd0f4a866bf53086202e..HEAD | python -c "import sys; expected={'global_pulse/source_availability.py','global_pulse/controller.py','global_pulse/provider_actions.py','global_pulse/ui.py','global_pulse/__main__.py','tests/test_issue82_owner_win11_optin_sources_tabs.py','.github/workflows/issue82-owner-win11-optin-sources-tabs-ci.yml','tests/test_controller.py','tests/test_installer_component_consent.py','tests/test_issue22_provider_controls.py','tests/test_qa_correction_integration.py','tests/test_qa_history_integration.py','tests/test_sdk_distribution.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Real Windows Qt backend
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Syntax check
+        shell: bash
+        run: python -m compileall -q global_pulse tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_controller.py tests/test_installer_component_consent.py tests/test_issue22_provider_controls.py tests/test_qa_correction_integration.py tests/test_qa_history_integration.py tests/test_sdk_distribution.py
+      - name: Source policy, notification migration, tab latency and existing UI regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_ui_desktop.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_source_expansion_ecb.py tests/test_issue22_settings_boundary.py tests/test_owner_feedback_qa_repairs.py tests/test_issue82_startup_video_diagnostics.py tests/test_issue82_tv_error_readout.py tests/test_controller.py tests/test_installer_component_consent.py tests/test_issue22_provider_controls.py tests/test_qa_correction_integration.py tests/test_qa_history_integration.py tests/test_sdk_distribution.py
+      - name: Ensure tracked source not mutated by tests
+        if: always()
+        shell: bash
+        run: git diff --exit-code
