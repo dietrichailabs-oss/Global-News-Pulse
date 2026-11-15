@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QThread, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -20,6 +20,7 @@ from global_pulse.__main__ import _TrayRefreshBridge, _tray_health_state
 from global_pulse.controller import Controller
 from global_pulse.source_availability import capability
 from global_pulse.core import Store
+from global_pulse.native_notifications import NativeNotifications
 from global_pulse.ui import MainWindow
 
 NOW = "2026-11-08T12:00:00Z"
@@ -367,4 +368,80 @@ def test_worker_origin_status_and_tray_bridge_run_on_gui_thread(desktop, app):
         c.evidence_changed.disconnect(bridge.schedule)
         tray_timer.stop()
         tray_timer.deleteLater()
+        app.processEvents()
+
+
+def test_worker_origin_status_and_alert_widget_updates_are_gui_queued(desktop, app):
+    w, c = desktop
+    previous = w.status_label.text()
+    worker = threading.Thread(
+        target=lambda: c.status_changed.emit("Worker-origin collection status"),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert w.status_label.text() == previous, (
+        "GPCollect worker must not mutate QWidget before GUI event loop"
+    )
+    app.processEvents()
+    assert w.status_label.text() == "Worker-origin collection status"
+
+    worker = threading.Thread(
+        target=lambda: c.alert_received.emit({"id": "offline-worker-alert"}),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert w.status_label.text() == "Worker-origin collection status"
+    app.processEvents()
+    assert w.status_label.text() == "New alert saved in Alerts."
+
+
+def test_worker_origin_native_toast_and_storage_pause_are_gui_queued(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    notifier = NativeNotifications(enabled=False)
+    deliveries = []
+    notifier.delivery_changed.connect(
+        lambda alert_id, status: deliveries.append(
+            (alert_id, QThread.currentThread() == app.thread(), status)
+        )
+    )
+    c.native_alert.connect(notifier.notify)
+    try:
+        worker = threading.Thread(
+            target=lambda: c.native_alert.emit(
+                {"id": "offline-worker-event", "_alert_id": "offline-worker-alert"},
+                "Synthetic native notification",
+            ),
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert not deliveries, "QProcess notification bridge must queue off-worker"
+        app.processEvents()
+        assert len(deliveries) == 1
+        assert deliveries[0][0] == "offline-worker-alert"
+        assert deliveries[0][1], "Native notification callback ran outside GUI"
+
+        # The storage fail-closed pause also arrives on GUI QObject affinity.
+        c.monitoring = True
+        worker = threading.Thread(
+            target=lambda: c.storage_problem.emit("Synthetic storage blocked"),
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert c.monitoring is True, "Worker must not pause GUI scheduler directly"
+        app.processEvents()
+        assert c.monitoring is False
+    finally:
+        c.native_alert.disconnect(notifier.notify)
+        notifier.stop()
+        notifier.deleteLater()
+        c.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
