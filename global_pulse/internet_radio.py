@@ -390,7 +390,7 @@ class RadioPanel(QWidget):
         for label,value in (("USB","usb"),("LSB","lsb"),("AM","am"),("CW","cw")):
             self.mode.addItem(label,value)
         self.tune_button=QPushButton("Tune")
-        self.tune_button.clicked.connect(self.tune_receiver)
+        self.tune_button.clicked.connect(self._manual_tune)
         tuner_row.addWidget(self.receiver_type)
         tuner_row.addWidget(QLabel("kHz"))
         tuner_row.addWidget(self.frequency,1)
@@ -816,6 +816,11 @@ class RadioPanel(QWidget):
         self.receiver_view.load(QUrl(url))
         self.receiver_view.show()
         return True
+
+    def _manual_tune(self):
+        """A Qt clicked(bool) is not an SDR frequency; manual Tune owns the scan."""
+        self.stop_scan()
+        return self.tune_receiver()
 
     def tune_receiver(self,frequency=None):
         if self._closed:
