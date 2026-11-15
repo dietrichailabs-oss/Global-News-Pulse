@@ -393,6 +393,11 @@ class MainWindow(SituationActions, QMainWindow):
         self._last_navigation_at=0.0
         self._last_full_refresh_at=0.0
         self._last_rendered_monitoring=None
+        # Explicit settings changes must normally update the current view
+        # immediately. Saving a whole Settings form is one logical action,
+        # though, and must not rebuild the 5k-event map for each changed field.
+        self._batch_settings_updates=False
+        self._settings_data_changed=False
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -456,12 +461,10 @@ class MainWindow(SituationActions, QMainWindow):
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        # data_changed can also be emitted in bursts during source updates and
-        # settings changes. Treat it as an invalidation; explicit filter
-        # changes and Refresh still have their own immediate UI paths.
-        # Otherwise one emitted signal can synchronously reconcile 5k map
-        # records before Windows gets to process the next tab click.
-        controller.data_changed.connect(self._schedule_evidence_refresh)
+        # User/settings changes retain immediate presentation semantics.
+        # The collector uses its separate evidence_changed signal; that path
+        # is coalesced to prevent high-frequency map rebuilds between clicks.
+        controller.data_changed.connect(self._on_user_data_changed)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
@@ -792,9 +795,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.setting_categories=QLineEdit(", ".join(self.controller.get_setting("categories",[])));self.setting_categories.setPlaceholderText("All categories; or comma-separated topics");qform.addRow("Topic watchlist",self.setting_categories)
         grid.addWidget(quiet,0,1);layout.addLayout(grid)
         sources_group=QGroupBox("Source preferences");sg=QVBoxLayout(sources_group)
-        sg.addWidget(label("Every available, approved collector is enabled by default, including a one-time enable-all upgrade of existing profiles. You can later turn off individual sources; restricted, duplicate and website-only entries cannot be collected.","Muted",True))
-        if getattr(self.controller, "_enabled_sources_migrated", False):
-            sg.addWidget(label("Upgrade applied: all eligible feeds are now on. Your previous selections were preserved locally; you can disable individual feeds and save new choices.","Muted",True))
+        sg.addWidget(label("Every available, approved collector is enabled for new profiles. Restricted, duplicate and website-only entries cannot be auto-collected. Muting affects alerts, not collection.","Muted",True))
         self.enable_all_sources_button=button("Enable all available sources",self._enable_all_available_sources)
         self.enable_all_sources_button.setToolTip("Select every currently collectable provider; press Save settings to apply. Does not bypass access or retry limits.")
         sg.addWidget(self.enable_all_sources_button,0,Qt.AlignmentFlag.AlignLeft)
@@ -839,80 +840,6 @@ class MainWindow(SituationActions, QMainWindow):
         if success:
             self._background_warm_enabled=True
         return success
-
-    def prime_initial_paint_caches(self, app, splash):
-        """Render the first real-sized Map/Economy frames before releasing splash.
-
-        Data prewarming does not itself trigger Qt paintEvent for hidden tabs.
-        Expose the disabled window under the on-top splash just long enough
-        for Qt to settle its actual DPI/layout, draw the heavyweight first
-        frames, and verify their cache keys. Never open video or network here.
-        """
-        if not self._background_warm_enabled or self._dirty_pages.intersection(range(1, 6)):
-            return False
-        previous_page = self.pages.currentIndex()
-        was_enabled = self.isEnabled()
-        self._initial_painted_pages = set()
-        self.setEnabled(False)
-        try:
-            # A hidden widget's geometry is not the real Windows viewport.
-            # Rendering at its default size would get invalidated on show().
-            self.show()
-            splash.raise_()
-            app.processEvents()
-            self.open_page(0)
-            app.processEvents()
-            if (not self.world_map.isVisible() or self.world_map.width() < 32
-                    or self.world_map.height() < 32):
-                return False
-            self.world_map.grab()
-            self._initial_painted_pages.add(0)
-
-            # Data is already preloaded for every workspace. Force its
-            # initial Qt geometry/viewport draw under splash as well; a cold
-            # first click must not pay for Sources, Settings, Alerts or Briefs.
-            for index in (1, 3, 4, 5, 6):
-                self.open_page(index)
-                app.processEvents()
-                page = self.pages.currentWidget()
-                if page is None or not page.isVisible():
-                    return False
-                page.grab()
-                self._initial_painted_pages.add(index)
-
-            self.open_page(2)
-            app.processEvents()
-            if (not self.economic_chart.isVisible() or self.economic_chart.width() < 32
-                    or self.economic_chart.height() < 32):
-                return False
-            self.economic_chart.grab()
-            # Initial QTableView viewport/layout must also complete under
-            # splash, but only visible virtual rows are materialized.
-            self.economy_table.viewport().grab()
-            self._initial_painted_pages.add(2)
-
-            self.open_page(previous_page)
-            app.processEvents()
-            self.world_map.grab()
-            world = self.world_map
-            chart = self.economic_chart
-            expected_map_key = (
-                world.width(), world.height(), world.zoom, world.pan_x, world.pan_y,
-            )
-            expected_chart_key = (
-                chart.width(), chart.height(), chart.devicePixelRatioF(),
-            )
-            return (
-                world._projected_view_key == expected_map_key
-                and len(world._projected_paths) == len(world._countries)
-                and chart._chart_pixmap is not None
-                and chart._chart_cache_key == expected_chart_key
-                and self._initial_painted_pages == set(range(7))
-            )
-        finally:
-            if self.pages.currentIndex() != previous_page:
-                self.open_page(previous_page)
-            self.setEnabled(was_enabled)
 
     def _schedule_workspace_warm(self):
         if (self._background_warm_enabled and self._dirty_pages
@@ -1016,6 +943,14 @@ class MainWindow(SituationActions, QMainWindow):
                 at=earliest+(latest-earliest)*self.history_slider.value()/1000
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
+
+    @Slot()
+    def _on_user_data_changed(self):
+        """Honor direct user updates while collapsing a multi-field Save."""
+        if self._batch_settings_updates:
+            self._settings_data_changed=True
+        else:
+            self.refresh_data()
 
     @Slot()
     def _schedule_evidence_refresh(self):
@@ -1553,14 +1488,25 @@ class MainWindow(SituationActions, QMainWindow):
             if self.source_preferences.cellWidget(i,1).isChecked():muted.append(source_id)
         values["enabled_sources"]=enabled;values["muted_sources"]=muted
         values["alert_threshold"]=self.setting_threshold.currentData()
+        self._batch_settings_updates=True
+        self._settings_data_changed=False
         try:
             for key,value in values.items():
                 # No-op saves must not redraw the map or relaunch the helper.
                 if self.controller.get_setting(key,None)!=value:
                     self.controller.set_setting(key,value)
             self._dirty_pages.update((2,3,4,5))
+            self._schedule_workspace_warm()
             self.settings_result.setText("Settings saved. Provider rate limits still apply; existing history stays available.")
-        except Exception as exc:self.settings_result.setText(f"Settings could not be saved: {exc}")
+        except Exception as exc:
+            self.settings_result.setText(f"Settings could not be saved: {exc}")
+        finally:
+            # Even if a later field fails, earlier successfully saved fields
+            # must become visible, but they cause only one map reconciliation.
+            self._batch_settings_updates=False
+            if self._settings_data_changed:
+                self._settings_data_changed=False
+                self.refresh_data()
 
     def _add_user_feed(self):
         if not hasattr(self.controller,"add_user_feed"):
