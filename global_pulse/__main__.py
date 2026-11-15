@@ -322,29 +322,61 @@ def main(argv=None):
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray.show()
 
-    def update_tray(*_):
-        unread = any(not a.get("read", False) for a in controller.store.list_alerts(limit=50))
-        errors = any(controller.store.get_source_state(s["id"]).get("status") in {"error", "rate_limited", "failed"} for s in controller.catalog if s.get("enabled"))
-        state = "alerts" if unread else "paused" if not controller.monitoring else "error" if errors else "active"
-        tray.setIcon(pulse_icon(state))
-        tray.setToolTip("Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused"))
+    shutting_down = False
+    tray_last_state = None
+    tray_last_tip = None
+    tray_pending_menu = False
 
-    # Source health and incoming alerts arrive in bursts. A store scan and
-    # tray icon replacement for every signal competes with native popup events.
+    def update_tray(*_):
+        nonlocal tray_last_state, tray_last_tip, tray_pending_menu
+        if shutting_down or controller._closed:
+            return
+        # Replacing Explorer's icon while its native context popup is open
+        # can make right-click/Exit Completely appear unreliable.
+        if menu.isVisible():
+            tray_pending_menu = True
+            return
+        tray_pending_menu = False
+        unread = any(not a.get("read", False) for a in controller.store.list_alerts(limit=50))
+        enabled = (s["id"] for s in controller.catalog if s.get("enabled"))
+        errors = controller.store.any_source_error(enabled)
+        state = "alerts" if unread else "paused" if not controller.monitoring else "error" if errors else "active"
+        if state != tray_last_state:
+            tray.setIcon(pulse_icon(state))
+            tray_last_state = state
+        tip = "Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused")
+        if tip != tray_last_tip:
+            tray.setToolTip(tip)
+            tray_last_tip = tip
+
+    # Collector events, source health and native alerts arrive in bursts.
+    # Never restart a pending first-due refresh or scan per enabled source.
     tray_refresh_timer = QTimer(tray)
     tray_refresh_timer.setSingleShot(True)
     tray_refresh_timer.setInterval(700)
     tray_refresh_timer.timeout.connect(update_tray)
 
     def schedule_tray(*_):
+        if shutting_down or controller._closed:
+            return
         if not tray_refresh_timer.isActive():
             tray_refresh_timer.start()
 
+    def menu_hidden():
+        nonlocal tray_pending_menu
+        if not tray_pending_menu:
+            return
+        tray_pending_menu = False
+        # Defer beyond menu.hide()'s synchronous quit signal. Shutdown may be
+        # called next; schedule_tray checks it before any Store access.
+        QTimer.singleShot(0, schedule_tray)
+
+    menu.aboutToHide.connect(menu_hidden)
     controller.data_changed.connect(schedule_tray)
+    controller.evidence_changed.connect(schedule_tray)
     controller.source_status_changed.connect(schedule_tray)
     controller.notification_changed.connect(schedule_tray)
     controller.alert_received.connect(schedule_tray)
-    shutting_down = False
 
     def shutdown():
         nonlocal shutting_down
