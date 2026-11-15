@@ -106,7 +106,7 @@ jobs:
           if ($process.ExitCode -ne 0) { throw ('Native policy test failed: ' + $process.ExitCode + ', stderr: ' + (Get-Content $stderr -Raw)) }
           $messages=@(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() })
           $checks=@($messages | ConvertFrom-Json | Where-Object { $_.type -eq 'policy_self_test' })
-          if ($checks.Count -ne 1 -or $checks[0].passed -ne $true -or $checks[0].cases -lt 27 -or $checks[0].failures -ne 0 -or $checks[0].network -ne 'none') {
+          if ($checks.Count -ne 1 -or $checks[0].passed -ne $true -or $checks[0].cases -lt 31 -or $checks[0].failures -ne 0 -or $checks[0].network -ne 'none') {
             throw 'Native browser policy self-test did not pass all network-free cases'
           }
           Get-Content -LiteralPath $receipt
