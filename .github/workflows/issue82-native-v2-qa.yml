@@ -76,6 +76,10 @@ jobs:
       - name: Run exact owner tab and video policy regressions
         run: |
           $ErrorActionPreference='Stop'
+          # Fast first-stage diagnostic: expose real map/SQLite heartbeat phases
+          # without waiting for 100+ unrelated tests after a performance STOP.
+          python -m pytest -q -s tests/test_issue82_owner_tab_paint_cpu.py::test_actual_collector_revision_overlapping_120_tab_clicks
+          if ($LASTEXITCODE -ne 0) { throw 'Real collector/UI heartbeat performance STOP' }
           python -m pytest -q tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py tests/test_dotnet_notices.py tests/test_tv_package_manifest_gate.py tests/test_issue82_startup_video_diagnostics.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_ui_desktop.py
           if ($LASTEXITCODE -ne 0) { throw 'Desktop and TV source QA failed' }
       - name: Restore exact locked Microsoft native WebView2 SDK
