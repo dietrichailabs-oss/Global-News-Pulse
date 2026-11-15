@@ -163,6 +163,9 @@ def test_actual_packaging_bundle_is_pinned_to_official_license():
 
 def test_main_gates_helper_start_but_not_news_monitoring():
     source=(Path(__file__).parents[1]/'global_pulse/__main__.py').read_text(encoding='utf-8')
-    assert 'if accept_windows_sdk_terms(controller, window):\n                notifier.start()' in source
-    assert source.index('if accept_windows_sdk_terms(controller, window):')<source.index('if args.no_start:',source.index('def begin():'))
-    assert 'controller.start()' in source
+    # The helper is never started or terms-prompted on default-off profiles.
+    begin=source.split('def begin():',1)[1]
+    assert 'if controller.get_setting("notifications_enabled", False):\n                apply_native_preference(True)' in begin
+    assert 'if accept_windows_sdk_terms(controller, window):\n            notifier.start()' in source
+    assert begin.index('apply_native_preference(True)') < begin.index('if args.no_start:')
+    assert 'controller.start()' in begin

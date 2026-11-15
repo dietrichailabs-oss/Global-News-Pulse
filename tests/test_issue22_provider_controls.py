@@ -176,7 +176,17 @@ def test_clicked_action_uses_provider_identity_not_selected_row(desktop):
     window, controller = desktop
     feed_action = window.source_table.cellWidget(row_for(window.source_table, "second"), 8)
     window.source_table.selectRow(row_for(window.source_table, "website"))
+    # Both collectable sources start on; SECOND toggles off even when a
+    # manual WEBSITE row is selected. Toggle again to verify identity.
+    # Fresh profiles enable all eligible sources effectively without writing
+    # a preference; only an explicit click persists the new selection.
+    assert controller.get_setting("enabled_sources") is None
+    assert {s["id"] for s in controller.scheduler.sources if s["enabled"]} == {"feed", "second"}
     feed_action.click()
+    assert controller.get_setting("enabled_sources") == ["feed"]
+    assert "disabled" in window.status_label.text()
+    # Re-acquire after a UI update in case the source table was rebuilt.
+    window.source_table.cellWidget(row_for(window.source_table, "second"), 8).click()
     assert controller.get_setting("enabled_sources") == ["feed", "second"]
     assert "paused" in window.status_label.text()
 
@@ -229,7 +239,7 @@ def test_settings_can_save_with_non_checkbox_manual_rows(desktop):
     window, controller = desktop
     window._save_settings()
     assert "Settings saved" in window.settings_result.text()
-    assert controller.get_setting("enabled_sources") == ["feed"]
+    assert controller.get_setting("enabled_sources") == ["feed", "second"]
 
 
 def test_source_toggle_preserves_other_unsaved_preferences(desktop):

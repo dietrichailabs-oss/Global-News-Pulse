@@ -57,14 +57,14 @@ jobs:
       - name: Verify exact conditional-QA PR103 and workflow-only owner package scope
         run: |
           $ErrorActionPreference='Stop'
-          git merge-base --is-ancestor bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2 HEAD
+          git merge-base --is-ancestor c09aba07ab3fc6bf38893726fbea8106e08bec8e HEAD
           if ($LASTEXITCODE -ne 0) { throw 'PR103 conditional-QA source absent' }
-          $changed=@(git diff --name-only bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2..HEAD)
+          $changed=@(git diff --name-only c09aba07ab3fc6bf38893726fbea8106e08bec8e..HEAD)
           $allowed=@('.github/workflows/issue82-owner-optin-native-package.yml')
           $unexpected=@($changed | Where-Object { $_ -notin $allowed })
           if ($unexpected.Count -gt 0 -or $changed.Count -ne 1) { throw ('Unreviewed product/test modification: ' + ($changed -join ',')) }
-          Write-Host 'ISSUE82_OWNER_WIN11_PRODUCT=bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2'
-          Write-Host 'PR103_WINDOWS_LINUX_FOCUSED=149_PASS_EACH'
+          Write-Host 'ISSUE82_OWNER_WIN11_PRODUCT=c09aba07ab3fc6bf38893726fbea8106e08bec8e'
+          Write-Host 'PR103_WINDOWS_LINUX_FOCUSED=273_PASS_EACH'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
           Write-Host 'PUBLIC_RELEASE_RIGHTS_HOLD=unchanged'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -123,7 +123,7 @@ jobs:
             portable_zip_sha256 = (Get-FileHash -LiteralPath (Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-portable.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
             public_release = $false
             signing_performed = $false
-            purpose = 'non-release Issue82 owner retest of exact PR103 opt-in notifications, idle tab warm, source enable-all, previous PR95-102 HAM/TV diagnostics; product bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2; native Windows full suite and installer lifecycle smoke required; embedded TV still unverified; public rights hold'
+            purpose = 'non-release Issue82 owner retest of exact PR103 opt-in notifications, idle tab warm, source enable-all, previous PR95-102 HAM/TV diagnostics; product c09aba07ab3fc6bf38893726fbea8106e08bec8e; native Windows full suite and installer lifecycle smoke required; embedded TV still unverified; public rights hold'
           } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:GP_OUTPUT 'OWNER_TEST_RECEIPT.json') -Encoding utf8
           Write-Host "SETUP_EXE_SHA256=$exeSha"
           Write-Host "SETUP_ZIP_SHA256=$zipSha"
