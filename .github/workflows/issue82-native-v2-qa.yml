@@ -1,0 +1,94 @@
+name: Issue82 Native TV Codec and Virtual Economy QA
+
+on:
+  push:
+    branches: [eng/issue82-owner-tab-render-video-20261115]
+    paths:
+      - 'global_pulse/ui.py'
+      - 'global_pulse/single_media.py'
+      - 'global_pulse/native_tv.py'
+      - 'tests/test_issue82_owner_tab_paint_cpu.py'
+      - 'tests/test_issue82_native_tv_policy.py'
+      - 'packaging/tv/**'
+      - 'scripts/build_windows.ps1'
+      - '.github/workflows/issue82-native-v2-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue82-native-tv-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: windows
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.403'
+      - name: Install source-locked Python test dependencies
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-bootstrap.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Python bootstrap failed' }
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-build.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Python build dependencies failed' }
+      - name: Run exact owner tab and video policy regressions
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pytest -q tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_ui_desktop.py
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop and TV source QA failed' }
+      - name: Restore reviewed Microsoft native WebView2 SDK in prototype scope
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet restore packaging/tv/GlobalPulse.TV.csproj --runtime win-x64 --use-lock-file --force-evaluate
+          if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 restore failed' }
+      - name: Compile native WebView2 host and probe offline HTML5 decoder
+        run: |
+          $ErrorActionPreference='Stop'
+          $output=Join-Path $env:RUNNER_TEMP 'globalpulse-tv-native-probe'
+          dotnet publish packaging/tv/GlobalPulse.TV.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --output $output -p:PublishSingleFile=false -p:PublishTrimmed=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native TV build failed' }
+          $exe=Join-Path $output 'GlobalPulse.TV.exe'
+          $receipt=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_CODEC_PROBE.jsonl'
+          $stderr=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_CODEC_STDERR.txt'
+          $process=Start-Process -FilePath $exe -ArgumentList '--probe' -PassThru -RedirectStandardOutput $receipt -RedirectStandardError $stderr
+          if (-not $process.WaitForExit(45000)) {
+            $process.Kill()
+            throw 'Offline native TV probe timed out'
+          }
+          if ($process.ExitCode -ne 0) { throw ('Offline native TV probe failed: ' + $process.ExitCode + ', stderr: ' + (Get-Content $stderr -Raw)) }
+          $messages=@(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() })
+          $codec=@($messages | ConvertFrom-Json | Where-Object { $_.type -eq 'codec_probe' })
+          if ($codec.Count -ne 1 -or $codec[0].h264 -notin @('probably','maybe') -or $codec[0].in_private -ne $true -or $codec[0].network -ne 'none') {
+            throw 'No successful offline WebView2 H.264+InPrivate capability receipt'
+          }
+          Get-Content -LiteralPath $receipt
+      - name: Preserve prototype QA receipts and dependency lock (not a release)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue82-v2-native-codec-qa
+          path: |
+            packaging/tv/packages.lock.json
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_PROBE.jsonl
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_STDERR.txt
+          retention-days: 7
+          if-no-files-found: warn
