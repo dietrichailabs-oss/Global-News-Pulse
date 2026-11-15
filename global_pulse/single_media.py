@@ -288,6 +288,10 @@ class Television(_MediaTile):
         except (ImportError,RuntimeError,ValueError):
             self.stop();self.tv_status.setText("ERROR")
             self.note.setText("The sandboxed embedded player could not start. No external website was opened.")
+            self.tv_diagnostics.setText(
+                "Embedded player startup refused or unavailable in this Qt session · "
+                "no video or audio started"
+            )
 
     def watch_full_page(self):
         """Load the selected official YouTube watch URL, not a stream mirror.
@@ -347,6 +351,10 @@ class Television(_MediaTile):
             self.note.setText(
                 "YouTube watch page could not start inside Pulse. "
                 "Use Open on YouTube in your regular browser."
+            )
+            self.tv_diagnostics.setText(
+                "Official YouTube watch page startup refused or unavailable · "
+                "no in-app playback verified"
             )
             return False
 
@@ -440,6 +448,13 @@ class Television(_MediaTile):
             self.note.setText(
                 message + " · Try YouTube watch page in Pulse or "
                 "Open on YouTube, or select another exact video."
+            )
+            # stop() clears stale media telemetry; restore the actual failure
+            # receipt to the readable/selectable pane, not only the 14px note.
+            self.tv_diagnostics.setText(
+                "YouTube unavailable · " + message[:140] +
+                " · " + (summary or "No decoder telemetry")[:120] +
+                " · Playback not verified"
             )
             return
         if not isinstance(value,dict) or value.get("missing"):
