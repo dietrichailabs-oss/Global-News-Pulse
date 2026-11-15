@@ -82,6 +82,19 @@ def build_sources(window):
     window.pages.addWidget(panel)
 
 
+def _existing_source_rows(table):
+    """Reuse cells and controls across live status pulses, even after sorting."""
+    rows = {}
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        source = item.data(Qt.ItemDataRole.UserRole) if item else None
+        sid = source.get("id") if isinstance(source, dict) else None
+        if not sid or sid in rows:
+            return {}
+        rows[sid] = row
+    return rows
+
+
 def populate_sources(window):
     from .ui import timestamp
     table = window.source_table
@@ -89,16 +102,20 @@ def populate_sources(window):
     selected_id = (current.data(Qt.ItemDataRole.UserRole) or {}).get("id") if current else None
     enabled = _effective(window)
     catalog = list(window.controller.catalog)
+    old_rows = _existing_source_rows(table)
+    reuse = bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
     blocked = table.blockSignals(True)
     sorting = table.isSortingEnabled()
     selected_row = None
     try:
         table.setSortingEnabled(False)
-        table.clearContents()
-        table.setRowCount(len(catalog))
+        if not reuse:
+            table.clearContents()
+            table.setRowCount(len(catalog))
         collectable = 0
-        for row, source in enumerate(catalog):
+        for catalog_row, source in enumerate(catalog):
             sid = source["id"]
+            row = old_rows[sid] if reuse else catalog_row
             available, kind, reason = capability(source)
             collectable += int(available)
             state = window.controller.store.get_source_state(sid) or {}
@@ -111,35 +128,65 @@ def populate_sources(window):
                       timestamp(state.get("next_poll")) if on and state.get("next_poll") else "—",
                       str(max(1, int(source.get("min_interval", 600))) // 60) + " min" if available else "—"]
             for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
-                item.setData(Qt.ItemDataRole.UserRole, source)
-                item.setToolTip(reason)
-                table.setItem(row, column, item)
-            if available:
+                if reuse:
+                    item = table.item(row, column)
+                    if item is None:
+                        item = QTableWidgetItem()
+                        table.setItem(row, column, item)
+                    if item.text() != str(value):
+                        item.setText(str(value))
+                    if item.toolTip() != reason:
+                        item.setToolTip(reason)
+                else:
+                    item = QTableWidgetItem(str(value))
+                    item.setData(Qt.ItemDataRole.UserRole, source)
+                    item.setToolTip(reason)
+                    table.setItem(row, column, item)
+            if reuse:
+                action = table.cellWidget(row, 8)
+                if available and isinstance(action, QPushButton):
+                    desired = "Disable collection" if on else "Enable collection"
+                    if action.text() != desired:
+                        action.setText(desired)
+                    action.setAccessibleName(desired + ": " + str(source.get("name", sid)))
+                # Capability doesn't change without a catalog edit. A changed
+                # catalog necessarily triggers a full widget rebuild.
+            elif available:
                 action = QPushButton("Disable collection" if on else "Enable collection")
                 action.setProperty("source_id", sid)
                 action.setAccessibleName(action.text() + ": " + str(source.get("name", sid)))
-                action.clicked.connect(lambda checked=False, identity=sid, target=not on: set_enabled(window, identity, target))
+                # Compute target on click, not at construction: live collection
+                # state can change without destroying 170 buttons.
+                action.clicked.connect(
+                    lambda checked=False, identity=sid: set_enabled(
+                        window, identity, identity not in _effective(window)
+                    )
+                )
+                table.setCellWidget(row, 8, action)
+                table.setCellWidget(row, 9, _site_button(window, source))
             else:
                 action = QLabel(kind)
                 action.setTextFormat(Qt.TextFormat.PlainText)
                 action.setWordWrap(True)
                 action.setToolTip(reason)
-            table.setCellWidget(row, 8, action)
-            table.setCellWidget(row, 9, _site_button(window, source))
+                table.setCellWidget(row, 8, action)
+                table.setCellWidget(row, 9, _site_button(window, source))
             if sid == selected_id:
                 selected_row = row
-        window.source_summary.setText(f"{collectable} automatic feeds · {len(enabled)} enabled · {len(catalog)-collectable} website/setup/unavailable entries (not collecting)")
-        if selected_row is not None:
-            table.selectRow(selected_row)
-        else:
-            table.clearSelection()
-            table.setCurrentCell(-1, -1)
-            window.source_browser.setPlainText("Select a provider to inspect access, attribution, limitations and its last recorded result.")
+        summary = f"{collectable} automatic feeds · {len(enabled)} enabled · {len(catalog)-collectable} website/setup/unavailable entries (not collecting)"
+        if window.source_summary.text() != summary:
+            window.source_summary.setText(summary)
+        if not reuse:
+            if selected_row is not None:
+                table.selectRow(selected_row)
+            else:
+                table.clearSelection()
+                table.setCurrentCell(-1, -1)
+                window.source_browser.setPlainText("Select a provider to inspect access, attribution, limitations and its last recorded result.")
     finally:
         table.setSortingEnabled(sorting)
         table.blockSignals(blocked)
-    if selected_row is not None:
+    if selected_row is not None and not reuse:
         source_selected(window)
 
 
