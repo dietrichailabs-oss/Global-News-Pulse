@@ -54,15 +54,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify exact focused Issue82 startup/video product and workflow-only diff
+      - name: Verify exact focused Issue82 product and single legacy TV assertion correction
         run: |
           $ErrorActionPreference='Stop'
           git merge-base --is-ancestor 73fa0943be6273c771084b4b8f1985793ea5f78c HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Issue82 focused tested source absent' }
           $changed=@(git diff --name-only 73fa0943be6273c771084b4b8f1985793ea5f78c..HEAD)
-          $unexpected=@($changed | Where-Object { $_ -ne '.github/workflows/issue82-native-owner-package.yml' })
-          if ($unexpected.Count -gt 0 -or $changed.Count -ne 1) { throw ('Unapproved product/test changes: ' + ($changed -join ',')) }
+          $allowed=@('.github/workflows/issue82-native-owner-package.yml','tests/test_single_media.py')
+          $unexpected=@($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0 -or $changed.Count -ne 2) { throw ('Unapproved product/test changes: ' + ($changed -join ',')) }
+          # The 1603-test suite exposed ONE legacy assertion written before the
+          # stronger Issue82 picture-verification rule. Verify the complete exact
+          # test-only change; do not allow any other test or product change.
+          $actualEdits=@(git diff --unified=0 73fa0943be6273c771084b4b8f1985793ea5f78c..HEAD -- tests/test_single_media.py | Where-Object { $_ -match '^[+-]' -and $_ -notmatch '^(\+\+\+|---)' })
+          $expectedEdits=@(
+            "-        assert tv.tv_status.text()=='PLAYING'"
+            "+        assert tv.tv_status.text()=='VIDEO TIME ADVANCING · picture unverified'"
+            "+        assert tv._had_playback is True"
+            "+        assert 'NOT confirmed' in tv.note.text()"
+          )
+          if ($actualEdits.Count -ne $expectedEdits.Count) { throw 'Legacy TV regression has unexpected assertion edits' }
+          for ($i=0; $i -lt $expectedEdits.Count; $i++) {
+            if ($actualEdits[$i] -cne $expectedEdits[$i]) { throw 'Legacy TV assertion patch deviates from reviewed expectation' }
+          }
           Write-Host 'ISSUE82_FOCUSED_PRODUCT=73fa0943be6273c771084b4b8f1985793ea5f78c'
+          Write-Host 'LEGACY_TV_TEST_CORRECTION=picture_unverified_with_positive_clock_and_note_checks'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
           Write-Host 'PUBLIC_RELEASE_RIGHTS_HOLD=unchanged'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
