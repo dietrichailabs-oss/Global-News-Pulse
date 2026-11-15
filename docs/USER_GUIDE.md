@@ -14,6 +14,15 @@ provider intervals and backoff. A source may legitimately publish no new items.
 Source failures do not disable other collectors. The **Sources** page shows
 availability, last success/failure, next eligibility and provider access limits.
 
+On a new profile, **all currently collectable public sources start enabled**.
+At the 2026-11-15 Issue82 candidate, that is 127 of 170 catalog entries;
+restricted, manual-only, duplicate or currently unavailable entries stay listed
+but cannot be forced on. Existing profiles retain their saved choices. To turn
+on every eligible source on an existing profile, use **Settings → Enable all
+available sources → Save**. The Sources page lets you turn off individual
+providers at any time. Enabled means eligible for scheduled collection, not
+that a provider is reachable now or promises fresh reports.
+
 ## Monitor workspace
 
 The upper map is available offline. Drag to pan, scroll or use the plus/minus
@@ -98,6 +107,11 @@ retransmit audio or access private cameras/accounts.
 
 The **Alerts** page retains qualifying event updates. Native Windows notifications
 are handled by the Windows App SDK component in the complete Windows build.
+**Native Windows pop-ups start OFF**, including after upgrade from profiles
+that previously stored the old on-by-default setting. Alerts remain in the
+internal Alerts page. You may opt in using **Settings → Windows notifications**
+or the tray's notification control; first use asks for the included Microsoft
+component terms. The native helper is not started if you leave pop-ups off.
 Clicking a native notification is intended to restore the existing window, select
 the matching event and focus its map marker where coordinates exist; this behavior
 must be verified during Windows acceptance for the frozen artifact.

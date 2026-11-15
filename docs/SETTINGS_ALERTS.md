@@ -18,6 +18,16 @@ manual-only entries and sources requiring access/licensing review. A disabled
 review-required provider cannot be activated by its checkbox. User RSS/Atom feeds
 need a public HTTPS URL and the user's acknowledgement of access rights.
 
+**Issue82 owner defaults (2026-11-15):** New profiles automatically enable every
+*currently collectable* source rather than the earlier hand-picked subset. The
+current 170-entry catalog has 127 capability-eligible automatic feeds and 43
+manual, blocked, duplicate or otherwise unavailable configurations. Settings
+shows the whole catalog and offers **Enable all available sources**; this checks
+only eligible providers and requires **Save** to apply on existing profiles.
+Previously saved source selections, including deliberate opt-outs, remain intact
+until the owner changes them. Neither the default nor **Enable all** bypasses
+provider consent, credentials, access restrictions, retry limits or pause.
+
 ## Alert policy
 
 | Evidence or change | Implemented behavior |
@@ -40,6 +50,15 @@ An unmuted repost cannot borrow confirmation or severity from a muted official
 source. No confidence percentage is fabricated.
 
 ## Quiet hours and native delivery
+
+**Windows pop-up notifications are OFF by default**; qualifying alerts still
+appear in Pulse's internal Alerts workspace. Turning them ON requires an
+explicit Settings checkbox or tray action, and first native use separately
+requires acceptance of the bundled Microsoft notification component terms.
+Legacy profiles with an old `notifications_enabled=true` value do not silently
+restore pop-ups after this migration. Disabling them does not stop news
+collection, and the native helper is not launched while disabled. This avoids
+unrequested notification-related UI/load work.
 
 Quiet hours use the computer's local time. An overnight range such as 22:00–07:00
 crosses midnight. Equal start/end times mean quiet all day when quiet hours are
