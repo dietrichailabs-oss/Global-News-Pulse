@@ -188,7 +188,9 @@ def test_tv_progress_not_page_load_or_constant_clock(app):
         tv._observed(generation,{'time':0.0,'paused':False,'ready':4})
         assert tv.tv_status.text()!='PLAYING'
         tv._observed(generation,{'time':1.0,'paused':False,'ready':4})
-        assert tv.tv_status.text()=='PLAYING'
+        assert tv.tv_status.text()=='VIDEO TIME ADVANCING · picture unverified'
+        assert tv._had_playback is True
+        assert 'NOT confirmed' in tv.note.text()
         tv.stop();tv._observed(generation,{'time':2.0,'paused':False,'ready':4})
         assert tv.tv_status.text()=='OFF'
     finally:tv.stop();tv.deleteLater()
