@@ -131,9 +131,15 @@ def test_unreviewed_windows_sdk_reference_version_still_fails_closed(tmp_path, m
 
 
 def _webview2_lock(tmp_path, monkeypatch, version="1.0.4314.35", package_hash=None):
+    # The package-content SHA512 and signed-archive SHA512 legitimately differ.
     package_hash = package_hash or base64.b64encode(
-        hashlib.sha512(b"synthetic WebView2 SDK locked archive").digest()
+        hashlib.sha512(b"synthetic NuGet CONTENT excluding signature").digest()
     ).decode("ascii")
+    monkeypatch.setattr(notices, "REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512", package_hash)
+    monkeypatch.setattr(
+        notices, "REVIEWED_WEBVIEW2_ARCHIVE_SHA512",
+        base64.b64encode(hashlib.sha512(b"synthetic WebView2 SDK locked archive").digest()).decode("ascii"),
+    )
     lock_path = tmp_path / "webview2" / "packages.lock.json"
     lock_path.parent.mkdir()
     lock_path.write_text(json.dumps({
@@ -165,7 +171,14 @@ def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monk
     (parent / "microsoft.web.webview2.1.0.4314.35.nupkg").write_bytes(
         b"synthetic WebView2 SDK locked archive"
     )
-    (parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512").write_text(lock_hash)
+    (parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512").write_text(
+        notices.REVIEWED_WEBVIEW2_ARCHIVE_SHA512
+    )
+    (parent / ".nupkg.metadata").write_text(json.dumps({
+        "version": 2,
+        "contentHash": lock_hash,
+        "source": "https://api.nuget.org/v3/index.json",
+    }))
     deps = tmp_path / "app.deps.json"
     _deps(deps, [
         ("Microsoft.Web.WebView2/1.0.4314.35", "package", [], []),
@@ -177,6 +190,8 @@ def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monk
     assert record["type"] == "reference"
     assert record["notice_source_package"] == "Microsoft.Web.WebView2/1.0.4314.35"
     assert record["notice_source_lock_sha512"] == lock_hash
+    assert record["notice_source_archive_sha512"] == notices.REVIEWED_WEBVIEW2_ARCHIVE_SHA512
+    assert record["notice_source_archive_sha512"] != record["notice_source_lock_sha512"]
     assert record["evidence_kind"] == "package_notice_text"
     assert len(record["notice_files"]) == 1
     copied = record["notice_files"][0]
@@ -194,6 +209,12 @@ def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monk
     "unreviewed_reference_name",
     "wrong_parent_deps_kind",
     "tampered_archive",
+    "metadata_lock_mismatch",
+    "metadata_source_invalid",
+    "missing_metadata",
+    "missing_archive",
+    "reviewed_content_pin_mismatch",
+    "reviewed_archive_pin_mismatch",
 ])
 def test_webview2_reference_provenance_fail_closed(tmp_path, monkeypatch, violation):
     nuget = tmp_path / "packages"
@@ -206,13 +227,28 @@ def test_webview2_reference_provenance_fail_closed(tmp_path, monkeypatch, violat
         version="1.0.4314.36" if violation == "wrong_locked_version" else "1.0.4314.35",
     )
     archive = parent / "microsoft.web.webview2.1.0.4314.35.nupkg"
-    archive.write_bytes(
-        b"modified content" if violation == "tampered_archive"
-        else b"synthetic WebView2 SDK locked archive"
-    )
+    if violation != "missing_archive":
+        archive.write_bytes(
+            b"modified content" if violation == "tampered_archive"
+            else b"synthetic WebView2 SDK locked archive"
+        )
     hash_file = parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512"
     if violation != "missing_restored_hash":
-        hash_file.write_text("BAD_HASH" if violation == "restored_hash_mismatch" else lock_hash)
+        hash_file.write_text(
+            "BAD_HASH" if violation == "restored_hash_mismatch"
+            else notices.REVIEWED_WEBVIEW2_ARCHIVE_SHA512
+        )
+    if violation != "missing_metadata":
+        (parent / ".nupkg.metadata").write_text(json.dumps({
+            "version": 2,
+            "contentHash": "BAD_HASH" if violation == "metadata_lock_mismatch" else lock_hash,
+            "source": "https://nuget.example.com/v3/index.json"
+            if violation == "metadata_source_invalid" else "https://api.nuget.org/v3/index.json",
+        }))
+    if violation == "reviewed_content_pin_mismatch":
+        monkeypatch.setattr(notices, "REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512", "BAD_PIN")
+    if violation == "reviewed_archive_pin_mismatch":
+        monkeypatch.setattr(notices, "REVIEWED_WEBVIEW2_ARCHIVE_SHA512", "BAD_PIN")
     if violation == "missing_lock":
         notices.REVIEWED_PACKAGE_LOCK_PATH.unlink()
     name = "Microsoft.Web.WebView2.Core"
