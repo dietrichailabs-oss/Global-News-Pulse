@@ -66,10 +66,10 @@ jobs:
           $ErrorActionPreference='Stop'
           python -m pytest -q tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_ui_desktop.py
           if ($LASTEXITCODE -ne 0) { throw 'Desktop and TV source QA failed' }
-      - name: Restore reviewed Microsoft native WebView2 SDK in prototype scope
+      - name: Restore exact locked Microsoft native WebView2 SDK
         run: |
           $ErrorActionPreference='Stop'
-          dotnet restore packaging/tv/GlobalPulse.TV.csproj --runtime win-x64 --use-lock-file --force-evaluate
+          dotnet restore packaging/tv/GlobalPulse.TV.csproj --runtime win-x64 --locked-mode
           if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 restore failed' }
       - name: Compile native WebView2 host and probe offline HTML5 decoder
         run: |
