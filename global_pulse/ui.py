@@ -9,6 +9,7 @@ import html
 import json
 import math
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import Qt, Signal, Slot, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
@@ -277,6 +278,10 @@ class MainWindow(SituationActions, QMainWindow):
         # Hidden workspaces are populated once per real data revision, not
         # synchronously on every back-and-forth tab switch.
         self._dirty_pages=set(range(1,6))
+        # Splash warms all workspaces before showing a window. Live updates
+        # use an idle timer; navigation itself never runs expensive queries.
+        self._background_warm_enabled=False
+        self._last_navigation_at=0.0
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -332,6 +337,10 @@ class MainWindow(SituationActions, QMainWindow):
         self._collection_refresh_timer.setSingleShot(True)
         self._collection_refresh_timer.setInterval(500)
         self._collection_refresh_timer.timeout.connect(self._refresh_source_status_ui)
+        self._workspace_warm_timer=QTimer(self)
+        self._workspace_warm_timer.setSingleShot(True)
+        self._workspace_warm_timer.setInterval(125)
+        self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
@@ -634,7 +643,8 @@ class MainWindow(SituationActions, QMainWindow):
         form.addRow(label("Provider minimums and retry delays take precedence.","Muted",True))
         self.setting_retention=QSpinBox();self.setting_retention.setRange(1,3650);self.setting_retention.setValue(int(self.controller.get_setting("retention_days",365)));self.setting_retention.setSuffix(" days");form.addRow("Local retention",self.setting_retention)
         self.setting_close=QCheckBox("Keep monitoring in the tray when X is clicked");self.setting_close.setChecked(bool(self.controller.get_setting("close_to_tray",True)));form.addRow(self.setting_close)
-        self.setting_notify=QCheckBox("Enable native notifications");self.setting_notify.setChecked(bool(self.controller.get_setting("notifications_enabled",True)));form.addRow(self.setting_notify)
+        self.setting_notify=QCheckBox("Enable Windows pop-up notifications (off by default)");self.setting_notify.setChecked(bool(self.controller.get_setting("notifications_enabled",False)));form.addRow(self.setting_notify)
+        form.addRow(label("Alerts remain searchable inside Pulse when pop-ups are off. Turn them on here only if you want desktop notifications.","Muted",True))
         self.setting_threshold=QComboBox()
         for severity in ("unassessed","informational","moderate","high","critical"):self.setting_threshold.addItem(severity.title(),severity)
         self.setting_threshold.setCurrentIndex(max(0,self.setting_threshold.findData(self.controller.get_setting("alert_threshold","moderate"))))
@@ -647,7 +657,10 @@ class MainWindow(SituationActions, QMainWindow):
         self.setting_categories=QLineEdit(", ".join(self.controller.get_setting("categories",[])));self.setting_categories.setPlaceholderText("All categories; or comma-separated topics");qform.addRow("Topic watchlist",self.setting_categories)
         grid.addWidget(quiet,0,1);layout.addLayout(grid)
         sources_group=QGroupBox("Source preferences");sg=QVBoxLayout(sources_group)
-        sg.addWidget(label("Enable approved available sources for collection. Muting suppresses their alerts; their reports remain searchable.","Muted",True))
+        sg.addWidget(label("Every available, approved collector is enabled for new profiles. Restricted, duplicate and website-only entries cannot be auto-collected. Muting affects alerts, not collection.","Muted",True))
+        self.enable_all_sources_button=button("Enable all available sources",self._enable_all_available_sources)
+        self.enable_all_sources_button.setToolTip("Select every currently collectable provider; press Save settings to apply. Does not bypass access or retry limits.")
+        sg.addWidget(self.enable_all_sources_button,0,Qt.AlignmentFlag.AlignLeft)
         self.source_preferences=QTableWidget(0,4);self.source_preferences.setHorizontalHeaderLabels(["Collect","Mute alerts","Source","Access limitation"]);self._configure_table(self.source_preferences);self.source_preferences.setMinimumHeight(220);sg.addWidget(self.source_preferences);layout.addWidget(sources_group)
         translation=QGroupBox("Offline translation");tl=QVBoxLayout(translation)
         tl.addWidget(label("Translation uses installed local language models. Original text is preserved. Missing models are reported honestly; no model is downloaded without your consent.","Muted",True))
@@ -685,29 +698,63 @@ class MainWindow(SituationActions, QMainWindow):
             if index in self._dirty_pages:
                 self.open_page(index)
         self.open_page(current)
-        return not (self._dirty_pages & {1,2,3,4,5})
+        success=not (self._dirty_pages & {1,2,3,4,5})
+        if success:
+            self._background_warm_enabled=True
+        return success
 
-    def open_page(self,index):
-        previous=self.pages.currentIndex()
-        self.pages.setCurrentIndex(index)
-        for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
-        # Data hasn't changed: switching tabs must not repeatedly read SQLite,
-        # reconstruct tables or re-render brief HTML on the main Qt thread.
-        # Stale pages stay marked dirty until they're next actually displayed.
-        if index not in self._dirty_pages:
+    def _schedule_workspace_warm(self):
+        if (self._background_warm_enabled and self._dirty_pages
+                and not self._force_close and not getattr(self.controller,"_closed",False)
+                and not self._workspace_warm_timer.isActive()):
+            self._workspace_warm_timer.start()
+
+    @Slot()
+    def _warm_next_workspace(self):
+        if (not self._background_warm_enabled or self._force_close
+                or getattr(self.controller,"_closed",False) or not self._dirty_pages):
             return
+        # Never let a hidden-table rebuild interrupt an active sequence of
+        # clicks. Users continue to see the fully initialized cached view.
+        if time.monotonic()-self._last_navigation_at < 0.35:
+            self._workspace_warm_timer.start(350)
+            return
+        # Prefer the visible page, then keep hidden snapshots warm. A tab click
+        # does no SQLite work; each idle turn handles at most one workspace.
+        current=self.pages.currentIndex()
+        page=current if current in self._dirty_pages else min(self._dirty_pages)
+        self._populate_workspace(page)
+        self._dirty_pages.discard(page)
+        self._schedule_workspace_warm()
+
+    def _populate_workspace(self,index):
         if index==1:self._populate_situations()
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
         elif index==5:self._generate_brief()
-        self._dirty_pages.discard(index)
+
+    def open_page(self,index):
+        previous=self.pages.currentIndex()
+        self.pages.setCurrentIndex(index)
+        for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
+        # After splash warmup, switching pages is strictly a widget-stack
+        # operation. New collector data arrives in a coalesced idle refresh.
+        if self._background_warm_enabled:
+            self._last_navigation_at=time.monotonic()
+            self._schedule_workspace_warm()
+            return
+        if index in self._dirty_pages:
+            self._populate_workspace(index)
+            self._dirty_pages.discard(index)
 
     @Slot()
     def _notification_status_only(self):
         """Refresh the Alerts view only, never the 5,000-event world map."""
         self._dirty_pages.add(4)
-        if self.pages.currentIndex()==4:
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+        elif self.pages.currentIndex()==4:
             self._populate_alerts()
             self._dirty_pages.discard(4)
 
@@ -789,7 +836,9 @@ class MainWindow(SituationActions, QMainWindow):
         # Source details are only needed if that tab is actually on screen.
         # Actual material report ingest uses Controller.evidence_changed and a
         # bounded, coalesced full event/map refresh. No location is invented.
-        if self.pages.currentIndex()==3 and self.isVisible():
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+        elif self.pages.currentIndex()==3 and self.isVisible():
             self._populate_sources()
             self._dirty_pages.discard(3)
 
@@ -857,6 +906,7 @@ class MainWindow(SituationActions, QMainWindow):
             elif page==4:self._populate_alerts()
             elif page==5:self._generate_brief()
             self._dirty_pages.discard(page)
+            self._schedule_workspace_warm()
         except Exception as exc:
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
@@ -1242,6 +1292,17 @@ class MainWindow(SituationActions, QMainWindow):
         from .provider_actions import populate_preferences
         return populate_preferences(self)
 
+    def _enable_all_available_sources(self):
+        from .source_availability import available_ids
+        collectable=available_ids(self.controller.catalog)
+        for i in range(self.source_preferences.rowCount()):
+            control=self.source_preferences.cellWidget(i,0)
+            if isinstance(control,QCheckBox) and control.isEnabled():
+                control.setChecked(control.property("source_id") in collectable)
+        self.settings_result.setText(
+            f"{len(collectable)} available sources selected. Choose Save settings to activate; provider limits still apply."
+        )
+
     def _save_settings(self):
         try:
             for value in (self.quiet_start.text(),self.quiet_end.text()):datetime.strptime(value,"%H:%M")
@@ -1256,7 +1317,10 @@ class MainWindow(SituationActions, QMainWindow):
         values["enabled_sources"]=enabled;values["muted_sources"]=muted
         values["alert_threshold"]=self.setting_threshold.currentData()
         try:
-            for key,value in values.items():self.controller.set_setting(key,value)
+            for key,value in values.items():
+                # No-op saves must not redraw the map or relaunch the helper.
+                if self.controller.get_setting(key,None)!=value:
+                    self.controller.set_setting(key,value)
             self._dirty_pages.update((2,3,4,5))
             self.settings_result.setText("Settings saved. Provider rate limits still apply; existing history stays available.")
         except Exception as exc:self.settings_result.setText(f"Settings could not be saved: {exc}")
@@ -1315,18 +1379,20 @@ class MainWindow(SituationActions, QMainWindow):
         self.titlebar.status.setStyleSheet("color:#7fdbb2;background:#173029;border:1px solid #284d40;border-radius:9px;padding:3px 9px;font-size:10px;" if monitoring else "color:#d3bd8f;background:#30291e;border:1px solid #514532;border-radius:9px;padding:3px 9px;font-size:10px;")
         self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
         if text:self.status_label.setText(str(text)[:250])
-        if self.pages.currentIndex()==3:
-            self._dirty_pages.add(3)
+        self._dirty_pages.add(3)
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+        elif self.pages.currentIndex()==3:
             self._populate_sources()
             self._dirty_pages.discard(3)
-        else:
-            self._dirty_pages.add(3)
 
     @Slot(dict)
     def _on_alert(self,alert):
         self.status_label.setText("New alert saved in Alerts.")
         self._dirty_pages.add(4)
-        if self.pages.currentIndex()==4:
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+        elif self.pages.currentIndex()==4:
             self._populate_alerts()
             self._dirty_pages.discard(4)
 
