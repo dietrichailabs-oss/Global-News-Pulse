@@ -841,6 +841,80 @@ class MainWindow(SituationActions, QMainWindow):
             self._background_warm_enabled=True
         return success
 
+    def prime_initial_paint_caches(self, app, splash):
+        """Render the first real-sized Map/Economy frames before releasing splash.
+
+        Data prewarming does not itself trigger Qt paintEvent for hidden tabs.
+        Expose the disabled window under the on-top splash just long enough
+        for Qt to settle its actual DPI/layout, draw the heavyweight first
+        frames, and verify their cache keys. Never open video or network here.
+        """
+        if not self._background_warm_enabled or self._dirty_pages.intersection(range(1, 6)):
+            return False
+        previous_page = self.pages.currentIndex()
+        was_enabled = self.isEnabled()
+        self._initial_painted_pages = set()
+        self.setEnabled(False)
+        try:
+            # A hidden widget's geometry is not the real Windows viewport.
+            # Rendering at its default size would get invalidated on show().
+            self.show()
+            splash.raise_()
+            app.processEvents()
+            self.open_page(0)
+            app.processEvents()
+            if (not self.world_map.isVisible() or self.world_map.width() < 32
+                    or self.world_map.height() < 32):
+                return False
+            self.world_map.grab()
+            self._initial_painted_pages.add(0)
+
+            # Data is already preloaded for every workspace. Force its
+            # initial Qt geometry/viewport draw under splash as well; a cold
+            # first click must not pay for Sources, Settings, Alerts or Briefs.
+            for index in (1, 3, 4, 5, 6):
+                self.open_page(index)
+                app.processEvents()
+                page = self.pages.currentWidget()
+                if page is None or not page.isVisible():
+                    return False
+                page.grab()
+                self._initial_painted_pages.add(index)
+
+            self.open_page(2)
+            app.processEvents()
+            if (not self.economic_chart.isVisible() or self.economic_chart.width() < 32
+                    or self.economic_chart.height() < 32):
+                return False
+            self.economic_chart.grab()
+            # Initial QTableView viewport/layout must also complete under
+            # splash, but only visible virtual rows are materialized.
+            self.economy_table.viewport().grab()
+            self._initial_painted_pages.add(2)
+
+            self.open_page(previous_page)
+            app.processEvents()
+            self.world_map.grab()
+            world = self.world_map
+            chart = self.economic_chart
+            expected_map_key = (
+                world.width(), world.height(), world.zoom, world.pan_x, world.pan_y,
+            )
+            expected_chart_key = (
+                chart.width(), chart.height(), chart.devicePixelRatioF(),
+            )
+            return (
+                world._projected_view_key == expected_map_key
+                and len(world._projected_paths) == len(world._countries)
+                and chart._chart_pixmap is not None
+                and chart._chart_cache_key == expected_chart_key
+                and self._initial_painted_pages == set(range(7))
+            )
+        finally:
+            if self.pages.currentIndex() != previous_page:
+                self.open_page(previous_page)
+            self.setEnabled(was_enabled)
+
     def _schedule_workspace_warm(self):
         if (self._background_warm_enabled and self._dirty_pages
                 and not self._force_close and not getattr(self.controller,"_closed",False)
