@@ -5,12 +5,15 @@ Synthetic/offline Qt: this does not claim a native Windows timing witness.
 from __future__ import annotations
 
 import os
+import statistics
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtWidgets import QApplication, QTableView
+from PySide6.QtCore import QTimer
+from PySide6.QtTest import QTest
 
 from global_pulse.controller import Controller
 from global_pulse.ui import EconomicChart, EconomicTableModel, MainWindow
@@ -114,3 +117,49 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     window._last_navigation_at=time.monotonic()-2
     window._refresh_evidence_when_idle()
     assert called == [1], "Once idle, the pending collector revision is applied"
+
+
+def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monkeypatch):
+    """Actual SQLite read plus 6,400 persisted records, then fast tab paints.
+
+    Timings are synthetic CI measurements, not claimed owner Win11 results.
+    Nothing in a tab click is allowed to query SQLite or reload economic rows.
+    """
+    window, controller = desktop
+    sample = observations(6400)
+    for i, record in enumerate(sample):
+        record["country"] = f"C{i % 200:03d}"
+        record["date"] = str(1980 + (i // 200))
+        record["synthetic"] = True
+    for offset in range(0, len(sample), 1600):
+        assert controller.store.put_observations(sample[offset:offset+1600]) == min(1600, len(sample)-offset)
+    window._dirty_pages.add(2)
+    assert window.prepare_initial_workspaces()
+    assert window.economy_model.rowCount() >= 6400
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Tab click synchronously queried 6400 economic rows")
+
+    monkeypatch.setattr(controller.store, "list_observations", forbidden)
+    heartbeat = []
+    timer = QTimer(window)
+    timer.setInterval(16)
+    timer.timeout.connect(lambda: heartbeat.append(time.perf_counter()))
+    timer.start()
+    durations = []
+    indexes = [0,2,1,2,3,2,4,2,5,2] * 12
+    try:
+        for step, index in enumerate(indexes):
+            began = time.perf_counter()
+            window.open_page(index)
+            app.processEvents()
+            durations.append(time.perf_counter() - began)
+            if step % 8 == 0:
+                QTest.qWait(18)
+    finally:
+        timer.stop()
+    assert heartbeat, "The event loop must still dispatch timer heartbeats"
+    # A one-second UI stall is the specific owner regression. Use a wide
+    # CI threshold; measured owner hardware latency remains unverified.
+    assert max(durations) < 0.5, f"A fast tab switch stalled {max(durations):.3f}s"
+    assert statistics.median(durations) < 0.1
