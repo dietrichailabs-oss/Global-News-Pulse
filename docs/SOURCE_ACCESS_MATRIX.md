@@ -16,7 +16,7 @@ Collection intervals are at least 10 minutes by default, 5 minutes only where co
 
 “Enabled” means a reviewed public access route was implemented. It does not guarantee uptime, current publication frequency, full national coverage, or independent verification of the reports.
 
-| ID / source | Default | Access / scope | Rights, attribution, and evidence | Limitation |
+| ID / source (historical) | Default (2026-11-08 review) | Access / scope | Rights, attribution, and evidence | Limitation |
 |---|---|---|---|---|
 | `usgs` — USGS Earthquake Hazards | Enabled | [usgs](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson) · 5 min floor | USGS public data; cite USGS and contributing networks. No agency endorsement. [Provider documentation](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php) | Only available feed fields; no guarantee of completeness. |
 | `eonet` — NASA EONET | Enabled | [eonet](https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=100&days=30) · 10 min floor | NASA event metadata; retain linked original source attribution. Third-party media excluded. [Provider documentation](https://eonet.gsfc.nasa.gov/docs/v3) | Only available feed fields; no guarantee of completeness. |
