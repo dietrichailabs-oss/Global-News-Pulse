@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal
+from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox, QInputDialog
 
@@ -217,7 +217,9 @@ class Controller(QObject):
             return False
         return self._gdelt.request_cleanup()
 
+    @Slot(str)
     def _pause_for_storage(self, message):
+        """Handle collector-origin disk failure on Controller GUI thread."""
         if not self._closed:
             self.pause()
             self.status_changed.emit(message)
