@@ -664,6 +664,21 @@ class MainWindow(SituationActions, QMainWindow):
     def _configure_table(table):
         table.setAlternatingRowColors(True);table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents);table.horizontalHeader().setStretchLastSection(True)
 
+    def prepare_initial_workspaces(self):
+        """Populate bounded local workspaces before releasing startup splash.
+
+        A cold first click on Economy/Sources/Alerts/Briefs previously ran the
+        entire SQLite/table/brief construction on the visible UI thread.
+        This runs once while the dashboard is hidden, no live media starts,
+        and future report or settings changes still mark workspaces dirty.
+        """
+        current=self.pages.currentIndex()
+        for index in (1,2,3,4,5):
+            if index in self._dirty_pages:
+                self.open_page(index)
+        self.open_page(current)
+        return not (self._dirty_pages & {1,2,3,4,5})
+
     def open_page(self,index):
         previous=self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
