@@ -201,16 +201,17 @@ def prepare_initial_dashboard(app, splash, window, controller):
             raise RuntimeError("Initial local headline queue did not settle")
         headlines.deferred_timer.stop()
     app.processEvents()
-    if hasattr(window, "prime_initial_paint_caches"):
-        splash.showMessage(
-            "INITIALIZING GLOBAL PULSE\n"
-            "Preparing full-size map, chart, and table frames...",
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-            QColor("#eee8f7"),
-        )
-        app.processEvents()
-        if window.prime_initial_paint_caches(app, splash) is not True:
-            raise RuntimeError("Initial full-size map/Economy paint caches did not initialize")
+    if not hasattr(window, "prime_initial_paint_caches"):
+        raise RuntimeError("Initial full-size map/Economy paint primer is missing")
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Preparing full-size map, chart, and table frames...",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    app.processEvents()
+    if window.prime_initial_paint_caches(app, splash) is not True:
+        raise RuntimeError("Initial full-size map/Economy paint caches did not initialize")
     splash.showMessage(
         "GLOBAL PULSE READY\n"
         "Local archive, workspaces and headline queue prepared.\n"
