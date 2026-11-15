@@ -113,6 +113,15 @@ jobs:
           }
           $lock=Get-Content -LiteralPath 'packaging/tv/packages.lock.json' -Raw | ConvertFrom-Json
           Write-Host ('SDK_LOCK_HASH=' + $lock.dependencies.'net10.0-windows10.0.19041/win-x64'.'Microsoft.Web.WebView2'.contentHash)
+          $archive=Join-Path $sdk 'microsoft.web.webview2.1.0.4314.35.nupkg'
+          $stream=[System.IO.File]::OpenRead($archive)
+          try { $archiveHash=[Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData($stream)) }
+          finally { $stream.Dispose() }
+          Write-Host ('SDK_ARCHIVE_SHA512=' + $archiveHash)
+          $upstream='https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4314.35/microsoft.web.webview2.1.0.4314.35.nupkg.sha512'
+          $upstreamHash=(Invoke-WebRequest -Uri $upstream -TimeoutSec 45).Content.Trim()
+          Write-Host ('SDK_OFFICIAL_NUGET_SHA512=' + $upstreamHash)
+          if ($archiveHash -ne $upstreamHash) { throw 'Cached WebView2 package bytes do not match official NuGet' }
           python scripts/collect_dotnet_notices.py --deps $deps --nuget-root $nuget --output $output
           if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 notice provenance failed closed' }
           $receipt=Get-Content -LiteralPath (Join-Path $output 'NATIVE_PACKAGE_NOTICES.json') -Raw | ConvertFrom-Json
