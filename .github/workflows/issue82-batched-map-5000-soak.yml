@@ -47,24 +47,29 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Confirm exact PR89 batched map product and two diagnostic-only paths
+      - name: Confirm exact PR89 batched map product and three diagnostic-only paths
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor d98b1a9f5f05a8518ed126acc56bf08ddb4fb5bf HEAD
-          git diff --name-only d98b1a9f5f05a8518ed126acc56bf08ddb4fb5bf..HEAD | python -c "import sys; expected={'.github/workflows/issue82-batched-map-5000-soak.yml','tests/test_issue82_5000_concurrent_gui_soak.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only d98b1a9f5f05a8518ed126acc56bf08ddb4fb5bf..HEAD | python -c "import sys; expected={'.github/workflows/issue82-batched-map-5000-soak.yml','tests/test_issue82_5000_concurrent_gui_soak.py','tests/test_issue82_5000_country_hotpath_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Match native Windows Qt layout and font backend
         if: runner.os == 'Windows'
         shell: bash
         run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
       - name: Syntax and source compile
         shell: bash
-        run: python -m compileall -q global_pulse tests/test_issue82_5000_concurrent_gui_soak.py
+        run: python -m compileall -q global_pulse tests/test_issue82_5000_concurrent_gui_soak.py tests/test_issue82_5000_country_hotpath_profile.py
       - name: Real 5k SQLite map concurrent writer and GUI heartbeat, timed diagnostic only
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q -s --tb=short tests/test_issue82_5000_concurrent_gui_soak.py
+      - name: Same-runner 5k country projection cProfile versus original legacy path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q -s --tb=short tests/test_issue82_5000_country_hotpath_profile.py
       - name: Check tracked product cleanliness
         if: always()
         shell: bash
