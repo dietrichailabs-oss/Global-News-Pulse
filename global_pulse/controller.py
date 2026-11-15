@@ -29,6 +29,9 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Real collector evidence is batched on the GUI event loop. Explicit user
+    # settings/filters keep the existing immediate data_changed semantics.
+    evidence_changed = Signal()
     # Source health/status-only callbacks never re-query the entire map for
     # each provider ping. MainWindow coalesces this GUI-thread update.
     source_status_changed = Signal()
@@ -296,7 +299,7 @@ class Controller(QObject):
                 except StorageBlocked as error:
                     self.storage_problem.emit(str(error))
                     return
-                self.data_changed.emit()
+                self.evidence_changed.emit()
 
     def _watched(self, event, previous=None, *, reason=None):
         # Persisted/imported JSON can bypass the Settings UI's list validation.
@@ -376,7 +379,11 @@ class Controller(QObject):
                     self.store.update_alert_delivery(alert["id"], "Quiet hours: retained in internal history")
                 elif self.monitoring:
                     self.native_alert.emit(dict(event, _alert_id=alert["id"]), reason)
-            self.data_changed.emit()
+            # Store.ingest still runs even on empty input: clock-only evidence
+            # transitions must be materialized. A true no-op is not a reason
+            # to rebuild a 5k-item GUI map or source tab.
+            if changed:
+                self.evidence_changed.emit()
 
     @staticmethod
     def _has_fresh_change(event, now=None, *, reason=None):
