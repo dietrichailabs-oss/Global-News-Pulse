@@ -5,9 +5,11 @@ on:
     branches: [eng/issue82-owner-tab-render-video-20261115]
     paths:
       - 'global_pulse/ui.py'
+      - 'global_pulse/__main__.py'
       - 'global_pulse/single_media.py'
       - 'global_pulse/native_tv.py'
       - 'tests/test_issue82_owner_tab_paint_cpu.py'
+      - 'tests/test_issue82_startup_video_diagnostics.py'
       - 'tests/test_issue82_native_tv_policy.py'
       - 'packaging/tv/**'
       - 'scripts/build_windows.ps1'
@@ -20,10 +22,12 @@ on:
     paths:
       - '.github/workflows/issue82-native-v2-qa.yml'
       - 'global_pulse/ui.py'
+      - 'global_pulse/__main__.py'
       - 'global_pulse/single_media.py'
       - 'global_pulse/native_tv.py'
       - 'packaging/tv/**'
       - 'tests/test_issue82_owner_tab_paint_cpu.py'
+      - 'tests/test_issue82_startup_video_diagnostics.py'
       - 'tests/test_issue82_native_tv_policy.py'
       - 'scripts/collect_dotnet_notices.py'
       - 'tests/test_dotnet_notices.py'
@@ -68,7 +72,7 @@ jobs:
       - name: Run exact owner tab and video policy regressions
         run: |
           $ErrorActionPreference='Stop'
-          python -m pytest -q tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py tests/test_dotnet_notices.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_ui_desktop.py
+          python -m pytest -q tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py tests/test_dotnet_notices.py tests/test_issue82_startup_video_diagnostics.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_ui_desktop.py
           if ($LASTEXITCODE -ne 0) { throw 'Desktop and TV source QA failed' }
       - name: Restore exact locked Microsoft native WebView2 SDK
         run: |
