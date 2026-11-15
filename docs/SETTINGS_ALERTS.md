@@ -57,7 +57,10 @@ explicit Settings checkbox or tray action, and first native use separately
 requires acceptance of the bundled Microsoft notification component terms.
 Legacy profiles with an old `notifications_enabled=true` value do not silently
 restore pop-ups after this migration. Disabling them does not stop news
-collection, and the native helper is not launched while disabled. This avoids
+collection. On default-off launch, the native helper is not started. If the
+owner turns pop-ups OFF after previously enabling them, new native submissions
+stop immediately, though the helper process may remain until **Exit Completely**
+so the UI does not block waiting for shutdown. This avoids
 unrequested notification-related UI/load work.
 
 Quiet hours use the computer's local time. An overnight range such as 22:00–07:00
