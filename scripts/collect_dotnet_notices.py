@@ -8,6 +8,7 @@ closed instead of silently producing a release candidate.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -104,10 +105,17 @@ def reviewed_reference_notice_root(
         raise ValueError(f"WebView2 reference package lock hashes conflict: {parent_identity}")
     locked_hash = locked_hashes.pop()
     root = package_root(nuget_root, parent, pinned_version)
-    hash_file = root / f"{parent.lower()}.{pinned_version.lower()}.nupkg.sha512"
-    if not hash_file.is_file() or hash_file.read_text(encoding="utf-8").strip() != locked_hash:
-        raise ValueError(f"Restored WebView2 reference package hash differs from lock: {parent_identity}")
-    return root, parent_identity, locked_hash
+    basename = f"{parent.lower()}.{pinned_version.lower()}.nupkg"
+    hash_file = root / f"{basename}.sha512"
+    archive = root / basename
+    if not archive.is_file() or archive.is_symlink() or not hash_file.is_file():
+        raise ValueError(f"Restored WebView2 SDK archive or hash receipt missing: {parent_identity}")
+    with archive.open("rb") as stream:
+        actual_hash = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode("ascii")
+    if (actual_hash != locked_hash
+            or hash_file.read_text(encoding="utf-8").strip() != actual_hash):
+        raise ValueError(f"Restored WebView2 reference archive SHA512 differs from lock: {parent_identity}")
+    return root, parent_identity, actual_hash
 
 
 def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
