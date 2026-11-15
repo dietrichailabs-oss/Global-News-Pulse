@@ -6,8 +6,14 @@ _get_event_unlocked implementation, including full labelled report evidence.
 """
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtWidgets import QApplication
+from global_pulse.map_widget import WorldMap
 
 from global_pulse.core import Store
 
@@ -53,6 +59,20 @@ def slow_projection(store: Store, event_id: str):
 
 def compare_all_to_original(store: Store, *, limit=5000):
     actual = store.list_events(map_evidence=True, limit=limit)
+    # Re-run the unchanged candidate/qualification/limit loop with its
+    # original per-row projection. Checking returned events alone can miss a
+    # silently dropped or reordered newer pending-warning decoy candidate.
+    with patch.object(
+        store, "_map_evidence_page_unlocked",
+        side_effect=lambda page: [
+            store._get_event_unlocked(row["id"], map_projection=True) for row in page
+        ],
+    ):
+        original = store.list_events(map_evidence=True, limit=limit)
+    assert [item["id"] for item in actual] == [item["id"] for item in original], (
+        "Country evidence result length/order and pending candidate eligibility must be exact"
+    )
+    assert actual == original, "No source identity, area, or report annotation may change"
     for item in actual:
         expected = slow_projection(store, item["id"])
         assert item == expected, (
@@ -128,3 +148,60 @@ def test_live_non_synthetic_country_reports_and_merged_mega_event_are_not_trunca
             assert slow.call_count >= 1, "Large event must take bounded legacy per-event path"
         assert len(actual) == 1 and actual[0]["report_count"] == 70
         compare_all_to_original(store, limit=20)
+
+
+def test_report_count_tampering_falls_back_without_dropping_source_evidence(tmp_path):
+    with Store(tmp_path / "tampered.sqlite3", mode="synthetic") as store:
+        changed = store.ingest([report(8080)], now=T0)
+        identity = changed[0]["id"]
+        with store._lock, store._conn:
+            row = store._conn.execute(
+                "SELECT body FROM events WHERE id=?", (identity,)
+            ).fetchone()
+            event = json.loads(row["body"])
+            event["report_count"] = 0  # Intentionally stale/corrupt denormalized claim.
+            store._conn.execute(
+                "UPDATE events SET body=? WHERE id=?",
+                (json.dumps(event, sort_keys=True, separators=(",", ":")), identity),
+            )
+        with patch.object(store, "_get_event_unlocked",
+                          wraps=store._get_event_unlocked) as slow:
+            actual = store.list_events(map_evidence=True, limit=20)
+            assert slow.call_count >= 1, "Actual source count mismatch must use old path"
+        assert len(actual) == 1
+        assert len(actual[0]["reports"]) == 1
+        compare_all_to_original(store, limit=20)
+
+
+def test_live_country_category_circle_preserves_searchable_source_reports(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    widget = None
+    with Store(tmp_path / "country-live.sqlite3", mode="live") as store:
+        assert store.ingest([
+            report(81, synthetic=False, category="Infrastructure",
+                   latitude=None, longitude=None),
+        ], now=T0)
+        evidence = compare_all_to_original(store, limit=100)
+        widget = WorldMap()
+        try:
+            widget.set_events([], country_events=evidence)
+            app.processEvents()
+            circles = widget.country_category_evidence_for("United States")
+            assert circles.get("count") == 1, (
+                "Neutral country-category circle must still expose official-location "
+                "independent source attribution"
+            )
+            assert circles["categories"].get("Infrastructure") == 1
+            searchable = [
+                source.get("title", "") + " " + source.get("summary", "")
+                for event in circles["events"]
+                for source in event.get("reports", [])
+            ]
+            assert any("Offline fictional record 81" in value for value in searchable), (
+                "Country circle search must retain full source records, not only "
+                "active aggregate labels"
+            )
+        finally:
+            widget.close()
+            widget.deleteLater()
+            app.processEvents()
