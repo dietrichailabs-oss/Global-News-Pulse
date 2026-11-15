@@ -111,7 +111,9 @@ are handled by the Windows App SDK component in the complete Windows build.
 that previously stored the old on-by-default setting. Alerts remain in the
 internal Alerts page. You may opt in using **Settings → Windows notifications**
 or the tray's notification control; first use asks for the included Microsoft
-component terms. The native helper is not started if you leave pop-ups off.
+component terms. The native helper is not started on default-off launch;
+turning pop-ups OFF later stops new native submissions, though an already-started
+helper may remain until **Exit Completely** to avoid freezing the UI.
 Clicking a native notification is intended to restore the existing window, select
 the matching event and focus its map marker where coordinates exist; this behavior
 must be verified during Windows acceptance for the frozen artifact.
