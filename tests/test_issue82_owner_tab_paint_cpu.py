@@ -107,7 +107,7 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     monkeypatch.setattr(window, "refresh_data", lambda:called.append(1))
     for _ in range(20):
         window.open_page(2)
-        controller.data_changed.emit()
+        controller.evidence_changed.emit()
         window.open_page(0)
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
@@ -117,6 +117,8 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     window._last_navigation_at=time.monotonic()-2
     window._refresh_evidence_when_idle()
     assert called == [1], "Once idle, the pending collector revision is applied"
+    controller.data_changed.emit()
+    assert len(called) == 2, "Explicit user/settings changes still refresh immediately"
 
 
 def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monkeypatch):
