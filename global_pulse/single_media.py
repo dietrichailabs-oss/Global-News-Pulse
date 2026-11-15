@@ -6,6 +6,7 @@ Builtin TV admission is intentionally separate from user-added specific videos.
 from __future__ import annotations
 import json
 import math
+import sys
 import time
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -16,6 +17,8 @@ from .internet_radio import RadioPanel
 
 class Television(_MediaTile):
     def __init__(self,parent=None):
+        self.native_tv=None
+        self._native_tv_active=False
         self._poll_timer=None
         self._generation=0
         self._requested=False
@@ -25,6 +28,7 @@ class Television(_MediaTile):
         self._had_playback=False
         self._player_signal_connected=False
         self._last_decode_info=""
+        self._last_native_status_at=0.0
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -261,6 +265,8 @@ class Television(_MediaTile):
                 raise RuntimeError("The embedded player requires Chromium sandboxing")
             if hasattr(os,"geteuid") and os.geteuid()==0:
                 raise RuntimeError("The embedded player requires a standard user session")
+            if self._begin_native_player(video):
+                return
             self.stop()
             self._ensure_player()
             from PySide6.QtWebEngineCore import QWebEngineHttpRequest
@@ -324,6 +330,8 @@ class Television(_MediaTile):
                 raise RuntimeError("Chromium sandbox is required")
             if hasattr(os,"geteuid") and os.geteuid()==0:
                 raise RuntimeError("Standard user session required")
+            if self._begin_native_player(video,full_watch=True):
+                return True
             self.stop()
             self._ensure_player()
             if not self._player_signal_connected:
@@ -357,6 +365,103 @@ class Television(_MediaTile):
                 "no in-app playback verified"
             )
             return False
+
+    def _begin_native_player(self, video, *, full_watch=False):
+        """Prefer the packaged, policy-guarded Edge codec process on Windows.
+
+        The QtWebEngine player remains a non-Windows and source-run fallback.
+        Consent and exact-video validation happen BEFORE this method.
+        """
+        if sys.platform != "win32":
+            return False
+        from .native_tv import NativeTvHost
+        if NativeTvHost.executable() is None:
+            return False
+        self.stop()
+        if self.native_tv is None:
+            self.native_tv=NativeTvHost(self)
+            self.layout_.insertWidget(3,self.native_tv,1)
+            self.native_tv.status_received.connect(self._native_tv_receipt)
+        self.mute.setChecked(True)
+        self._requested=True
+        self._native_tv_active=True
+        self._had_playback=False
+        self._progress_at=time.monotonic()
+        self._last_native_status_at=0.0
+        self.tv_status.setText("CONNECTING · native Windows video decoder")
+        self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
+        started=self.native_tv.play(video,full_watch=full_watch)
+        if not started:
+            self._native_tv_active=False
+            self._requested=False
+            self.tv_status.setText("NATIVE VIDEO UNAVAILABLE")
+            self.tv_diagnostics.setText("Packaged WebView2 host could not start")
+            return False
+        self.display.hide()
+        self.note.setText(
+            "Official YouTube player in isolated Windows video process · "
+            "press Play in the video · initially muted"
+        )
+        return True
+
+    def _native_tv_receipt(self, event):
+        if not self._native_tv_active or not self._requested:
+            return
+        kind=event.get("type")
+        if kind=="ready":
+            self.tv_status.setText("WINDOWS PLAYER READY · press Play")
+            self.tv_diagnostics.setText(
+                "Native Edge WebView2 active · InPrivate profile · "
+                "awaiting video time and decoded-frame evidence"
+            )
+            self.native_tv.command("MUTE 1")
+            self.native_tv.command("VOLUME "+str(self.volume.value()))
+        elif kind=="page_loaded":
+            success=event.get("success") is True
+            self.tv_status.setText(
+                "PAGE LOADED · video not yet verified" if success
+                else "PAGE ERROR · video not loaded"
+            )
+        elif kind=="waiting":
+            now=time.monotonic()
+            if now-self._last_native_status_at<5.0:
+                return
+            self._last_native_status_at=now
+            codec=str(event.get("h264") or "unknown")
+            self.tv_diagnostics.setText(
+                "Windows decoder H.264: "+codec+
+                " · decoded frames "+str(event.get("frames",0))+
+                " · picture/audio not confirmed"
+            )
+        elif kind=="advancing":
+            self._had_playback=True
+            now=time.monotonic()
+            self._progress_at=now
+            # The native helper reports at 1 Hz. Reflowing wrapped labels on
+            # every receipt forced Qt's scroll-area/native-child geometry to
+            # change while frames were being composited. Telemetry remains
+            # live; only the visible diagnostic label is rate-limited.
+            if now-self._last_native_status_at<5.0:
+                return
+            self._last_native_status_at=now
+            self.tv_status.setText("VIDEO TIME ADVANCING · decoded frames reported")
+            self.tv_diagnostics.setText(
+                "Native Edge H.264 "+str(event.get("h264") or "unknown")+
+                " · time "+str(event.get("current_time"))+
+                "s · decoded frames "+str(event.get("decoded_frames"))+
+                " · picture and audio require owner verification"
+            )
+        elif kind=="error":
+            reason=str(event.get("reason") or "unknown")[:80]
+            self.stop()
+            self.tv_status.setText("VIDEO ERROR · "+reason)
+            self.tv_diagnostics.setText(
+                "Native WebView2 error: "+reason+
+                ". No successful video playback is claimed."
+            )
+        elif kind=="stopped":
+            self.stop()
+            self.tv_status.setText("WINDOWS PLAYER EXITED")
 
     def _begin_observation(self):
         self._generation+=1;self._requested=True;self._poll_pending=False;self._last_time=None
@@ -416,6 +521,8 @@ class Television(_MediaTile):
         return " · ".join(parts)[:320]
 
     def _poll(self):
+        if self._native_tv_active:
+            return  # Native helper sends bounded, honest frame telemetry.
         if not self._requested or not self.view:return
         if time.monotonic()-self._progress_at>45:
             self.stop();self.tv_status.setText("ERROR")
@@ -507,18 +614,26 @@ class Television(_MediaTile):
         self._last_time=current
 
     def _volume(self,value):
+        if self._native_tv_active and self.native_tv:
+            self.native_tv.command("VOLUME "+str(max(0,min(100,value))))
+            return
         if self.view and self._requested:
             self.view.page().runJavaScript("(()=>{const v=document.querySelector('video');if(v)v.volume="+str(max(0,min(100,value))/100.0)+";})()")
 
     def _mute(self,value):
+        if self._native_tv_active and self.native_tv:
+            self.native_tv.command("MUTE "+("1" if value else "0"))
+            return
         if self.view:self.view.page().setAudioMuted(value)
 
     def stop(self):
         self._generation=getattr(self,"_generation",0)+1
         self._requested=False;self._poll_pending=False
+        self._native_tv_active=False
         if self._poll_timer:self._poll_timer.stop()
         self._player_loaded=False
         self._had_playback=False
+        if self.native_tv:self.native_tv.stop()
         super().stop()
         if hasattr(self,"tv_status"):self.tv_status.setText("OFF")
         if hasattr(self,"tv_diagnostics"):
@@ -627,3 +742,4 @@ class MediaPanel(QWidget):
         self.tv.stop();self.radio.shutdown();self.camera.stop()
         from .camera_snapshot import CameraSnapshot
         CameraSnapshot._images.clear()
+

@@ -51,6 +51,7 @@ $buildRoot = Join-Path $projectRoot 'build'
 $distRoot = Join-Path $projectRoot 'dist'
 $venvRoot = Join-Path $buildRoot 'venv-windows'
 $nativeRoot = Join-Path $buildRoot 'notifications'
+$tvRoot = Join-Path $buildRoot 'tv'
 $workRoot = Join-Path $buildRoot 'pyinstaller-windows'
 $packageRoot = Join-Path $distRoot 'GlobalPulse'
 $helper = Join-Path $PSScriptRoot 'package_manifest.py'
@@ -67,7 +68,8 @@ if ((Test-Path -LiteralPath $outputRoot) -and (Get-ChildItem -LiteralPath $outpu
 
 foreach ($required in @('requirements-bootstrap.lock','requirements-build.lock','pyproject.toml',
         'global_pulse\resources\pulse.ico','global_pulse\resources\pulse.png',
-        'packaging\notifications\GlobalPulse.Notifications.csproj')) {
+        'packaging\notifications\GlobalPulse.Notifications.csproj',
+        'packaging\tv\GlobalPulse.TV.csproj')) {
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot $required) -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -112,6 +114,7 @@ if ($innoVersion -notmatch '^6\.7\.4(?:\D|$)') {
 New-Item -ItemType Directory -Path $buildRoot,$distRoot,$outputRoot -Force | Out-Null
 Remove-GeneratedDirectory -Path $venvRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $nativeRoot -AllowedParent $buildRoot
+Remove-GeneratedDirectory -Path $tvRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $workRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $packageRoot -AllowedParent $distRoot
 
@@ -176,12 +179,43 @@ try {
         '--nuget-root',$nugetRoot, '--published',$nativeRoot
     )
 
+    Write-Host 'Publishing isolated native WebView2 television (only starts after consent).'
+    $tvProject = Join-Path $projectRoot 'packaging\tv\GlobalPulse.TV.csproj'
+    $tvLock = Join-Path $projectRoot 'packaging\tv\packages.lock.json'
+    $tvRestore = @('restore',$tvProject,'--runtime','win-x64','--use-lock-file','--force-evaluate')
+    if (Test-Path -LiteralPath $tvLock -PathType Leaf) {
+        $tvRestore = @('restore',$tvProject,'--runtime','win-x64','--locked-mode')
+    }
+    Invoke-Checked -File $dotnet -Arguments $tvRestore
+    Invoke-Checked -File $dotnet -Arguments @(
+        'publish',$tvProject,'--configuration','Release','--runtime','win-x64',
+        '--self-contained','true','--no-restore','--output',$tvRoot,
+        '-p:PublishSingleFile=false','-p:PublishTrimmed=false'
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $tvRoot 'GlobalPulse.TV.exe') -PathType Leaf)) {
+        throw 'Native WebView2 television was not built.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $tvRoot 'coreclr.dll') -PathType Leaf)) {
+        throw 'Native television is missing its self-contained .NET runtime.'
+    }
+    Invoke-Checked -File $buildPython -Arguments @(
+        'scripts\collect_dotnet_notices.py',
+        '--deps',(Join-Path $tvRoot 'GlobalPulse.TV.deps.json'),
+        '--nuget-root',$nugetRoot,
+        '--output',(Join-Path $tvRoot 'licenses')
+    )
+
     Write-Host 'Freezing the application from the explicit PyInstaller specification.'
     Invoke-Checked -File $buildPython -Arguments @('-m','PyInstaller','--noconfirm','--clean','--distpath',$distRoot,'--workpath',$workRoot,'packaging\GlobalPulse.spec')
     Copy-Item -LiteralPath $nativeRoot -Destination (Join-Path $packageRoot 'notifications') -Recurse
+    Copy-Item -LiteralPath $tvRoot -Destination (Join-Path $packageRoot 'tv') -Recurse
     Copy-Item -LiteralPath 'global_pulse\resources\pulse.png' -Destination (Join-Path $packageRoot 'notifications\pulse.png')
     # The compiler's .pdb debugging symbols are engineering artifacts, not runtime.
-    Get-ChildItem -LiteralPath (Join-Path $packageRoot 'notifications') -Filter '*.pdb' -Recurse | Remove-Item -Force
+    # Generated symbols for either self-contained helper are engineering-only.
+    # Retain the global package scanner's .pdb prohibition (do not allowlist them).
+    foreach ($helperDir in @('notifications','tv')) {
+        Get-ChildItem -LiteralPath (Join-Path $packageRoot $helperDir) -Filter '*.pdb' -File -Recurse | Remove-Item -Force
+    }
     $userDocuments = [ordered]@{
         'docs\PRIVATE_TEST_GUIDE.md' = 'README.md'
         'docs\USER_GUIDE.md' = 'USER_GUIDE.md'
@@ -235,3 +269,4 @@ catch {
 finally {
     Pop-Location
 }
+

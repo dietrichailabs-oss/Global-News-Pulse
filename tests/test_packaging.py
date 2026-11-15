@@ -33,6 +33,51 @@ def package(tmp_path):
         ("_internal/global_pulse/resources/translation_models.json",{}),
         ("_internal/global_pulse/resources/context_cameras.json",{"schema_version":1,"entries":[]})):
         path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data))
+    # Match the reviewed, required in-package WebView2 TV helper boundary.
+    # Every byte here is inert: no browser, NuGet access, or player launch.
+    for name in (
+        "tv/GlobalPulse.TV.exe",
+        "tv/coreclr.dll",
+        "tv/Microsoft.Web.WebView2.Core.dll",
+        "tv/Microsoft.Web.WebView2.WinForms.dll",
+        "tv/runtimes/win-x64/native/WebView2Loader.dll",
+    ):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(inert_pe_header())
+    for name, data in (
+        ("tv/GlobalPulse.TV.deps.json", {"libraries": {
+            "Microsoft.Web.WebView2.Core/1.0.4314.35": {"type": "reference"},
+            "Microsoft.Web.WebView2.WinForms/1.0.4314.35": {"type": "reference"},
+            "Microsoft.Web.WebView2.Wpf/1.0.4314.35": {"type": "reference"},
+            "GlobalPulse.TV/1.0.0": {"type": "project"},
+        }}),
+        ("tv/GlobalPulse.TV.runtimeconfig.json", {"runtimeOptions": {"tfm": "net10.0"}}),
+    ):
+        path = root / name
+        path.write_text(json.dumps(data), encoding="utf-8")
+    notices = []
+    for name in ("Microsoft.Web.WebView2.Core", "Microsoft.Web.WebView2.WinForms",
+                 "Microsoft.Web.WebView2.Wpf"):
+        folder = root / "tv" / "licenses" / (name + "-1.0.4314.35")
+        folder.mkdir(parents=True, exist_ok=True)
+        license_file = folder / "LICENSE.txt"
+        license_file.write_text("Inert reviewed package fixture: " + name, encoding="utf-8")
+        notices.append({
+            "package": name,
+            "version": "1.0.4314.35",
+            "type": "reference",
+            "notice_source_package": pack.TV_PARENT,
+            "notice_source_lock_sha512": pack.TV_NUGET_CONTENT_SHA512,
+            "notice_source_archive_sha512": pack.TV_ARCHIVE_SHA512,
+            "notice_files": [{
+                "packaged_relative": "licenses/" + folder.name + "/LICENSE.txt",
+                "bytes": license_file.stat().st_size,
+                "sha256": pack.digest(license_file),
+            }],
+        })
+    ledger = root / "tv" / "licenses" / "NATIVE_PACKAGE_NOTICES.json"
+    ledger.write_text(json.dumps({"packages": notices}), encoding="utf-8")
     return root
 
 

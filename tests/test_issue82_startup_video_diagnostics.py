@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication,QEvent,Qt
 from PySide6.QtWidgets import QApplication
 from global_pulse.controller import Controller
-from global_pulse.ui import MainWindow
+from global_pulse.ui import MainWindow, EconomicChart
 from global_pulse.__main__ import show_initializing,prepare_initial_dashboard
 from global_pulse.single_media import Television
 
@@ -173,4 +173,82 @@ def test_renderer_exit_reports_real_browser_failure(app):
     finally:
         tv.stop();tv.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
+@pytest.mark.parametrize("size", [(960, 640), (1440, 940)])
+def test_splash_primes_real_size_first_economy_paint_before_interaction(
+    app, tmp_path, monkeypatch, size,
+):
+    """Cold 6,400-row SQLite first paints belong under splash, not a tab click."""
+    c = Controller(tmp_path, demo=True)
+    w = None
+    splash = None
+    try:
+        records = [{
+            "indicator": "wb_inflation",
+            "country": f"C{i % 200:03d}",
+            "country_name": f"Country {i % 200:03d}",
+            "date": str(1990 + (i // 200)),
+            "value": float(i % 500) / 10,
+            "previous_value": None,
+            "synthetic": True,
+            "source_id": "wb_inflation",
+            "url": f"https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG?locations={i % 200}",
+        } for i in range(6400)]
+        for offset in range(0, len(records), 1600):
+            assert c.store.put_observations(records[offset:offset + 1600]) == 1600
+        splash = show_initializing(app)
+        w = MainWindow(c)
+        w.resize(*size)
+        paints = []
+        original_paint = EconomicChart._paint_chart
+
+        def counted(self, painter):
+            paints.append(1)
+            return original_paint(self, painter)
+
+        monkeypatch.setattr(EconomicChart, "_paint_chart", counted)
+        assert not w.isVisible()
+        assert prepare_initial_dashboard(app, splash, w, c)
+        assert w.isVisible() and splash.isVisible()
+        assert w.pages.currentIndex() == 0
+        assert w._initial_painted_pages == set(range(7))
+        assert len(w._observations) >= 6400
+        assert w.economy_model.rowCount() >= 6400
+        assert paints, "Full-size Economy raster must be painted during startup"
+        chart = w.economic_chart
+        key = (chart.width(), chart.height(), chart.devicePixelRatioF())
+        assert chart._chart_cache_key == key
+        assert chart._chart_pixmap is not None
+        world = w.world_map
+        assert world._projected_view_key == (
+            world.width(), world.height(), world.zoom, world.pan_x, world.pan_y
+        )
+        warm_count = len(paints)
+        # The first owner click after splash is removed must reuse warm raster.
+        splash.finish(w)
+        w.open_page(2)
+        app.processEvents()
+        chart.grab()
+        assert len(paints) == warm_count, "First Economy click repainted the entire chart"
+        assert chart._chart_cache_key == key
+        w.open_page(0)
+        app.processEvents()
+        assert world._projected_view_key == (
+            world.width(), world.height(), world.zoom, world.pan_x, world.pan_y
+        )
+        assert w.media.tv._requested is False
+        assert w.media.radio.receiver_connected is False
+    finally:
+        if w is not None:
+            w._force_close = True
+            w.media.shutdown()
+            w.close()
+            w.deleteLater()
+        c.close()
+        if splash is not None:
+            splash.close()
+            splash.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
