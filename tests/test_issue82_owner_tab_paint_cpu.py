@@ -266,7 +266,11 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
             QTest.qWait(25)
         assert len(durations)==120, "All 120 navigation callbacks must arrive"
         for worker in workers:
-            worker.join(timeout=3)
+            worker_deadline=time.monotonic()+3
+            while worker.is_alive() and time.monotonic()<worker_deadline:
+                # Keep Qt event delivery flowing; join() on the UI thread
+                # would itself create a false multi-second heartbeat stall.
+                QTest.qWait(25)
             assert not worker.is_alive(), "Offline collector fixture must complete"
         deadline=time.monotonic()+7
         while time.monotonic()<deadline:
