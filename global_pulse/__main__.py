@@ -117,6 +117,61 @@ def show_initializing(app):
     return splash
 
 
+def prepare_initial_dashboard(app, splash, window, controller):
+    """Finish bounded LOCAL UI startup work before showing the dashboard.
+
+    First load has already queried the local archive and painted the map
+    while MainWindow was constructed. Cold headlines deliberately queue
+    language identification after the first paint; drain that finite queue
+    while the non-dismissable splash remains visible, rather than running
+    500 Qt ticks against the newly interactive main window. Pre-populate
+    all deferred local workspace tables now; no network/media is opened.
+    Ongoing live collection is NOT a startup prerequisite.
+    """
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Preparing local source tables and intelligence views...",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    app.processEvents()
+    if hasattr(window, "prepare_initial_workspaces"):
+        window.prepare_initial_workspaces()
+    headlines = getattr(controller, "_headlines", None)
+    if headlines is not None and not getattr(headlines, "closed", False):
+        pending = getattr(headlines, "deferred", None)
+        # MAX_DEFERRED is intentionally finite (512). No provider access,
+        # model installation or article-body processing is permitted here.
+        limit = int(getattr(headlines, "MAX_DEFERRED", 512)) + 8
+        initial = len(pending) if pending is not None else 0
+        for processed in range(limit):
+            if not pending:
+                break
+            if processed % 24 == 0:
+                splash.showMessage(
+                    "INITIALIZING GLOBAL PULSE\n"
+                    f"Preparing source headlines {processed}/{initial}...",
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                    QColor("#eee8f7"),
+                )
+                app.processEvents()
+            headlines._drain_deferred()
+        if pending:
+            # Fail closed: never show a dashboard marked ready if a changed
+            # worker implementation breaks the finite startup invariant.
+            raise RuntimeError("Initial local headline queue did not settle")
+        headlines.deferred_timer.stop()
+    app.processEvents()
+    splash.showMessage(
+        "GLOBAL PULSE READY\n"
+        "Local archive, workspaces and headline queue prepared.\n"
+        "Live source collection remains subject to provider availability.",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    return True
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["--gdelt-worker"]:
@@ -367,8 +422,6 @@ def main(argv=None):
             controller.quit()
 
     window.set_close_handler(close_window)
-    window.show()
-    splash.finish(window)
     if args.fixture:
         controller.load_fixture(args.fixture)
     if args.snapshot_first_fixture_event:
@@ -378,6 +431,12 @@ def main(argv=None):
         window.navigate_event(fixture_events[0]["id"])
     if snapshot_size is not None:
         window.resize(*snapshot_size)
+    # Never reveal an interactive dashboard until its expensive local
+    # workspace construction AND deferred cold headline queue have settled.
+    # This cannot and does not preload live media or future source updates.
+    prepare_initial_dashboard(app, splash, window, controller)
+    window.show()
+    splash.finish(window)
     if args.activate:
         QTimer.singleShot(150, lambda: activate(args.activate))
     if args.snapshot:
