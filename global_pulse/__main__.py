@@ -22,6 +22,13 @@ def data_directory():
     return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "global-pulse"
 
 
+def _native_status_visible(status, enabled):
+    """A late helper ready/exit signal cannot claim pop-ups are ON after opt-out."""
+    if enabled is not True:
+        return "Windows pop-up notifications off · alerts remain in Pulse history"
+    return str(status)
+
+
 def _tray_health_state(controller):
     """Preserve alerts > paused > active-source errors > active precedence."""
     if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
@@ -299,7 +306,9 @@ def main(argv=None):
     controller.native_alert.connect(notifier.notify)
     def notification_status_only(status):
         if not controller._closed:
-            controller.notification_status = status
+            controller.notification_status = _native_status_visible(
+                status, controller.get_setting("notifications_enabled", False)
+            )
             controller.notification_changed.emit()
 
     notifier.status_changed.connect(notification_status_only)
