@@ -157,8 +157,6 @@ def run_in_app(helper: Path) -> int:
             window=MainWindow(controller)
             window.resize(1440,940)
             window.show()
-            window.vertical_split.setSizes([180,720])
-            window.lower_split.setSizes([250,850,250])
             app.processEvents()
             television=window.media.tv
             television.display.hide()
@@ -199,9 +197,12 @@ def run_in_app(helper: Path) -> int:
 
             def visible_marker(label):
                 window.media_scroll.ensureWidgetVisible(host,0,0)
-                host._window_container.show()
                 QTest.qWait(350)
                 app.processEvents()
+                # Never forcibly show a foreign child in the probe: doing so
+                # could repair the exact tab-return black-screen defect.
+                if not host._window_container.isVisible():
+                    raise AssertionError(f"{label}: Qt did not keep video container visible")
                 viewport=window.media_scroll.viewport()
                 surface=QRect(host.mapToGlobal(QPoint(0,0)),host.size())
                 clip=QRect(viewport.mapToGlobal(QPoint(0,0)),viewport.size())
@@ -230,7 +231,10 @@ def run_in_app(helper: Path) -> int:
                 return {"case":label,"visible_rect":[visible.x(),visible.y(),visible.width(),visible.height()],
                         "samples":pixels,"matching_pixels":matches}
 
-            result["cases"]=[visible_marker("initial_1440x940")]
+            result["cases"]=[visible_marker("default_splitters_1440x940")]
+            window.vertical_split.setSizes([180,720])
+            window.lower_split.setSizes([250,850,250])
+            result["cases"].append(visible_marker("expanded_1440x940"))
             window.open_page(1)
             app.processEvents()
             if host.isVisible():
