@@ -17,6 +17,11 @@ from pathlib import Path
 
 REVIEWED_REFERENCE_ROOT = Path(__file__).resolve().parents[1] / "packaging" / "licenses"
 REVIEWED_PACKAGE_LOCK_PATH = Path(__file__).resolve().parents[1] / "packaging" / "tv" / "packages.lock.json"
+# NuGet's signed-package content hash (packages.lock/.nupkg.metadata) is
+# intentionally distinct from the SHA-512 of the complete signed .nupkg bytes.
+# These two identities were independently verified against the NuGet v3 package.
+REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512 = "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
+REVIEWED_WEBVIEW2_ARCHIVE_SHA512 = "cOaiVqP3BmQHMnxGpZzANM22tUXgycrisyJHjIGNzIaMsm8iXj7Kx+ceYg+RbYwJtzT009qfcFTocvVLY+ekMw=="
 # Published WebView2 assembly identities are .deps.json "reference" entries, not
 # independently restored packages. Only these exact SDK version identities may
 # take their notice provenance from the pinned parent Microsoft.Web.WebView2.
@@ -70,11 +75,12 @@ def notice_files(root: Path) -> list[Path]:
 
 def reviewed_reference_notice_root(
     library_name: str, version: str, libraries: dict, nuget_root: Path,
-) -> tuple[Path, str, str]:
-    """Resolve only reviewed WebView2 assembly references to a locked NuGet source.
+) -> tuple[Path, str, str, str]:
+    """Resolve reviewed WebView2 references using BOTH NuGet and archive hashes.
 
-    Validate both the source-locked package record and the restored NuGet
-    SHA-512 digest. Unknown references, missing lock proof, and mismatches STOP.
+    NuGet contentHash excludes signed-archive metadata, so it must match the
+    pinned package lock and .nupkg.metadata, never the raw signed .nupkg hash.
+    Unknown references, missing receipts, and mismatches STOP.
     """
     alias = REVIEWED_WEBVIEW2_REFERENCE_PARENTS.get((library_name.lower(), version))
     if alias is None:
@@ -104,18 +110,31 @@ def reviewed_reference_notice_root(
     if len(locked_hashes) != 1:
         raise ValueError(f"WebView2 reference package lock hashes conflict: {parent_identity}")
     locked_hash = locked_hashes.pop()
+    if locked_hash != REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512:
+        raise ValueError(f"Reviewed WebView2 NuGet content hash changed: {parent_identity}")
     root = package_root(nuget_root, parent, pinned_version)
+    metadata_file = root / ".nupkg.metadata"
+    if (not metadata_file.is_file() or metadata_file.is_symlink()
+            or metadata_file.stat().st_size > 16 * 1024):
+        raise ValueError(f"Restored WebView2 NuGet content metadata missing: {parent_identity}")
+    metadata = json.loads(metadata_file.read_text(encoding="utf-8-sig"))
+    if (not isinstance(metadata, dict)
+            or metadata.get("contentHash") != locked_hash
+            or not isinstance(metadata.get("source"), str)
+            or not metadata["source"].startswith("https://api.nuget.org/v3/")):
+        raise ValueError(f"Restored WebView2 NuGet content proof differs from lock: {parent_identity}")
     basename = f"{parent.lower()}.{pinned_version.lower()}.nupkg"
     hash_file = root / f"{basename}.sha512"
     archive = root / basename
-    if not archive.is_file() or archive.is_symlink() or not hash_file.is_file():
+    if (not archive.is_file() or archive.is_symlink()
+            or not hash_file.is_file() or hash_file.is_symlink()):
         raise ValueError(f"Restored WebView2 SDK archive or hash receipt missing: {parent_identity}")
     with archive.open("rb") as stream:
         actual_hash = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode("ascii")
-    if (actual_hash != locked_hash
+    if (actual_hash != REVIEWED_WEBVIEW2_ARCHIVE_SHA512
             or hash_file.read_text(encoding="utf-8").strip() != actual_hash):
-        raise ValueError(f"Restored WebView2 reference archive SHA512 differs from lock: {parent_identity}")
-    return root, parent_identity, actual_hash
+        raise ValueError(f"Restored WebView2 signed archive SHA512 differs from official bytes: {parent_identity}")
+    return root, parent_identity, locked_hash, actual_hash
 
 
 def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
@@ -150,8 +169,9 @@ def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
             continue
         notice_source_package = identity
         reference_lock_hash = None
+        reference_archive_hash = None
         if kind == "reference":
-            root, notice_source_package, reference_lock_hash = reviewed_reference_notice_root(
+            root, notice_source_package, reference_lock_hash, reference_archive_hash = reviewed_reference_notice_root(
                 package, version, libraries, nuget_root
             )
         elif kind in {"package", "runtimepack"}:
@@ -199,6 +219,7 @@ def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
             "evidence_kind": evidence_kind,
             "notice_source_package": notice_source_package,
             "notice_source_lock_sha512": reference_lock_hash,
+            "notice_source_archive_sha512": reference_archive_hash,
             "runtime_files": sorted(runtime),
             "native_files": sorted(native),
             "notice_files": copied,
