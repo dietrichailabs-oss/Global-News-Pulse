@@ -159,6 +159,12 @@ def test_repeated_fast_navigation_on_preloaded_sqlite_economy(desktop, app, monk
     finally:
         timer.stop()
     assert heartbeat, "The event loop must still dispatch timer heartbeats"
+    max_gap=max((later-earlier for earlier,later in zip(heartbeat,heartbeat[1:])),default=0)
+    print("\nSynthetic preloaded SQLite tab navigation: "
+          f"max_switch_ms={max(durations)*1000:.1f}, "
+          f"median_switch_ms={statistics.median(durations)*1000:.1f}, "
+          f"max_heartbeat_gap_ms={max_gap*1000:.1f}, "
+          f"switches={len(durations)}, heartbeat_ticks={len(heartbeat)}")
     # A one-second UI stall is the specific owner regression. Use a wide
     # CI threshold; measured owner hardware latency remains unverified.
     assert max(durations) < 0.5, f"A fast tab switch stalled {max(durations):.3f}s"
