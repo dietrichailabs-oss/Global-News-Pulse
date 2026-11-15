@@ -15,9 +15,11 @@ from scripts import package_manifest as manifest
 
 def test_reviewed_tv_subtree_is_admitted_without_generic_directory_escape(tmp_path: Path):
     native = tmp_path / "tv"
-    (native / "licenses").mkdir(parents=True)
+    (native / "licenses" / "Reviewed-1.0").mkdir(parents=True)
     (native / "GlobalPulse.TV.exe").write_bytes(b"synthetic TV fixture")
-    (native / "licenses" / "NOTICE.txt").write_text("synthetic notice", encoding="utf-8")
+    (native / "licenses" / "Reviewed-1.0" / "NOTICE.txt").write_text(
+        "synthetic notice", encoding="utf-8"
+    )
     result = manifest.scan(tmp_path, require_complete=False)
     assert result["status"] == "PASS"
     assert result["files"] == 2
