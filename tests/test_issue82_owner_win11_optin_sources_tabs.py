@@ -6,12 +6,15 @@ or timing; independent packaged Win11 QA is still required.
 from __future__ import annotations
 
 import os
+import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton, QLabel
 
+from global_pulse.__main__ import _native_status_visible
+from global_pulse.native_notifications import NativeNotifications
 from global_pulse.controller import Controller
 from global_pulse.source_availability import available_ids, capability, enabled_ids
 from global_pulse.sources import load_catalog
@@ -193,3 +196,36 @@ def test_same_id_capability_change_rebuilds_controls_even_after_sorting(desktop)
     window._populate_sources()
     row = row_for_id()
     assert isinstance(window.source_table.cellWidget(row, 8), QPushButton)
+
+
+def test_opt_out_during_native_registration_blocks_pending_dispatch(app):
+    assert _native_status_visible("Windows notification service ready", False).startswith(
+        "Windows pop-up notifications off"
+    )
+    assert _native_status_visible("helper failed", True) == "helper failed"
+    state = {"enabled": True}
+    notifier = NativeNotifications(enabled=True, predicate=lambda: state["enabled"])
+    writes, deliveries = [], []
+
+    class InMemoryProcess:
+        def write(self, payload):
+            writes.append(payload)
+            return len(payload)
+
+    notifier.process = InMemoryProcess()
+    notifier.ready = True
+    notifier.delivery_changed.connect(lambda identifier, message: deliveries.append((identifier, message)))
+    event = {"id": "synthetic-optout-event", "_alert_id": "synthetic-optout-alert"}
+    try:
+        # In the race a helper can signal ready after Settings/Tray turned OFF.
+        state["enabled"] = False
+        assert notifier.notify(event, "Synthetic never submitted") is False
+        notifier._pending.append((event, "Synthetic queued before opt-out", time.monotonic()))
+        notifier._flush()
+        assert not writes, "Opt-out must prevent every new native helper write"
+        assert not notifier._pending
+        assert all("suppressed" in message for _, message in deliveries)
+    finally:
+        notifier.process = None
+        notifier.stop()
+        notifier.deleteLater()
