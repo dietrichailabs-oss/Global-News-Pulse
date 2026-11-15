@@ -13,6 +13,31 @@ import sys
 from pathlib import Path
 
 
+CODEC_JAVASCRIPT = """
+(() => {
+  const video = document.createElement('video');
+  return JSON.stringify({
+    h264_aac: video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+    vp9_opus: video.canPlayType('video/webm; codecs="vp9, opus"'),
+    av1_opus: video.canPlayType('video/webm; codecs="av01.0.08M.08, opus"'),
+    media_source: typeof MediaSource !== 'undefined',
+    location: String(location.href)
+  });
+})()
+"""
+
+
+def decode_callback(value: object) -> object:
+    for _ in range(2):
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            break
+    return value
+
+
 def inspect_native_plugin() -> dict[str, object]:
     """Check Qt's installed plugin metadata without starting the video engine."""
     from PySide6.QtCore import QLibraryInfo, QPluginLoader
@@ -83,32 +108,13 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
         report["result"] = result
         report["callback_type"] = type(payload).__name__
         report["callback_sample"] = repr(payload)[:500]
-        for _ in range(2):
-            if not isinstance(payload, str):
-                break
-            try:
-                payload = json.loads(payload)
-            except json.JSONDecodeError:
-                break
+        payload = decode_callback(payload)
         if isinstance(payload, dict):
             report["video_can_play_type"] = payload
             report["result"] = "codec_capability_reported"
         webview.stop()
         host.close()
         app.quit()
-
-    javascript = """
-    (() => {
-      const video = document.createElement('video');
-      return JSON.stringify({
-        h264_aac: video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
-        vp9_opus: video.canPlayType('video/webm; codecs="vp9, opus"'),
-        av1_opus: video.canPlayType('video/webm; codecs="av01.0.08M.08, opus"'),
-        media_source: typeof MediaSource !== 'undefined',
-        location: String(location.href)
-      });
-    })()
-    """
 
     def evaluate() -> None:
         try:
@@ -120,7 +126,7 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
                 lambda value: report.update({"arithmetic_callback": repr(value)}),
             )
             webview.runJavaScript(
-                javascript,
+                CODEC_JAVASCRIPT,
                 lambda value: finish(
                     "javascript_callback_received" if value is not None else "empty_codec_reply",
                     value,
@@ -139,16 +145,64 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
     return report
 
 
+def probe_existing_webengine(report: dict[str, object]) -> dict[str, object]:
+    """Compare Pulse's existing QtWebEngine codec advertisements offline."""
+    if sys.platform != "win32":
+        report["result"] = "unsupported_non_windows"
+        return report
+    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    app = QApplication.instance() or QApplication(["GlobalPulseWebEngineCodecProbe"])
+    view = QWebEngineView()
+    view.resize(400, 240)
+    report["loading_transitions"] = []
+    finished = {"value": False}
+
+    def done(result: str, value: object = None) -> None:
+        if finished["value"]:
+            return
+        finished["value"] = True
+        report["result"] = result
+        report["callback_sample"] = repr(value)[:500]
+        decoded = decode_callback(value)
+        if isinstance(decoded, dict):
+            report["video_can_play_type"] = decoded
+            report["result"] = "codec_capability_reported"
+        view.stop()
+        view.close()
+        app.quit()
+
+    def query() -> None:
+        report["reported_page"] = view.url().toString()
+        view.page().runJavaScript(CODEC_JAVASCRIPT, lambda value: done("webengine_callback_received", value))
+
+    view.loadFinished.connect(
+        lambda ok: (report["loading_transitions"].append({"success": bool(ok)}),
+                    QTimer.singleShot(1000, query))
+    )
+    QTimer.singleShot(18000, lambda: done("qt_webengine_timeout"))
+    view.show()
+    view.setUrl(QUrl("about:blank"))
+    app.exec()
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--inspect-only", action="store_true")
+    parser.add_argument("--backend", choices=("webview2", "qtwebengine"), default="webview2")
     args = parser.parse_args(argv)
     report: dict[str, object] = {"probe": "issue82-qt-native-webview2-codecs", "network": "none"}
     try:
         report = inspect_native_plugin()
         if args.inspect_only:
             report["result"] = "inventory_only"
+        elif args.backend == "qtwebengine":
+            report["probe"] = "issue82-existing-qtwebengine-codecs"
+            report = probe_existing_webengine(report)
         else:
             report = probe_codec_capabilities(report)
     except Exception as exc:
