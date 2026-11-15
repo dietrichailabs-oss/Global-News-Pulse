@@ -118,7 +118,7 @@ jobs:
           if ($policy.ExitCode -ne 0) { throw ('Shipped WebView2 policy probe failed: ' + (Get-Content $errPolicy -Raw)) }
           $lines=@(Get-Content -LiteralPath $policyOut | Where-Object { $_.Trim() })
           $check=@($lines | ConvertFrom-Json | Where-Object { $_.type -eq 'policy_self_test' })
-          if ($check.Count -ne 1 -or $check[0].passed -ne $true -or $check[0].cases -lt 27 -or $check[0].failures -ne 0 -or $check[0].network -ne 'none') { throw 'Shipped WebView2 policy receipt invalid' }
+          if ($check.Count -ne 1 -or $check[0].passed -ne $true -or $check[0].cases -lt 31 -or $check[0].failures -ne 0 -or $check[0].network -ne 'none') { throw 'Shipped WebView2 policy receipt invalid' }
       - name: Offline installer lifecycle smoke
         run: |
           $ErrorActionPreference = 'Stop'
