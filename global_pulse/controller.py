@@ -38,6 +38,9 @@ class Controller(QObject):
     # Native notification delivery/status is NOT news ingest. Distinct signal
     # avoids synchronous 500 feed + 5k map + 5k country refresh on each toast.
     notification_changed = Signal()
+    # Explicit opt-in changes can start the native bridge after launch without
+    # routing a Settings checkbox through a 5,000-event map redraw.
+    notification_preference_changed = Signal(bool)
     # Bookmark-only updates must not repaint the entire 5,000-record map.
     situation_changed = Signal(str, bool)
     status_changed = Signal(str)
@@ -62,7 +65,7 @@ class Controller(QObject):
         self.catalog = bundled + self.get_setting("user_feeds", [])
         self.media_catalog = load_media_catalog()
         self.monitoring = False
-        self.notification_status = "Registering native notifications"
+        self.notification_status = "Native pop-up notifications off · enable in Settings (alerts remain in history)"
         self.last_collection = "Never"
         self._closed = False
         self.storage_problem.connect(self._pause_for_storage)
@@ -109,7 +112,7 @@ class Controller(QObject):
 
     def set_source_enabled(self, source_id, enabled):
         """Explicit provider-ID action; never starts monitoring or bypasses due times."""
-        from .source_availability import capability
+        from .source_availability import available_ids, capability
         if self._closed:
             raise RuntimeError("Controller is closed")
         if type(enabled) is not bool or not isinstance(source_id, str):
@@ -123,7 +126,7 @@ class Controller(QObject):
         # Match enabled_ids(): local/imported JSON settings may contain
         # non-string (including unhashable) entries.  Ignore those before
         # adding/removing a source; never reinterpret corrupt values as IDs.
-        requested = ({s["id"] for s in self.catalog if s.get("enabled")}
+        requested = (available_ids(self.catalog)
                      if preference is None else
                      {item for item in preference if isinstance(item, str)}
                      if isinstance(preference, list) else set())
@@ -142,6 +145,11 @@ class Controller(QObject):
             return size_gb(value)
         if key == "gdelt_batches_enabled":
             return value is True
+        if key == "notifications_enabled":
+            # Upgrades used to default to native toasts ON. Require a fresh
+            # explicit opt-in after this change, even if an old setting is True.
+            return (value is True and
+                    self.store.get_setting("native_notifications_opt_in_v2", False) is True)
         if key == "gdelt_retention_days":
             from .gdelt_schedule import retention_days as gdelt_days
             return gdelt_days(value)
@@ -156,6 +164,9 @@ class Controller(QObject):
     def set_setting(self, key, value):
         if self._closed:
             return
+        if key == "notifications_enabled" and type(value) is not bool:
+            raise ValueError("Native notifications require an explicit boolean choice")
+        old_native = self.get_setting("notifications_enabled", False) if key == "notifications_enabled" else False
         if key == "gdelt_batches_enabled" and type(value) is not bool:
             raise ValueError("GDELT collection requires a boolean")
         if key == "gdelt_retention_days" and (type(value) is not int or not 1 <= value <= 365):
@@ -185,6 +196,14 @@ class Controller(QObject):
                 self._gdelt.set_active(was_active and self.monitoring and not self.demo)
         else:
             self.store.set_setting(key, value)
+        if key == "notifications_enabled":
+            # Only Settings Save or the tray toggle sets this migration marker;
+            # old permissive defaults can never silently launch native alerts.
+            self.store.set_setting("native_notifications_opt_in_v2", True)
+            if old_native != value:
+                self.notification_preference_changed.emit(value)
+            self.notification_changed.emit()
+            return
         if key == "gdelt_batches_enabled":
             self._apply_sources()
             self._gdelt.set_active(value and self.monitoring and not self.demo)
@@ -194,6 +213,8 @@ class Controller(QObject):
             self.scheduler.set_interval(int(value))
         elif key == "enabled_sources":
             self._apply_sources()
+            self.source_status_changed.emit()
+            return
         elif key == "retention_days":
             self.store.prune(int(value))
         self.data_changed.emit()
@@ -380,7 +401,7 @@ class Controller(QObject):
                 settings = {k: self.get_setting(k, default) for k, default in [("quiet_enabled", False), ("quiet_start", "22:00"), ("quiet_end", "07:00")]}
                 if self.demo:
                     self.store.update_alert_delivery(alert["id"], "Synthetic review: native delivery disabled")
-                elif not self.get_setting("notifications_enabled", True):
+                elif not self.get_setting("notifications_enabled", False):
                     self.store.update_alert_delivery(alert["id"], "Notifications muted: retained in internal history")
                 elif in_quiet_hours(settings):
                     self.store.update_alert_delivery(alert["id"], "Quiet hours: retained in internal history")
