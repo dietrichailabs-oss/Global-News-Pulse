@@ -307,6 +307,9 @@ class Television(_MediaTile):
             self._ensure_player()
             if not self._player_signal_connected:
                 self.view.loadFinished.connect(self._tv_load_finished)
+                self.view.renderProcessTerminated.connect(
+                    self._renderer_terminated
+                )
                 self._player_signal_connected=True
             self.view.page().allowed_video_id=video
             self.view.page().full_watch_mode=True
@@ -379,6 +382,8 @@ class Television(_MediaTile):
             )
             parts.append("network state "+str(value.get("network", "?")))
             parts.append("ready state "+str(value.get("ready", "?")))
+            if value.get("frames") is not None:
+                parts.append("decoded frames "+str(value["frames"]))
             if value.get("controls_visible") is False:
                 parts.append("YouTube controls hidden")
         return " · ".join(parts)[:320]
@@ -395,7 +400,7 @@ class Television(_MediaTile):
         # YouTube can successfully load its embed shell while reporting
         # "Video unavailable" for a rotated/ended livestream. Read only the
         # provider's displayed error element, never arbitrary page content.
-        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap,.ytp-error,.ytp-error-message');const probe=document.createElement('video');const codecs={h264:probe.canPlayType('video/mp4; codecs="avc1.42E01E,mp4a.40.2"'),vp9:probe.canPlayType('video/webm; codecs="vp9,opus"'),av1:probe.canPlayType('video/webm; codecs="av01.0.08M.08"')};const chrome=document.querySelector('.ytp-chrome-bottom');const controls_visible=chrome?getComputedStyle(chrome).visibility!=='hidden'&&getComputedStyle(chrome).display!=='none':false;if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250),codecs};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error_code:v.error?v.error.code:0,video_width:v.videoWidth,video_height:v.videoHeight,network:v.networkState,controls_visible,codecs}:{missing:true,controls_visible,codecs};})()"""
+        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap,.ytp-error,.ytp-error-message');const probe=document.createElement('video');const codecs={h264:probe.canPlayType('video/mp4; codecs="avc1.42E01E,mp4a.40.2"'),vp9:probe.canPlayType('video/webm; codecs="vp9,opus"'),av1:probe.canPlayType('video/webm; codecs="av01.0.08M.08"')};const chrome=document.querySelector('.ytp-chrome-bottom');const controls_visible=chrome?getComputedStyle(chrome).visibility!=='hidden'&&getComputedStyle(chrome).display!=='none':false;if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250),codecs};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error_code:v.error?v.error.code:0,video_width:v.videoWidth,video_height:v.videoHeight,frames:v.getVideoPlaybackQuality?v.getVideoPlaybackQuality().totalVideoFrames:null,network:v.networkState,controls_visible,codecs}:{missing:true,controls_visible,codecs};})()"""
         self.view.page().runJavaScript(script,lambda value,g=generation:self._observed(g,value))
 
     def _observed(self,generation,value):
@@ -448,8 +453,9 @@ class Television(_MediaTile):
                 self._progress_at=time.monotonic()
         elif value.get("ready",0)<2:
             self.tv_status.setText("BUFFERING · no decoded frame yet")
-        elif (value.get("video_width")==0 or value.get("video_height")==0):
-            self.tv_status.setText("NO VIDEO FRAME · renderer/codec unverified")
+        elif (value.get("video_width")==0 or value.get("video_height")==0 or
+              (value.get("frames") == 0 and current > 2.0)):
+            self.tv_status.setText("NO DECODED FRAMES · black video suspected")
         elif self._last_time is not None and current>self._last_time:
             self._had_playback=True
             self.tv_status.setText("VIDEO TIME ADVANCING · picture unverified")
