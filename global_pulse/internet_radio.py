@@ -193,6 +193,9 @@ class RadioPanel(QWidget):
         self.receiver_host = ""
         self.receiver_origin = None
         self.receiver_connected = False
+        # Read-only, origin-neutral WebEngine failure code for owner diagnosis.
+        # Never save page URLs, credentials, contents or player activity.
+        self._sdr_load_error = ""
         self.sdr_state = "OFF"
         self.sdr_directory_cache = {}
         self.sdr_directory_reply = None
@@ -644,6 +647,23 @@ class RadioPanel(QWidget):
         )
         return bool(result)
 
+    def _sdr_loading_changed(self, info):
+        """Record the bounded *main-page* Chromium load failure only.
+
+        Page-load failure does not establish a network ban, audio incompatibility
+        or operator outage. Do not report paths or raw error strings; they may
+        include user-supplied query parameters or other private information.
+        """
+        if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
+            return
+        from PySide6.QtWebEngineCore import QWebEngineLoadingInfo
+        if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
+            return
+        # Keep the error-domain/code receipt finite, without user-entered URLs.
+        domain = getattr(info.errorDomain(), "name", "UnknownErrorDomain")
+        domain = "".join(c for c in str(domain) if c.isalnum())[:40]
+        self._sdr_load_error = f"{domain or 'UnknownErrorDomain'} code {int(info.errorCode())}"
+
     def _sdr_load_finished(self, ok):
         if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
             return
@@ -652,8 +672,14 @@ class RadioPanel(QWidget):
             return
         self.sdr_load_watch.stop()
         if not ok:
+            reason = self._sdr_load_error
             self._destroy_receiver()
-            self._sdr_state_change("ERROR", "Receiver page failed to load. Try Open receiver in browser.")
+            self._sdr_state_change(
+                "ERROR", "Receiver page failed to load"
+                + (f" ({reason})" if reason else "")
+                + ". Check the receiver in a normal browser; port 8901,"
+                " provider availability and network restrictions may differ."
+            )
             return
         self._sdr_state_change(
             "ON",
@@ -783,6 +809,7 @@ class RadioPanel(QWidget):
             if not approved:
                 return False
         self._ensure_receiver_view(host)
+        self._sdr_load_error = ""
         self._sdr_state_change("CONNECTING", "Connecting to public SDR receiver…")
         self.sdr_load_watch.start(20000)
         self.receiver_connected=True
@@ -876,7 +903,10 @@ class RadioPanel(QWidget):
             url,host=self._tuned_receiver_url()
             if not self._load_receiver_url(url,host,require_consent=True):
                 return False
-            self.ham_note.setText("SDR CONNECTED · provider screen/waterfall · use Tune or Scan frequencies")
+            self.ham_note.setText(
+                "SDR CONNECTING · waiting for operator page. "
+                "Waterfall and audio are not verified; use receiver Audio start after load."
+            )
             return True
         except (ImportError,RuntimeError,ValueError,OSError) as error:
             self._destroy_receiver()
@@ -964,6 +994,7 @@ class RadioPanel(QWidget):
         page.certificateError.connect(lambda error:error.rejectCertificate())
         self.receiver_view.setPage(page)
         self.receiver_view.loadFinished.connect(self._sdr_load_finished)
+        page.loadingChanged.connect(self._sdr_loading_changed)
         settings=page.settings()
         for flag in (
             QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,
@@ -980,6 +1011,7 @@ class RadioPanel(QWidget):
         self.sdr_load_watch.stop()
         self.sdr_volume_apply.stop()
         self.receiver_connected=False
+        self._sdr_load_error = ""
         self._sdr_state_change("OFF")
         if self.receiver_view:
             self.receiver_view.stop()
