@@ -144,5 +144,9 @@ class NativeTvHost(QWidget):
                 )
                 process.finished.connect(watchdog.stop)
                 watchdog.start(3000)
-            process.finished.connect(lambda *_args, p=process: p.deleteLater())
+                process.finished.connect(lambda *_args, p=process: p.deleteLater())
+            else:
+                # A very fast or failed child may have finished before Stop;
+                # do not wait for a finished signal already delivered.
+                process.deleteLater()
         self.hide()
