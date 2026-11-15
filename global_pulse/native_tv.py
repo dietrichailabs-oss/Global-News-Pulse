@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QProcess, QTimer, Signal
 from PySide6.QtGui import QWindow
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -128,6 +128,19 @@ class NativeTvHost(QWidget):
                 ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)
             )
             user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+            user32.GetParent.argtypes = (ctypes.c_void_p,)
+            user32.GetParent.restype = ctypes.c_void_p
+            user32.SetParent.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+            user32.SetParent.restype = ctypes.c_void_p
+            user32.GetWindowLongPtrW.argtypes = (ctypes.c_void_p, ctypes.c_int)
+            user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+            user32.SetWindowLongPtrW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
+            user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+            user32.SetWindowPos.argtypes = (
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int, ctypes.c_uint
+            )
+            user32.SetWindowPos.restype = ctypes.c_bool
             handle = ctypes.c_void_p(hwnd)
             owner_pid = ctypes.c_ulong()
             if (not user32.IsWindow(handle)
@@ -147,6 +160,27 @@ class NativeTvHost(QWidget):
             self._layout.addWidget(container)
             container.show()
             container.raise_()
+            container.installEventFilter(self)
+            # Qt's foreign-window wrapper can resize and visibly paint an
+            # unmanaged *top-level* HWND over the desktop. That passes a naive
+            # screenshot test but can sit behind the Qt viewport for the owner.
+            # Require a real Win32 child of the exact Qt native container.
+            parent_hwnd = int(container.winId())
+            if not parent_hwnd:
+                return False
+            old_style = int(user32.GetWindowLongPtrW(handle, -16) or 0)
+            child_style = (old_style | 0x40000000 | 0x02000000) & ~0x80000000
+            if old_style != child_style:
+                ctypes.set_last_error(0)
+                user32.SetWindowLongPtrW(handle, -16, ctypes.c_void_p(child_style))
+                if ctypes.get_last_error() != 0:
+                    return False
+            if int(user32.GetParent(handle) or 0) != parent_hwnd:
+                user32.SetParent(handle, ctypes.c_void_p(parent_hwnd))
+            if int(user32.GetParent(handle) or 0) != parent_hwnd:
+                return False
+            if not self._resize_native_child():
+                return False
             return True
         except (OSError, TypeError, ValueError, RuntimeError):
             return False
@@ -160,6 +194,30 @@ class NativeTvHost(QWidget):
             container.hide()
             self._layout.removeWidget(container)
             container.deleteLater()
+
+    def eventFilter(self, watched, event):
+        if watched is self._window_container and event.type() == QEvent.Type.Resize:
+            self._resize_native_child()
+        return super().eventFilter(watched, event)
+
+    def _resize_native_child(self) -> bool:
+        container = self._window_container
+        if sys.platform != "win32" or not self._child_window or container is None:
+            return False
+        try:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.SetWindowPos.argtypes = (
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int, ctypes.c_uint
+            )
+            user32.SetWindowPos.restype = ctypes.c_bool
+            return bool(user32.SetWindowPos(
+                ctypes.c_void_p(self._child_window), ctypes.c_void_p(), 0, 0,
+                max(1, container.width()), max(1, container.height()),
+                0x0020 | 0x0004 | 0x0040  # FRAMECHANGED, NOZORDER, SHOWWINDOW
+            ))
+        except (OSError, TypeError, ValueError, RuntimeError):
+            return False
 
     def command(self, value: str):
         process = self._process
