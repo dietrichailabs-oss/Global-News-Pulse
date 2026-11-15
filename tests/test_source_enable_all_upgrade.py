@@ -126,3 +126,68 @@ def test_zero_eligible_sources_does_not_invent_provider_access():
     assert migrate_all_available_sources_once(store, catalog) is True
     assert store.get_setting("enabled_sources") == []
     assert enabled_ids(catalog, store.get_setting("enabled_sources")) == set()
+
+
+def test_actual_sqlite_controller_upgrade_restart_and_later_opt_out(tmp_path):
+    """Exercise the real live Controller/Store without starting monitoring."""
+    from PySide6.QtCore import QCoreApplication
+    from global_pulse.controller import Controller
+    from global_pulse.core import Store
+
+    app = QCoreApplication.instance() or QCoreApplication([])
+    profile = tmp_path / "live-profile"
+    profile.mkdir()
+    store = Store(profile / "global-pulse.sqlite3", mode="live")
+    store.set_setting("enabled_sources", ["historical_missing_feed"])
+    store.close()
+
+    first = Controller(profile, demo=False)
+    try:
+        eligible = available_ids(first.catalog)
+        assert eligible
+        assert first._enabled_sources_migrated is True
+        assert set(first.get_setting("enabled_sources")) == eligible
+        assert first._enabled_collection_ids == frozenset(eligible)
+        assert first.store.get_setting("enabled_sources_before_enable_all_v1") == [
+            "historical_missing_feed"
+        ]
+        assert first.monitoring is False
+        excluded = sorted(eligible)[0]
+        first.set_source_enabled(excluded, False)
+    finally:
+        first.close()
+
+    second = Controller(profile, demo=False)
+    try:
+        assert second._enabled_sources_migrated is False
+        assert excluded not in second._enabled_collection_ids
+        assert len(second._enabled_collection_ids) == len(eligible) - 1
+        assert second.store.get_setting("enabled_sources_before_enable_all_v1") == [
+            "historical_missing_feed"
+        ]
+        assert second.monitoring is False
+    finally:
+        second.close()
+
+
+def test_actual_synthetic_controller_does_not_rewrite_demo_selection(tmp_path):
+    from PySide6.QtCore import QCoreApplication
+    from global_pulse.controller import Controller
+    from global_pulse.core import Store
+
+    app = QCoreApplication.instance() or QCoreApplication([])
+    profile = tmp_path / "synthetic-profile"
+    profile.mkdir()
+    store = Store(profile / "synthetic.sqlite3", mode="synthetic")
+    store.set_setting("enabled_sources", [])
+    store.close()
+
+    controller = Controller(profile, demo=True)
+    try:
+        assert controller._enabled_sources_migrated is False
+        assert controller.get_setting("enabled_sources") == []
+        assert controller._enabled_collection_ids == frozenset()
+        assert controller.store.get_setting("source_enable_all_upgrade_v1") is None
+        assert controller.monitoring is False
+    finally:
+        controller.close()
