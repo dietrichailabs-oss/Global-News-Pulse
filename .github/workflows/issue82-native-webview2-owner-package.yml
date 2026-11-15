@@ -68,6 +68,11 @@ jobs:
           $allowed=@('.github/workflows/issue82-native-webview2-owner-package.yml')
           $unexpected=@($changed | Where-Object { $_ -notin $allowed })
           if ($unexpected.Count -gt 0 -or $changed.Count -ne 1) { throw ('Unreviewed product/test modification: ' + ($changed -join ',')) }
+          $checkoutSha=((& git rev-parse HEAD) -join '').Trim()
+          $eventHead='${{ github.event.pull_request.head.sha || github.sha }}'
+          if ($checkoutSha -ne $eventHead) { throw 'Checkout is not exact event head; refusing provenance' }
+          "GP_CHECKOUT_SHA=$checkoutSha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "OWNER_TEST_CHECKOUT_SHA=$checkoutSha"
           Write-Host 'ISSUE82_OWNER_WIN11_V2_PRODUCT=249cfb74595adb12bec66b8e1aef1a44369534e2'
           Write-Host 'NATIVE_V2_WINDOWS_PROBE_AND_POLICY_REQUIRED=true'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
@@ -142,7 +147,7 @@ jobs:
           Compress-Archive -LiteralPath $installer -DestinationPath $zip -CompressionLevel Optimal -Force
           $zipSha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            source_commit = $env:GITHUB_SHA
+            source_commit = $env:GP_CHECKOUT_SHA
             setup_exe_sha256 = $exeSha
             setup_zip_sha256 = $zipSha
             setup_zip_bytes = (Get-Item -LiteralPath $zip).Length
@@ -157,7 +162,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: global-news-pulse-issue82-native-webview2-tabs-owner-test-${{ github.sha }}
+          name: global-news-pulse-issue82-native-webview2-tabs-owner-test-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-setup.zip
             ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-portable.zip
