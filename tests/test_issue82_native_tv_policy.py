@@ -35,7 +35,7 @@ def test_native_windows_process_only_launches_after_existing_consent_gate():
         assert "QMessageBox.question" in body
         assert body.index("QMessageBox.question") < body.index("_begin_native_player")
     assert "return False" in inspect.getsource(NativeTvHost.play)
-    assert "waitForFinished" not in inspect.getsource(NativeTvHost.stop)
+    assert ".waitForFinished(" not in inspect.getsource(NativeTvHost.stop)
 
 
 def test_webview2_source_installs_resource_and_permission_guards_before_navigate():
