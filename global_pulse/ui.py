@@ -391,6 +391,7 @@ class MainWindow(SituationActions, QMainWindow):
         # use an idle timer; navigation itself never runs expensive queries.
         self._background_warm_enabled=False
         self._last_navigation_at=0.0
+        self._last_full_refresh_at=0.0
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -448,15 +449,18 @@ class MainWindow(SituationActions, QMainWindow):
         self._collection_refresh_timer.timeout.connect(self._refresh_source_status_ui)
         self._workspace_warm_timer=QTimer(self)
         self._workspace_warm_timer.setSingleShot(True)
-        self._workspace_warm_timer.setInterval(125)
+        # Rebuilding a hidden 127-source table/charts in every 125 ms idle
+        # slot could still seize the GUI between fast owner tab clicks.
+        self._workspace_warm_timer.setInterval(750)
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        # User settings, translations and explicit requests must remain
-        # immediate (existing desktop contract); only worker-origin evidence
-        # is deferred while the owner switches tabs. Controller emits the
-        # distinct evidence_changed signal on collector ingest.
-        controller.data_changed.connect(self.refresh_data)
+        # data_changed can also be emitted in bursts during source updates and
+        # settings changes. Treat it as an invalidation; explicit filter
+        # changes and Refresh still have their own immediate UI paths.
+        # Otherwise one emitted signal can synchronously reconcile 5k map
+        # records before Windows gets to process the next tab click.
+        controller.data_changed.connect(self._schedule_evidence_refresh)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
@@ -922,8 +926,8 @@ class MainWindow(SituationActions, QMainWindow):
             return
         # Never let a hidden-table rebuild interrupt an active sequence of
         # clicks. Users continue to see the fully initialized cached view.
-        if time.monotonic()-self._last_navigation_at < 0.35:
-            self._workspace_warm_timer.start(350)
+        if time.monotonic()-self._last_navigation_at < 1.8:
+            self._workspace_warm_timer.start(1000)
             return
         # Prefer the visible page, then keep hidden snapshots warm. A tab click
         # does no SQLite work; each idle turn handles at most one workspace.
@@ -1035,8 +1039,15 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller, "_closed", False):
             return
         idle_for=time.monotonic()-self._last_navigation_at
-        if self._background_warm_enabled and idle_for < 1.1:
-            self._evidence_refresh_timer.start(max(100,int((1.1-idle_for)*1000)))
+        if self._background_warm_enabled and idle_for < 1.8:
+            self._evidence_refresh_timer.start(max(100,int((1.8-idle_for)*1000)))
+            return
+        # A full map/feed revision performs bounded but substantial local
+        # SQLite and country-classification work. Several providers finishing
+        # together must produce one visible revision, not a UI stall for each.
+        since_last=time.monotonic()-self._last_full_refresh_at
+        if self._background_warm_enabled and since_last < 5.0:
+            self._evidence_refresh_timer.start(max(100,int((5.0-since_last)*1000)))
             return
         self.refresh_data()
 
@@ -1129,6 +1140,7 @@ class MainWindow(SituationActions, QMainWindow):
             elif page==5:self._generate_brief()
             self._dirty_pages.discard(page)
             self._schedule_workspace_warm()
+            self._last_full_refresh_at=time.monotonic()
         except Exception as exc:
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
