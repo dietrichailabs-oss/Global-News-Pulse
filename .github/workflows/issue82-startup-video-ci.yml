@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor dbf85d5867519e7ffecf12c6add37c1c33a7a346 HEAD
-          git diff --name-only 303b75aaa11e9c5c7f04d859bec0306957a718dd..HEAD | python -c "import sys; expected={'global_pulse/__main__.py','global_pulse/ui.py','global_pulse/single_media.py','tests/test_issue31_tv_basic_player.py','tests/test_issue82_startup_video_diagnostics.py','.github/workflows/issue82-startup-video-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only dbf85d5867519e7ffecf12c6add37c1c33a7a346..HEAD | python -c "import sys; expected={'global_pulse/__main__.py','global_pulse/ui.py','global_pulse/single_media.py','tests/test_issue31_tv_basic_player.py','tests/test_issue82_startup_video_diagnostics.py','.github/workflows/issue82-startup-video-ci.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Match native Windows Qt layout and font backend
         if: runner.os == 'Windows'
         shell: bash
