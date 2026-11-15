@@ -1,0 +1,91 @@
+name: Research - Offline Windows WebView2 Codec Probe
+
+on:
+  push:
+    branches: [research/issue82-webview2-codec-probe-20261115]
+    paths:
+      - 'scripts/issue82_webview2_codec_probe.py'
+      - '.github/workflows/issue82-edge-webview2-codec-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue82-webview2-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PIP_NO_INPUT: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTHONUTF8: '1'
+      QT_QPA_PLATFORM: windows
+      QT_WEBVIEW_PLUGIN: webview2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin experiment to reviewed PR103, no product modifications
+        run: |
+          $ErrorActionPreference='Stop'
+          git merge-base --is-ancestor bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'PR103 source not ancestor' }
+          $changed=@(git diff --name-only bbd30fc8174a3db2587baa44a57a5cdd0ccb82b2..HEAD)
+          $allowed=@('scripts/issue82_webview2_codec_probe.py', '.github/workflows/issue82-edge-webview2-codec-probe.yml')
+          $unexpected=@($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0 -or $changed.Count -ne 2) {
+            throw ('Probe contains unreviewed changes: ' + ($changed -join ','))
+          }
+          Write-Host 'RESEARCH_ONLY=true'
+          Write-Host 'DO_NOT_MERGE_AS_PRODUCT_FIX=true'
+          Write-Host 'NETWORK_PAGES_LOADED=none'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install frozen build dependencies with hashes
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-bootstrap.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen bootstrap install failed' }
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-build.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen Qt build dependencies install failed' }
+      - name: Inspect WebView2 native plugin and offline HTML5 codec support
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m compileall -q scripts/issue82_webview2_codec_probe.py
+          if ($LASTEXITCODE -ne 0) { throw 'Probe syntax failed' }
+          $report = Join-Path $env:RUNNER_TEMP 'ISSUE82_OFFLINE_WEBVIEW2_CODEC_PROBE.json'
+          python scripts/issue82_webview2_codec_probe.py --output $report
+          if ($LASTEXITCODE -ne 0) { throw 'Offline codec probe process failed' }
+          if (-not (Test-Path -LiteralPath $report)) { throw 'No report file' }
+          Get-Content -LiteralPath $report
+      - name: Compare existing QtWebEngine codecs offline
+        run: |
+          $ErrorActionPreference='Stop'
+          $report = Join-Path $env:RUNNER_TEMP 'ISSUE82_OFFLINE_QTWEBENGINE_CODEC_PROBE.json'
+          python scripts/issue82_webview2_codec_probe.py --backend qtwebengine --output $report
+          if ($LASTEXITCODE -ne 0) { throw 'QtWebEngine codec probe process failed' }
+          if (-not (Test-Path -LiteralPath $report)) { throw 'No QtWebEngine report file' }
+          Get-Content -LiteralPath $report
+      - name: Upload research report (no installer, no release)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue82-offline-webview2-codec-probe
+          path: |
+            ${{ runner.temp }}/ISSUE82_OFFLINE_WEBVIEW2_CODEC_PROBE.json
+            ${{ runner.temp }}/ISSUE82_OFFLINE_QTWEBENGINE_CODEC_PROBE.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Confirm git checkout remains unchanged
+        if: always()
+        run: git diff --exit-code
