@@ -877,14 +877,23 @@ class RadioPanel(QWidget):
             return False
         self.scan_timer.start()
         self.ham_note.setText(
-            f"SDR SCANNING · {start:g} to {end:g} kHz · step {step:g} · dwell {dwell:g}s · "
-            "frequency stepping only; provider screen shows actual signals"
+            f"SDR SCAN PENDING · {start:g} to {end:g} kHz · step {step:g} · dwell {dwell:g}s · "
+            "waiting for the receiver page; audio and signal are not verified"
         )
         return True
 
     def _scan_next(self):
         if self.scan_frequency is None or self.scan_end is None or self.scan_step is None:
             self.stop_scan();return
+        # A page load may exceed the user-selected dwell interval. Do not
+        # interrupt a pending tune with another Chromium navigation: canceled
+        # requests can report a failure and obscure the new tune's receipt.
+        # Hold the frequency until the page finishes or its watchdog fails.
+        if self.sdr_state == "CONNECTING":
+            return
+        if self.sdr_state != "ON" or not self.receiver_connected:
+            self.stop_scan()
+            return
         value=self.scan_frequency+self.scan_direction*self.scan_step
         if ((self.scan_direction>0 and value>self.scan_end+1e-9)
                 or (self.scan_direction<0 and value<self.scan_end-1e-9)):
