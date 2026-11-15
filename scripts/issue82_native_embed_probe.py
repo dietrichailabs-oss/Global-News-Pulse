@@ -10,14 +10,17 @@ from __future__ import annotations
 import json
 import ctypes
 import sys
+import tempfile
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QProcess
+from PySide6.QtCore import QPoint, QRect, QProcess, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.native_tv import NativeTvHost
+from global_pulse.controller import Controller
+from global_pulse.ui import MainWindow
 
 
 def run(helper: Path) -> int:
@@ -133,7 +136,144 @@ def run(helper: Path) -> int:
         app.processEvents()
 
 
+def run_in_app(helper: Path) -> int:
+    """Check real MainWindow > MediaPanel > QScrollArea video composition.
+
+    The standalone parent check cannot expose scroll-area stacking failures.
+    This uses the same offline WebView2 color marker without YouTube/network.
+    """
+    if sys.platform != "win32" or not helper.is_file():
+        raise RuntimeError("In-app embed probe requires the built Windows TV helper")
+    app=QApplication.instance() or QApplication([])
+    result={"type":"visual_inapp_embed_probe","network":"none","marker":"f21a9a"}
+    with tempfile.TemporaryDirectory(prefix="pulse-qt-embed-") as temporary:
+        controller=Controller(Path(temporary),demo=True)
+        window=None
+        host=None
+        process=None
+        heartbeat=[]
+        timer=None
+        try:
+            window=MainWindow(controller)
+            window.resize(1440,940)
+            window.show()
+            window.vertical_split.setSizes([180,720])
+            window.lower_split.setSizes([250,850,250])
+            app.processEvents()
+            television=window.media.tv
+            television.display.hide()
+            host=NativeTvHost(television)
+            host.setMinimumHeight(230)
+            television.layout_.insertWidget(3,host,1)
+            host.show()
+            window.media_scroll.ensureWidgetVisible(host,0,0)
+            app.processEvents()
+            qt_parent=int(host.winId())
+            if not qt_parent:
+                raise AssertionError("Real television tile did not expose a native Qt parent")
+            events=[]
+            process=QProcess(host)
+            process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+            process.readyReadStandardOutput.connect(lambda:host._consume(process))
+            process.errorOccurred.connect(lambda error:host._failed(process,error))
+            process.finished.connect(lambda code,state:host._finished(process,code))
+            host.status_received.connect(events.append)
+            host._process=process
+            timer=QTimer(window)
+            timer.setInterval(16)
+            timer.timeout.connect(lambda:heartbeat.append(time.perf_counter()))
+            timer.start()
+            process.start(str(helper),["--probe-embed",str(qt_parent)])
+            deadline=time.monotonic()+18
+            while time.monotonic()<deadline:
+                app.processEvents()
+                if any(e.get("type")=="error" for e in events):
+                    raise AssertionError("Real video tile attach error: "+repr(events))
+                if any(e.get("type")=="embed_probe_ready" for e in events):
+                    break
+                if process.state()==QProcess.ProcessState.NotRunning:
+                    raise RuntimeError("In-app child exited: "+repr(events))
+                QTest.qWait(40)
+            else:
+                raise TimeoutError("In-app WebView2 did not become ready")
+
+            def visible_marker(label):
+                window.media_scroll.ensureWidgetVisible(host,0,0)
+                host._window_container.show()
+                QTest.qWait(350)
+                app.processEvents()
+                viewport=window.media_scroll.viewport()
+                surface=QRect(host.mapToGlobal(QPoint(0,0)),host.size())
+                clip=QRect(viewport.mapToGlobal(QPoint(0,0)),viewport.size())
+                visible=surface.intersected(clip).intersected(
+                    QRect(window.mapToGlobal(QPoint(0,0)),window.size()))
+                if not host.isVisible() or visible.width()<80 or visible.height()<60:
+                    raise AssertionError(f"{label}: video clipped out of real scroll viewport: {visible}")
+                screen=host.screen()
+                image=screen.grabWindow(0).toImage()
+                if image.isNull():
+                    raise RuntimeError("Windows desktop image unavailable")
+                ratios=[(.2,.2),(.5,.2),(.5,.5),(.8,.5),(.8,.8)]
+                pixels=[]
+                matches=0
+                for fx,fy in ratios:
+                    x=int(visible.x()+visible.width()*fx-screen.geometry().x())
+                    y=int(visible.y()+visible.height()*fy-screen.geometry().y())
+                    if x<0 or y<0 or x>=image.width() or y>=image.height():
+                        raise AssertionError(f"{label}: sampling coordinate outside desktop")
+                    color=image.pixelColor(x,y)
+                    rgb=[color.red(),color.green(),color.blue()]
+                    pixels.append(rgb)
+                    matches+=max(abs(v-w) for v,w in zip(rgb,(242,26,154)))<=30
+                if matches<3:
+                    raise AssertionError(f"{label}: blank/clipped in-app media surface: {pixels}")
+                return {"case":label,"visible_rect":[visible.x(),visible.y(),visible.width(),visible.height()],
+                        "samples":pixels,"matching_pixels":matches}
+
+            result["cases"]=[visible_marker("initial_1440x940")]
+            window.open_page(1)
+            app.processEvents()
+            if host.isVisible():
+                raise AssertionError("Switching away left native video visible on another tab")
+            window.open_page(0)
+            result["cases"].append(visible_marker("returned_to_monitor"))
+            window.resize(960,640)
+            result["cases"].append(visible_marker("resized_960x640"))
+            window.resize(1440,940)
+            result["cases"].append(visible_marker("resized_1440x940"))
+            user32=ctypes.WinDLL("user32",use_last_error=True)
+            user32.GetParent.argtypes=(ctypes.c_void_p,)
+            user32.GetParent.restype=ctypes.c_void_p
+            actual=int(user32.GetParent(ctypes.c_void_p(host._child_window)) or 0)
+            target=int(host._window_container.winId())
+            if actual!=target:
+                raise AssertionError("In-app WebView2 is not parented to exact Qt container")
+            gaps=[b-a for a,b in zip(heartbeat,heartbeat[1:])]
+            result.update({"qt_container_hwnd":target,"native_parent":actual,
+                           "max_heartbeat_gap_ms":round(max(gaps,default=0)*1000,1),
+                           "heartbeat_ticks":len(heartbeat),"passed":True})
+            print(json.dumps(result,sort_keys=True))
+            return 0
+        finally:
+            if not result.get("passed"):
+                print(json.dumps(dict(result,passed=False),sort_keys=True))
+            if timer is not None:timer.stop()
+            if host is not None:host.stop()
+            if process is not None and process.state()!=QProcess.ProcessState.NotRunning:
+                if not process.waitForFinished(4000):
+                    process.kill()
+                    process.waitForFinished(1000)
+            if window is not None:
+                window.media.shutdown()
+                window._force_close=True
+                window.close()
+                app.processEvents()
+            controller.close()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: python -m scripts.issue82_native_embed_probe <GlobalPulse.TV.exe>")
+    if len(sys.argv)==3 and sys.argv[1]=="--inapp":
+        sys.exit(run_in_app(Path(sys.argv[2])))
+    if len(sys.argv)!=2:
+        sys.exit("usage: python -m scripts.issue82_native_embed_probe [--inapp] <GlobalPulse.TV.exe>")
     sys.exit(run(Path(sys.argv[1])))
