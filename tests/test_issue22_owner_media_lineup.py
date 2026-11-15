@@ -103,22 +103,41 @@ def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatc
 
 
 def test_sdr_scan_steps_bounded_range_and_stops(app,monkeypatch):
+    """Advance only on page completion; never cancel a pending WebSDR load.
+
+    This remains a bounded *offline* scan test: synthetic load completion is
+    not evidence of provider connectivity or any audio/video playback.
+    """
     panel=RadioPanel(confirm=lambda:False)
     tuned=[]
     try:
-        monkeypatch.setattr(panel,"tune_receiver",lambda frequency=None:(tuned.append(float(frequency)) or True))
+        def fake_tune(frequency=None):
+            tuned.append(float(frequency))
+            panel.receiver_connected=True
+            panel._sdr_state_change("CONNECTING", "Synthetic receiver page pending")
+            return True
+        monkeypatch.setattr(panel,"tune_receiver",fake_tune)
         panel.scan_start.setText("7000")
         panel.scan_end_edit.setText("7010")
         panel.scan_step_edit.setText("5")
         panel.scan_dwell.setText("1")
         assert panel.start_scan()
         assert tuned==[7000.0]
-        panel._scan_next();panel._scan_next();panel._scan_next()
+        panel._scan_next()  # A slow page must not be interrupted by dwell.
+        assert tuned==[7000.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
         assert tuned==[7000.0,7005.0,7010.0]
+        panel._sdr_state_change("ON","Synthetic final page completed; audio unverified")
+        panel._scan_next()
         assert not panel.scan_timer.isActive()
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
-
 
 @pytest.mark.parametrize("bad",[
     "http://receiver.example.org/",
