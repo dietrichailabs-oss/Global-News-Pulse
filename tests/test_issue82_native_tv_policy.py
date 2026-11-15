@@ -6,8 +6,11 @@ Neither test proves a real YouTube frame, which still needs owner acceptance.
 from __future__ import annotations
 
 import inspect
+import sys
 from pathlib import Path
 
+from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 from global_pulse.media_widget import youtube_player_navigation
 from global_pulse.native_tv import NativeTvHost
 from global_pulse.single_media import Television
@@ -36,6 +39,7 @@ def test_native_windows_process_only_launches_after_existing_consent_gate():
         assert body.index("QMessageBox.question") < body.index("_begin_native_player")
     assert "return False" in inspect.getsource(NativeTvHost.play)
     assert ".waitForFinished(" not in inspect.getsource(NativeTvHost.stop)
+    assert "watchdog=QTimer(process)" in inspect.getsource(NativeTvHost.stop)
 
 
 def test_webview2_source_installs_resource_and_permission_guards_before_navigate():
@@ -56,3 +60,31 @@ def test_webview2_source_installs_resource_and_permission_guards_before_navigate
     assert source.index("DownloadStarting +=") < source.index("NavigateWithWebResourceRequest")
     assert 'if (offlineProbe)' in source
     assert 'network = "none"' in source
+    assert 'web.IsMuted = desiredMuted;' in source
+    assert source.index('web.IsMuted = desiredMuted;') < source.index('NavigateWithWebResourceRequest(request)')
+    assert 'SetAudio(muted, null)' in source
+    assert 'SetAudio(null, volume)' in source
+    assert 'private int desiredVolume = 60;' in source
+    assert 'v.volume=' in source and 'v.muted=' in source
+    assert 'FrameAllowed(e.Uri,videoId,fullWatch)' in source
+    assert 'PolicySelfTest()' in source
+    assert 'CleanupPrivateProfileAfterExit()' in source
+
+
+def test_native_host_quick_stop_restarts_leave_no_stale_watchdog(monkeypatch):
+    # The helper is represented by the local interpreter with impossible CLI
+    # arguments, so it exits promptly. No network, video or native TV backend.
+    # This exercises QProcess ownership and watchdog callbacks on real Qt.
+    qt_app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(NativeTvHost, "executable", staticmethod(lambda: Path(sys.executable)))
+    host=NativeTvHost()
+    host.resize(320, 180)
+    host.show()
+    for _ in range(12):
+        assert host.play("YE7VzlLtp-4")
+        host.stop()
+        qt_app.processEvents()
+    QTest.qWait(3100)
+    qt_app.processEvents()
+    assert host._process is None
+    host.close()
