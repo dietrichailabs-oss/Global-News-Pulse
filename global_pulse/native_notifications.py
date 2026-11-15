@@ -7,7 +7,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QTimer, Signal, Slot
 
 from .security import event_id, redact
 
@@ -121,7 +121,10 @@ class NativeNotifications(QObject):
             except (ValueError, KeyError, TypeError, AttributeError):
                 self._status("Invalid notification-helper response")
 
+    @Slot(dict, str)
     def notify(self, event, reason):
+        # Controller.native_alert may be emitted by a GPCollect worker.
+        # QObject @Slot routes the queue/QProcess interaction to GUI thread.
         if not isinstance(event, dict) or not isinstance(event.get("id"), str):
             raise ValueError("Invalid notification event")
         identifier = event_id(event["id"])
