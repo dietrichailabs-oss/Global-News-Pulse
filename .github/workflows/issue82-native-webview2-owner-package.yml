@@ -55,6 +55,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          # Pull-request events otherwise test GitHub's synthetic merge with
+          # newer base-only commits, defeating the frozen-product diff gate.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Verify exact frozen PR108 product and workflow-only owner packaging
         run: |
