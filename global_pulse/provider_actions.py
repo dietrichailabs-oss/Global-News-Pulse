@@ -82,6 +82,17 @@ def build_sources(window):
     window.pages.addWidget(panel)
 
 
+def _catalog_fingerprint(catalog):
+    """Capture immutable provider metadata, not references to mutable dicts.
+
+    Status polling never changes catalog metadata, so frequent updates reuse
+    all widgets. Any same-ID access/URL/adapter/name change rebuilds actions,
+    provider links and UserRole metadata before they can become misleading.
+    """
+    return tuple(tuple(sorted((str(key), repr(value)) for key, value in source.items()))
+                 for source in catalog)
+
+
 def _existing_source_rows(table):
     """Reuse cells and controls across live status pulses, even after sorting."""
     rows = {}
@@ -103,7 +114,9 @@ def populate_sources(window):
     enabled = _effective(window)
     catalog = list(window.controller.catalog)
     old_rows = _existing_source_rows(table)
-    reuse = bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
+    fingerprint = _catalog_fingerprint(catalog)
+    reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
+             and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
     blocked = table.blockSignals(True)
     sorting = table.isSortingEnabled()
     selected_row = None
@@ -177,6 +190,7 @@ def populate_sources(window):
         if window.source_summary.text() != summary:
             window.source_summary.setText(summary)
         if not reuse:
+            window._source_registry_fingerprint = fingerprint
             if selected_row is not None:
                 table.selectRow(selected_row)
             else:
