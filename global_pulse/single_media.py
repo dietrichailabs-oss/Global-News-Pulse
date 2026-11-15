@@ -21,19 +21,26 @@ class Television(_MediaTile):
         self._requested=False
         self._last_time=None
         self._progress_at=0.0
+        self._player_loaded=False
+        self._had_playback=False
+        self._player_signal_connected=False
+        self._last_decode_info=""
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
         self.selector.setAccessibleName("Television channel or saved video")
         for control in self.findChildren(QPushButton):
-            if control.text()=="Source ↗":control.hide()
+            if control.text()=="Source ↗":
+                control.setText("Open on YouTube")
+                control.setToolTip("Open the selected official video in your browser if embedding fails")
         self._poll_timer=QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._poll)
         self._poll_pending=False
         self.tv_status=QLabel("OFF")
         self.tv_status.setTextFormat(Qt.TextFormat.PlainText)
-        self.layout_.addWidget(self.tv_status)
+        # Keep status above the large video surface, visible without scrolling.
+        self.layout_.insertWidget(2,self.tv_status)
         row=QHBoxLayout()
         self.volume=QSlider(Qt.Orientation.Horizontal);self.volume.setRange(0,100);self.volume.setValue(60)
         self.volume.setAccessibleName("Television volume")
@@ -46,7 +53,21 @@ class Television(_MediaTile):
         self.video_url=QLineEdit();self.video_url.setPlaceholderText("Your YouTube video URL (not a channel page)")
         self.video_url.setAccessibleName("Add a specific YouTube video")
         save=QPushButton("Add video");save.clicked.connect(self.add_video)
-        add.addWidget(self.video_url,1);add.addWidget(save);self.layout_.addLayout(add)
+        test_clip=QPushButton("Test TV player")
+        test_clip.setAccessibleName("Try one official Blender Creative Commons test video inside Pulse")
+        test_clip.clicked.connect(self.test_tv_player)
+        owner_clip=QPushButton("Test your video")
+        owner_clip.setAccessibleName("Test owner-provided YouTube video b0ZhJhN_Sn8 in Pulse")
+        owner_clip.clicked.connect(self.test_owner_video)
+        add.addWidget(self.video_url,1);add.addWidget(save)
+        add.addWidget(test_clip);add.addWidget(owner_clip)
+        self.layout_.addLayout(add)
+        self.full_watch_button=QPushButton("Try YouTube watch page in Pulse")
+        self.full_watch_button.setAccessibleName(
+            "Try the selected video in YouTube's normal watch page, with consent"
+        )
+        self.full_watch_button.clicked.connect(self.watch_full_page)
+        self.layout_.addWidget(self.full_watch_button)
         self._saved=[]
         self._builtins=[]
         self._test_candidates=[]
@@ -137,6 +158,64 @@ class Television(_MediaTile):
             self.note.setText("Video was not saved; previous selections are unchanged.");return False
         self._saved=updated;self._populate_channels();self.video_url.clear();return True
 
+    def test_tv_player(self):
+        """Opt-in reproducible YouTube embed test, not a purported live channel.
+
+        Blender Foundation's Creative Commons Big Buck Bunny video is an
+        independently identifiable fixed video, not a rotating news livestream.
+        Selecting it is a user gesture; Watch still requests explicit consent.
+        """
+        test_url="https://www.youtube.com/watch?v=YE7VzlLtp-4"
+        self.video_url.setText(test_url)
+        if not self.add_video():
+            self.tv_status.setText("ERROR · cannot select test video")
+            return False
+        for index in range(self.selector.count()):
+            item=self.selector.itemData(index) or {}
+            if youtube_id(item.get("url",""))=="YE7VzlLtp-4":
+                self.selector.setCurrentIndex(index)
+                self.tv_status.setText("TEST READY · Blender video, not live news")
+                self.note.setText("Fixed official Blender video selected · press Play after consent")
+                self.watch()
+                return True
+        self.tv_status.setText("ERROR · test video not found")
+        return False
+
+    def test_owner_video(self):
+        """Opt-in owner-supplied exact YouTube video ID; availability unverified.
+
+        Not a reviewed 24/7 news channel or evidence of a playable embed.
+        Official player and user-consent path remain unchanged.
+        """
+        test_url="https://www.youtube.com/watch?v=b0ZhJhN_Sn8"
+        self.video_url.setText(test_url)
+        if not self.add_video():
+            self.tv_status.setText("ERROR · cannot select owner test video")
+            return False
+        for index in range(self.selector.count()):
+            item=self.selector.itemData(index) or {}
+            if youtube_id(item.get("url",""))=="b0ZhJhN_Sn8":
+                self.selector.setCurrentIndex(index)
+                self.tv_status.setText("OWNER TEST READY · video availability unverified")
+                self.note.setText("Your supplied YouTube video · in-app playback requires consent and Play")
+                self.watch()
+                return True
+        self.tv_status.setText("ERROR · owner test video missing")
+        return False
+
+    def _tv_load_finished(self, ok):
+        """Top-level browser navigation is not evidence of video playback."""
+        if not self._requested:
+            return
+        self._player_loaded=bool(ok)
+        if not ok:
+            self.stop()
+            self.tv_status.setText("ERROR · YouTube page could not load")
+            self.note.setText("In-app YouTube page load failed · try Open on YouTube")
+        else:
+            self.tv_status.setText("PAGE LOADED · video NOT verified")
+            self.note.setText("YouTube web page loaded; that does not prove the video is available. Click Play inside the video.")
+
     def _populate_channels(self):
         self.media=[]
         self.catalog=list(getattr(self,"_builtins",[]))+list(getattr(self,"_test_candidates",[]))+[
@@ -152,7 +231,8 @@ class Television(_MediaTile):
 
     def watch(self):
         import os
-        video=youtube_id(self._current().get("url",""))
+        item=self._current()
+        video=youtube_id(item.get("url",""))
         if not video:
             self.note.setText("Select a verified channel or add a specific supported video.");return
         consent=QMessageBox.question(self,"Connect to YouTube?",
@@ -167,55 +247,223 @@ class Television(_MediaTile):
             self.stop()
             self._ensure_player()
             from PySide6.QtWebEngineCore import QWebEngineHttpRequest
-            request=QWebEngineHttpRequest(QUrl(f"https://www.youtube-nocookie.com/embed/{video}?autoplay=0&mute=1&playsinline=1"))
+            request=QWebEngineHttpRequest(QUrl(f"https://www.youtube.com/embed/{video}?autoplay=0&mute=1&playsinline=1"))
+            # A desktop WebView needs an explicit identifying Referer for
+            # YouTube playback (error 153 otherwise). This is the real
+            # product publisher domain, not a spoofed third-party origin.
             request.setHeader(b"Referer",b"https://www.dietrichailabs.com/")
             self.mute.setChecked(True)
+            if not self._player_signal_connected:
+                self.view.loadFinished.connect(self._tv_load_finished)
+                self.view.renderProcessTerminated.connect(
+                    self._renderer_terminated
+                )
+                self._player_signal_connected=True
+            self._begin_observation()
+            page=self.view.page()
+            page.allowed_video_id=video
+            page.full_watch_mode=False
             self.view.load(request);self.view.show();self.display.hide()
             if item.get("owner_test_candidate"):
                 self.note.setText("OWNER TEST CANDIDATE · official embedded player · if playback reaches PLAYING, report the channel so it can be promoted to verified.")
             else:
                 self.note.setText("Official embedded player · press Play · initially muted")
-            self._begin_observation()
         except (ImportError,RuntimeError,ValueError):
             self.stop();self.tv_status.setText("ERROR")
             self.note.setText("The sandboxed embedded player could not start. No external website was opened.")
 
+    def watch_full_page(self):
+        """Load the selected official YouTube watch URL, not a stream mirror.
+
+        Explicit consent, one exact video ID and strict mainframe/third-party
+        origin policy remain. This offers YouTube's own normal player inside
+        the app where iframe embedding is unavailable, without autoplay.
+        """
+        import os
+        video=youtube_id(self._current().get("url",""))
+        if not video:
+            self.note.setText("Select an exact YouTube video first.")
+            return False
+        approved=QMessageBox.question(
+            self,"Try official YouTube watch page inside Pulse?",
+            "Open the selected video on YouTube's normal watch page inside "
+            "Pulse? YouTube receives your IP address and player requests. "
+            "Only this exact video may navigate; other videos, sign-in pages, "
+            "downloads and popups remain blocked. Press Play yourself; "
+            "availability depends on YouTube and the publisher. Continue?",
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )==QMessageBox.StandardButton.Yes
+        if not approved:
+            return False
+        try:
+            if (os.environ.get("QTWEBENGINE_DISABLE_SANDBOX","").lower()
+                not in {"","0","false"}
+                or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS","")):
+                raise RuntimeError("Chromium sandbox is required")
+            if hasattr(os,"geteuid") and os.geteuid()==0:
+                raise RuntimeError("Standard user session required")
+            self.stop()
+            self._ensure_player()
+            if not self._player_signal_connected:
+                self.view.loadFinished.connect(self._tv_load_finished)
+                self.view.renderProcessTerminated.connect(
+                    self._renderer_terminated
+                )
+                self._player_signal_connected=True
+            self.view.page().allowed_video_id=video
+            self.view.page().full_watch_mode=True
+            self.mute.setChecked(True)
+            self._begin_observation()
+            self.view.load(QUrl("https://www.youtube.com/watch?v="+video))
+            self.view.show()
+            self.display.hide()
+            self.tv_status.setText("OFFICIAL WATCH PAGE · video not verified")
+            self.note.setText(
+                "Normal YouTube player opened inside Pulse. "
+                "Use Play there; only advancing video proves playback."
+            )
+            return True
+        except (ImportError,RuntimeError,ValueError,OSError):
+            self.stop()
+            self.tv_status.setText("ERROR · official watch page unavailable")
+            self.note.setText(
+                "YouTube watch page could not start inside Pulse. "
+                "Use Open on YouTube in your regular browser."
+            )
+            return False
+
     def _begin_observation(self):
         self._generation+=1;self._requested=True;self._poll_pending=False;self._last_time=None
-        self._progress_at=time.monotonic();self.tv_status.setText("CONNECTING")
+        self._progress_at=time.monotonic()
+        self._player_loaded=False
+        self._had_playback=False
+        self._last_decode_info=""
+        self.tv_status.setText("CONNECTING · YouTube player")
         self._poll_timer.start()
         self.view.page().setAudioMuted(self.mute.isChecked())
+
+    def _renderer_terminated(self, status, exit_code):
+        """Distinguish WebEngine renderer failure from an ordinary black video."""
+        if not self._requested:
+            return
+        # Qt enum and numeric code are runtime diagnostics, not source URLs.
+        self.stop()
+        self.tv_status.setText("RENDERER EXITED · video unavailable")
+        self.note.setText(
+            "The embedded Chromium render process ended. This is a player "
+            "failure, not a valid playing news stream. Try the normal "
+            "YouTube browser link or inspect Windows graphics/Qt codecs."
+        )
+
+    @staticmethod
+    def _media_diagnostics(value):
+        """Safe codec/element summary from read-only YouTube page properties."""
+        if not isinstance(value,dict):
+            return ""
+        codecs=value.get("codecs") or {}
+        if not isinstance(codecs,dict):
+            codecs={}
+        def codec(name):
+            raw=str(codecs.get(name) or "").lower()
+            return raw if raw in {"probably","maybe"} else "not reported"
+        parts=[
+            "Decoder: H.264 "+codec("h264")+
+            ", VP9 "+codec("vp9")+
+            ", AV1 "+codec("av1")
+        ]
+        if value.get("missing"):
+            parts.append("YouTube video element missing")
+        elif "video_width" in value:
+            width=value.get("video_width",0)
+            height=value.get("video_height",0)
+            parts.append(
+                "video dimensions "+str(width)+"×"+str(height)
+            )
+            parts.append("network state "+str(value.get("network", "?")))
+            parts.append("ready state "+str(value.get("ready", "?")))
+            if value.get("frames") is not None:
+                parts.append("decoded frames "+str(value["frames"]))
+            if value.get("controls_visible") is False:
+                parts.append("YouTube controls hidden")
+        return " · ".join(parts)[:320]
 
     def _poll(self):
         if not self._requested or not self.view:return
         if time.monotonic()-self._progress_at>45:
             self.stop();self.tv_status.setText("ERROR")
-            self.note.setText("No in-app playback progress. This video may be unavailable, blocked for embedding, or waiting for Play. Connection stopped.")
+            self.note.setText("No video progress in Pulse. Check embed permissions or use Open on YouTube. Connection stopped.")
             return
         # A lost JavaScript reply must not disable the independent deadline.
         if self._poll_pending:return
         self._poll_pending=True;generation=self._generation
-        script="""(()=>{const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error:!!v.error}:{missing:true};})()"""
+        # YouTube can successfully load its embed shell while reporting
+        # "Video unavailable" for a rotated/ended livestream. Read only the
+        # provider's displayed error element, never arbitrary page content.
+        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap,.ytp-error,.ytp-error-message');const probe=document.createElement('video');const codecs={h264:probe.canPlayType('video/mp4; codecs="avc1.42E01E,mp4a.40.2"'),vp9:probe.canPlayType('video/webm; codecs="vp9,opus"'),av1:probe.canPlayType('video/webm; codecs="av01.0.08M.08"')};const chrome=document.querySelector('.ytp-chrome-bottom');const controls_visible=chrome?getComputedStyle(chrome).visibility!=='hidden'&&getComputedStyle(chrome).display!=='none':false;if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250),codecs};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error_code:v.error?v.error.code:0,video_width:v.videoWidth,video_height:v.videoHeight,frames:v.getVideoPlaybackQuality?v.getVideoPlaybackQuality().totalVideoFrames:null,network:v.networkState,controls_visible,codecs}:{missing:true,controls_visible,codecs};})()"""
         self.view.page().runJavaScript(script,lambda value,g=generation:self._observed(g,value))
 
     def _observed(self,generation,value):
         if generation!=self._generation or not self._requested:return
         self._poll_pending=False
+        summary=self._media_diagnostics(value)
+        if summary and summary!=self._last_decode_info:
+            self._last_decode_info=summary
+            self.note.setText(summary+" · Picture/audio not yet proven")
+        if isinstance(value,dict) and value.get("provider_error"):
+            # A displayed provider error is stronger evidence than loadFinished.
+            # Never treat a dead live-video recording as a playing channel.
+            message=str(value["provider_error"])[:200]
+            self.stop()
+            self.tv_status.setText("UNAVAILABLE · YouTube video/embedding")
+            self.note.setText(
+                message + " · Try YouTube watch page in Pulse or "
+                "Open on YouTube, or select another exact video."
+            )
+            return
         if not isinstance(value,dict) or value.get("missing"):
-            self.tv_status.setText("PLAYER LOADING");return
-        if value.get("error"):
-            self.stop();self.tv_status.setText("ERROR");self.note.setText("The embedded video reported a playback error; connection stopped.");return
+            self.tv_status.setText(
+                "PAGE LOADED · no video confirmed" if self._player_loaded
+                else "PAGE LOADING"
+            )
+            return
+        error_code=value.get("error_code") or (3 if value.get("error") else 0)
+        if error_code:
+            self.stop()
+            reason={1:"aborted",2:"network",3:"decoder",4:"unsupported media"}
+            self.tv_status.setText(
+                "VIDEO ERROR · "+reason.get(error_code,"unknown")
+            )
+            self.note.setText(
+                "The YouTube HTMLMediaElement reported error code " +
+                str(error_code) +
+                ". Provider restrictions, missing Qt codecs or graphics "
+                "rendering may be involved. Try the official browser page."
+            )
+            return
         current=value.get("time")
         if isinstance(current,bool) or not isinstance(current,(int,float)) or not math.isfinite(current):return
         if value.get("ended"):
             self.stop();self.tv_status.setText("ENDED");return
         if value.get("paused"):
-            self.tv_status.setText("PAUSED · use Play in the official player")
-            self._progress_at=time.monotonic()
+            self.tv_status.setText("PAUSED · press Play in video")
+            # Do not reset the never-played deadline on every paused poll:
+            # the old implementation could wait forever on a dead embed.
+            if self._had_playback:
+                self._progress_at=time.monotonic()
         elif value.get("ready",0)<2:
-            self.tv_status.setText("BUFFERING")
+            self.tv_status.setText("BUFFERING · no decoded frame yet")
+        elif (value.get("video_width")==0 or value.get("video_height")==0 or
+              (value.get("frames") == 0 and current > 2.0)):
+            self.tv_status.setText("NO DECODED FRAMES · black video suspected")
         elif self._last_time is not None and current>self._last_time:
-            self.tv_status.setText("PLAYING");self._progress_at=time.monotonic()
+            self._had_playback=True
+            self.tv_status.setText("VIDEO TIME ADVANCING · picture unverified")
+            self.note.setText(
+                "Video clock is advancing. Audio and displayed picture are "
+                "NOT confirmed by this measurement. "+(summary or "")
+            )
+            self._progress_at=time.monotonic()
         self._last_time=current
 
     def _volume(self,value):
@@ -229,6 +477,8 @@ class Television(_MediaTile):
         self._generation=getattr(self,"_generation",0)+1
         self._requested=False;self._poll_pending=False
         if self._poll_timer:self._poll_timer.stop()
+        self._player_loaded=False
+        self._had_playback=False
         super().stop()
         if hasattr(self,"tv_status"):self.tv_status.setText("OFF")
 

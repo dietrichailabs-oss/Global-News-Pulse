@@ -32,6 +32,30 @@ def youtube_id(url):
     return candidate if VIDEO_ID.fullmatch(candidate) else None
 
 
+def youtube_player_navigation(url, video_id, *, full_watch=False):
+    """Permit only the explicitly selected official YouTube video main frame.
+
+    Main-frame links to other videos, channel navigation, redirects to login,
+    and non-YouTube sites are never approved by the in-app viewer.
+    """
+    if not isinstance(video_id,str) or not VIDEO_ID.fullmatch(video_id):
+        return False
+    try:
+        parsed=urlsplit(safe_url(url))
+    except (TypeError,ValueError):
+        return False
+    host=(parsed.hostname or "").lower()
+    if (host in {"www.youtube.com","youtube.com",
+                 "www.youtube-nocookie.com","youtube-nocookie.com"}
+            and parsed.path=="/embed/"+video_id):
+        return True
+    return bool(
+        full_watch and host in {"www.youtube.com","youtube.com"}
+        and parsed.path=="/watch"
+        and parse_qs(parsed.query).get("v",[""])[0]==video_id
+    )
+
+
 def media_identity(item):
     """Keep separate tuned stations even when they share one public receiver URL."""
     url = str(item.get("url", item.get("original_url", "")))
@@ -364,14 +388,40 @@ class _MediaTile(QFrame):
                 if url.scheme() in {"about", "data", "blob"}:
                     return
                 host = url.host().lower()
-                allowed = ("youtube-nocookie.com", "youtube.com", "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com")
-                info.block(url.scheme() != "https" or url.port(443) != 443 or not any(host == x or host.endswith("." + x) for x in allowed))
+                # Embedded YouTube players load their API, media, thumbnails and
+                # provider-served ads across separate Google-owned domains.
+                # The old five-domain gate blocked required YouTube API calls,
+                # leaving a player shell that could never start video.
+                # Restrict to explicit provider families AFTER user consent;
+                # main-frame navigation remains locked to /embed/ below.
+                allowed = (
+                    "youtube-nocookie.com", "youtube.com", "youtubei.googleapis.com",
+                    "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com",
+                    "googleapis.com", "google.com", "googleusercontent.com",
+                    "gvt1.com", "gvt2.com", "doubleclick.net",
+                    "googlesyndication.com", "googleadservices.com",
+                )
+                info.block(
+                    url.scheme() != "https" or url.port(443) != 443
+                    or not any(host == x or host.endswith("." + x) for x in allowed)
+                )
 
         class Page(QWebEnginePage):
+            allowed_video_id=""
+            full_watch_mode=False
+
             def createWindow(self, _):
                 return None
+
             def acceptNavigationRequest(self, url, kind, main):
-                return url.scheme() == "about" or (url.scheme() == "https" and url.host() in {"www.youtube-nocookie.com", "www.youtube.com"} and url.path().startswith("/embed/")) or not main
+                if not main:
+                    return True  # Resource interceptor still restricts hosts
+                if url.scheme()=="about":
+                    return True
+                return youtube_player_navigation(
+                    url.toString(),self.allowed_video_id,
+                    full_watch=self.full_watch_mode
+                )
 
         self.profile = QWebEngineProfile(self)
         self.profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)

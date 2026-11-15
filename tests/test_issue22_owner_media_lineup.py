@@ -20,15 +20,15 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_direct_radio_lineup_is_expanded_and_documented():
-    assert len(STATIONS) >= 9
+def test_direct_radio_lineup_is_news_talk_only_and_documented():
     ids={item["id"] for item in STATIONS}
-    assert {"wnyc_fm","wnyc_am","wqxr","new_sounds","operavore",
-            "deutschlandfunk","deutschlandfunk_kultur",
-            "deutschlandfunk_nova","deutschlandfunk_debatten"} <= ids
+    assert ids=={"wnyc_fm","wnyc_am","deutschlandfunk",
+                 "deutschlandfunk_nova","deutschlandfunk_debatten"}
+    assert not {"wqxr","new_sounds","operavore","deutschlandfunk_kultur"} & ids
     for item in STATIONS:
         assert item["url"].startswith("https://")
         assert item["documentation"].startswith("https://")
+        assert "News" in item["language"]
 
 
 def test_ham_sdr_receiver_directories_are_visible_without_starting_audio(app):
@@ -73,7 +73,7 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
         panel.receiver_url.setText("https://receiver.example.org/")
         assert panel.connect_receiver()
         assert panel.receiver_connected
-        assert fake.loaded==["https://receiver.example.org/"]
+        assert fake.loaded==["https://receiver.example.org/?f=7100usb&vol=40"]
         assert fake.shown
 
         panel.disconnect_receiver()
@@ -83,6 +83,61 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
 
+
+def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatch):
+    panel=RadioPanel(confirm=lambda:False)
+    try:
+        panel.receiver_url.setText("https://receiver.example.org/rx")
+        panel.frequency.setText("14200.5")
+        panel.mode.setCurrentIndex(panel.mode.findData("usb"))
+        kiwi,host=panel._tuned_receiver_url()
+        assert host=="receiver.example.org"
+        assert kiwi=="https://receiver.example.org/rx?f=14200.5usb&vol=40"
+
+        panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
+        panel.mode.setCurrentIndex(panel.mode.findData("lsb"))
+        websdr,_=panel._tuned_receiver_url("7200")
+        assert websdr=="https://receiver.example.org/rx?tune=7200lsb"
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_sdr_scan_steps_bounded_range_and_stops(app,monkeypatch):
+    """Advance only on page completion; never cancel a pending WebSDR load.
+
+    This remains a bounded *offline* scan test: synthetic load completion is
+    not evidence of provider connectivity or any audio/video playback.
+    """
+    panel=RadioPanel(confirm=lambda:False)
+    tuned=[]
+    try:
+        def fake_tune(frequency=None):
+            tuned.append(float(frequency))
+            panel.receiver_connected=True
+            panel._sdr_state_change("CONNECTING", "Synthetic receiver page pending")
+            return True
+        monkeypatch.setattr(panel,"tune_receiver",fake_tune)
+        panel.scan_start.setText("7000")
+        panel.scan_end_edit.setText("7010")
+        panel.scan_step_edit.setText("5")
+        panel.scan_dwell.setText("1")
+        assert panel.start_scan()
+        assert tuned==[7000.0]
+        panel._scan_next()  # A slow page must not be interrupted by dwell.
+        assert tuned==[7000.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0,7010.0]
+        panel._sdr_state_change("ON","Synthetic final page completed; audio unverified")
+        panel._scan_next()
+        assert not panel.scan_timer.isActive()
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
 
 @pytest.mark.parametrize("bad",[
     "http://receiver.example.org/",

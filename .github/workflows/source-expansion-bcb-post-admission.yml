@@ -1,0 +1,92 @@
+name: Source Expansion - BCB Brazil Atom Post-Admission Provenance and Live
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-bcb-post-admission.yml
+      - global_pulse/resources/sources.json
+      - tests/test_source_expansion_bcb.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bcb-post-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned feed parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact-catalog offline Atom parser and publisher origin regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_source_expansion_bcb.py tests/test_issue22_publisher_origin_group.py tests/test_source_expansion_mid.py
+      - name: Fresh direct BCB Atom release-date, provenance and rights admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,re,time
+          from datetime import datetime,timezone,timedelta
+          from urllib.parse import urlsplit
+          from global_pulse.sources import load_catalog,Collector,timestamp
+          ids=["br_bcb_press","br_bcb_news","br_bcb_acts","br_bcb_focus"]
+          catalog={s["id"]:s for s in load_catalog()}
+          assert len({catalog[i]["publisher_origin_id"] for i in ids})==1
+          assert {catalog[i]["publisher_origin_id"] for i in ids}=={"br_bcb"}
+          now=datetime.now(timezone.utc).timestamp()
+          failures=[]
+          for i,sid in enumerate(ids):
+              if i: time.sleep(3)
+              s=catalog[sid]
+              assert s["enabled"] and s["metadata_only"] and s["updated_is_publication_time"]
+              assert s["access_status"]=="reviewed_public" and s["authentication"]=="None"
+              assert s["license_url"] and s["attribution"] and s["feed_documentation"]
+              assert s["min_interval"]>=3600 and s["retention_days"]<=180
+              d=Collector(s).collect(); st=d["state"]; reports=d["reports"]
+              recent=[r for r in reports if r.get("published_at") and 0<=now-timestamp(r["published_at"])<=30*86400]
+              violations=[r for r in reports if not r.get("title")
+                  or not r.get("published_at") or not r.get("source_updated_at")
+                  or r.get("published_at")!=r.get("source_updated_at")
+                  or not r.get("attribution") or r.get("summary") or r.get("media")
+                  or r.get("origin_id")!="br_bcb" or r.get("country_basis")!="publisher_coverage"
+                  or r.get("latitude") is not None or r.get("longitude") is not None
+                  or urlsplit(r.get("url","")).scheme!="https"
+                  or urlsplit(r.get("url","")).hostname not in s["article_domains"]]
+              # Focus report URLs embed DDMMYYYY. Compare it against the issuer's
+              # Atom update date in Brazil (-03:00) as an extra independent check.
+              focus_mismatches=[]
+              if sid=="br_bcb_focus":
+                  for r in reports:
+                      match=re.search(r"/focus/(\d{2})(\d{2})(\d{4})$",urlsplit(r.get("url","")).path)
+                      if not match: focus_mismatches.append("missing-link-date"); continue
+                      d,m,y=map(int,match.groups())
+                      observed=(datetime.fromisoformat(r["published_at"].replace("Z","+00:00"))-timedelta(hours=3)).date()
+                      if observed!=datetime(y,m,d).date(): focus_mismatches.append(r["url"])
+              passed=bool(st.get("status")=="available" and st.get("http_status")==200
+                  and reports and recent and not violations and not focus_mismatches)
+              print("BCB_CATALOG_POST_ADMISSION",json.dumps(dict(
+                  id=sid,passed=passed,status=st.get("status"),http_status=st.get("http_status"),
+                  reports=len(reports),recent_30d=len(recent),latest=st.get("latest_publication"),
+                  origin=s["publisher_origin_id"],violations=len(violations),
+                  focus_date_mismatches=len(focus_mismatches),error=st.get("error","")),sort_keys=True),flush=True)
+              if not passed: failures.append(sid)
+          if failures: raise SystemExit("BCB_POST_ADMISSION_FAILED:"+",".join(failures))
+          print("BCB_FOUR_FEEDS_POST_ADMISSION_PASS",flush=True)
+          PY

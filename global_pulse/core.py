@@ -253,7 +253,9 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     elif result["geo_precision"] not in {"exact", "approximate", "regional", "country", "unknown"}:
         result["geo_precision"] = "unknown"
     result["media"] = []
-    for media in (raw.get("media") or [])[:30]:
+    # A reviewed metadata-only source must not persist media even if a
+    # hostile feed or alternate adapter supplies an embedded-media field.
+    for media in ([] if result["metadata_only"] else (raw.get("media") or [])[:30]):
         if not isinstance(media, dict):
             continue
         try:
@@ -1159,6 +1161,81 @@ class Store:
                 event["linked_event_histories"][linked] = snapshots
         return event
 
+    def _map_evidence_page_unlocked(self, page: list[sqlite3.Row]) -> list[dict | None]:
+        """Batch common stable map reports; preserve exact old projection for exceptions.
+
+        Map country/category circles need every labelled source report, not
+        merely the active subset. Historical, legacy, pending NWS, merged and
+        deferred-source cases still take the original read-only projection.
+        Called only while the Store lock is held.
+        """
+        saved = [(row, json.loads(row["body"])) for row in page]
+        common = []
+        expected_counts = {}
+        remaining_reports = 8192  # Finite aggregate memory budget per page.
+        for row, event in saved:
+            count = event.get("report_count")
+            if (event.get("status") != "active"
+                    or type(event.get("evidence_policy_version")) is not int
+                    or not 2 <= event["evidence_policy_version"] <= 3
+                    or event.get("merged_source_events")
+                    or event.get("map_areas")
+                    or type(count) is not int or not 0 <= count <= 64
+                    or count > remaining_reports):
+                continue
+            common.append(row["id"])
+            expected_counts[row["id"]] = count
+            remaining_reports -= count
+        if common:
+            placeholders = ",".join("?" for _ in common)
+            # A tampered/stale event report_count must not cause an unbounded
+            # group load or silently omit evidence. First verify the true
+            # indexed row counts before fetching source bodies.
+            actual_counts = {
+                row["event_id"]: row["n"] for row in self._conn.execute(
+                    "SELECT event_id,COUNT(*) AS n FROM reports WHERE event_id IN ("
+                    + placeholders + ") GROUP BY event_id", common)
+            }
+            common = [identity for identity in common
+                      if actual_counts.get(identity, 0) == expected_counts[identity]]
+        common_ids = set(common)
+        grouped = defaultdict(list)
+        if common:
+            # A page is at most 256 IDs; SQLite parameter bounds and ordering
+            # are preserved. This replaces thousands of per-event/per-report
+            # SELECT calls without inventing or discarding source evidence.
+            sql = ("SELECT event_id,body FROM reports WHERE event_id IN (" +
+                   ",".join("?" for _ in common) +
+                   ") ORDER BY event_id,published_at,record_key")
+            for row in self._conn.execute(sql, common):
+                grouped[row["event_id"]].append(json.loads(row["body"]))
+        output = []
+        for row, event in saved:
+            identity = row["id"]
+            if identity not in common_ids:
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            at = event["updated_at"]
+            reports = grouped.get(identity, [])
+            # The latest received revision may still be future by provider time.
+            # Only the old history-aware projection can select the earlier
+            # eligible immutable report_revisions entry in that case.
+            if any(_report_is_future(report, at) or report.get("source_id") == "nws"
+                   for report in reports):
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            selected = []
+            for raw in reports:
+                report = dict(raw)
+                report["future_dated"] = False
+                report["expired"] = is_expired(report, at)
+                selected.append(report)
+            _, event["reports"] = _evidence_reports(selected, at)
+            # project_warning_context is an identity projection for active
+            # records; pending or area-bearing events took the original path.
+            output.append(event)
+        return output
+
     def get_event(self, event_id: str, at: str | None = None) -> dict | None:
         with self._lock:
             return self._get_event_unlocked(event_id, at)
@@ -1222,7 +1299,8 @@ class Store:
                         params.append("%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
             order = ("CASE json_extract(body,'$.severity') WHEN 'critical' THEN 4 WHEN 'high' THEN 3 "
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
-            sql = ("SELECT body FROM events" if map_view and not map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
+            sql = ("SELECT body FROM events" if map_view and not map_evidence else
+                   "SELECT id,body FROM events" if map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
             if map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
@@ -1236,22 +1314,26 @@ class Store:
                 # of hiding later eligible areas behind a larger arbitrary cap.
                 result = []
                 page_size = min(256, max(32, limit))
-                offset = 0
-                while len(result) < limit:
-                    page = self._conn.execute(sql + " LIMIT ? OFFSET ?",
-                                              [*params, page_size, offset]).fetchall()
-                    if not page:
-                        break
-                    offset += len(page)
-                    for row in page:
-                        event = self._get_event_unlocked(row[0], map_projection=True)
-                        if event and (event.get("status") == "active" or
-                                      event.get("map_history_incomplete") is True):
-                            result.append(event)
-                            if len(result) >= limit:
-                                break
-                    if len(page) < page_size:
-                        break
+                # One ordered, Store-locked cursor avoids re-sorting/re-reading
+                # every earlier candidate for each subsequent OFFSET page. A
+                # bounded fetchmany keeps materialized rows capped at 256 while
+                # the original accepted-only limit and warning checks remain.
+                cursor = self._conn.execute(sql, params)
+                try:
+                    while len(result) < limit:
+                        page = cursor.fetchmany(page_size)
+                        if not page:
+                            break
+                        for event in self._map_evidence_page_unlocked(page):
+                            if event and (event.get("status") == "active" or
+                                          event.get("map_history_incomplete") is True):
+                                result.append(event)
+                                if len(result) >= limit:
+                                    break
+                        if len(page) < page_size:
+                            break
+                finally:
+                    cursor.close()
             else:
                 result = [(json.loads(row[0]) if map_view else self._get_event_unlocked(row[0]))
                           for row in self._conn.execute(sql + " LIMIT ?", [*params, limit])]
@@ -1314,6 +1396,39 @@ class Store:
         with self._lock:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()
             return json.loads(row[0]) if row else {}
+
+    def any_source_error(self, source_ids: Iterable[str]) -> bool:
+        """One bounded, consistent source-state scan for the native tray icon.
+
+        Query only explicitly enabled identities. A malformed stored state is
+        conservatively considered an error; never silently report healthy.
+        SQLite's parameter limit is respected for catalogs over 400 sources.
+        """
+        identities = list(source_ids)
+        if any(not isinstance(item, str) or not item for item in identities):
+            return True
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            return False
+        statuses = {"error", "rate_limited", "failed"}
+        with self._lock:
+            for start in range(0, len(identities), 400):
+                batch = identities[start:start + 400]
+                sql = ("SELECT body FROM source_states WHERE source_id IN (" +
+                       ",".join("?" for _ in batch) + ")")
+                for row in self._conn.execute(sql, batch):
+                    try:
+                        state = json.loads(row[0])
+                    except (ValueError, TypeError):
+                        return True
+                    if not isinstance(state, dict):
+                        return True
+                    status = state.get("status")
+                    if "status" in state and not isinstance(status, str):
+                        return True  # Malformed list/dict/null cannot crash native tray.
+                    if status in statuses:
+                        return True
+        return False
 
     def set_source_state(self, source_id: str, state: dict) -> None:
         encoded = _json(state)
@@ -1453,8 +1568,14 @@ class Store:
                 body["delivery_status"] = plain_text(status, 500)
                 self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
 
-    def put_observations(self, observations: Iterable[dict]) -> None:
+    def put_observations(self, observations: Iterable[dict]) -> int:
+        """Store valid indicator revisions; return the count of material changes.
+
+        A repeated fingerprint may advance retrieved_at for custody without
+        rebuilding the full GUI map. New or corrected values remain visible.
+        """
         stamp = utcnow()
+        changed = 0
         with self._lock, write_transaction(self._conn, self.path):
             for index, raw in enumerate(observations):
                 if index >= 5000:
@@ -1499,8 +1620,10 @@ class Store:
                     else:
                         self._conn.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?)", (identity, source, indicator, country, date, stamp, retrieved, fingerprint, _json(body)))
                     self._conn.execute("INSERT INTO observation_revisions(observation_id,at,fingerprint,body) VALUES(?,?,?,?)", (identity, stamp, fingerprint, _json(body)))
+                    changed += 1
                 except (ValueError, TypeError):
                     continue
+        return changed
 
     def list_observations(self, indicator: str = "", country: str = "") -> list[dict]:
         where, params = [], []
@@ -1598,11 +1721,35 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
     lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {utcnow()}", "",
              "SYNTHETIC TRAINING DATA — NOT LIVE NEWS" if synthetic else "Source-linked summary of the supplied local monitoring records.", "",
              "Coverage is limited to monitored sources. Official attribution does not independently confirm every underlying claim.", ""]
-    ranked = sorted(events, key=lambda e: (SEVERITY.get(e.get("severity"), 0), e.get("updated_at", "")), reverse=True)[:limit]
-    if not ranked:
+    # A single high-volume weather adapter can otherwise consume every slot
+    # before one disease, conflict, infrastructure or government record appears.
+    # These are source CATEGORY groupings, never invented news/crisis claims.
+    from .brief_selection import balanced_brief_sections, BRIEF_DOMAINS
+    grouped = balanced_brief_sections(
+        events, per_domain=4 if period == "daily" else 9,
+        max_total=limit, disaster_limit=3 if period == "daily" else 6
+    )
+    if not grouped:
         lines.extend(["No matching developments are stored for this period.", ""])
-    for index, event in enumerate(ranked, 1):
-        lines.extend([f"## {index}. {_markdown_text(event['title'])}", "",
+    else:
+        lines.extend([
+            "## Topic coverage", "",
+            "Items are grouped by source category, then by importance and last recorded update. "
+            "These sections do not establish worldwide coverage or verify a crisis.", ""
+        ])
+        present = {domain for domain, _ in grouped}
+        absent = [domain for domain in BRIEF_DOMAINS if domain not in present]
+        if absent:
+            lines.extend(["**Not represented in supplied local records:** " +
+                          ", ".join(absent) +
+                          ". This is a coverage gap, not evidence that no events occurred.", ""])
+    ranked = [(domain, event) for domain, items in grouped for event in items]
+    current_domain = None
+    for index, (domain, event) in enumerate(ranked, 1):
+        if domain != current_domain:
+            current_domain = domain
+            lines.extend([f"## {domain}", ""])
+        lines.extend([f"### {index}. {_markdown_text(event['title'])}", "",
                       f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {_markdown_text(event['category'])} · {_markdown_text(event['region'])} · {_markdown_text(event['verification'])}", "",
                       _markdown_text(event["recap"]), "",
                       f"Last material record update: {event['updated_at']} · Local event: {event['id']}", ""])

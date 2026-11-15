@@ -16,6 +16,7 @@ import httpx
 from .map_evidence import normalize_geometry, valid_nws_zone, MAX_ZONE_REFS
 
 MAX_REQUESTS = 8
+MAX_REFUSAL_COOLDOWN_SECONDS = 24 * 3600  # deny/retry must remain finite
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_CACHE_BYTES = 4 * 1024 * 1024
 MAX_CACHE_ENTRIES = 128
@@ -37,17 +38,25 @@ def _eligible(report, now):
     if report.get('status','active') not in {'','active'} or report.get('evidence_status','active')!='active':return False
     published=_stamp(report.get('published_at'))
     expiry=_stamp(report.get('expires_at'))
-    return not report.get('future_dated') and not (published and published>now) and not (expiry and expiry<=now)
+    hazard_end=_stamp(report.get('ends_at'))
+    # NWS bulletin expiry and the provider's dated hazard end are distinct.
+    # Retain affected-zone evidence for a still-dated hazard even when its
+    # original bulletin has expired. This only resolves geometry: Store's CAP
+    # lifecycle must STILL mark an expired bulletin expired, never current.
+    expired_without_ongoing_hazard=bool(expiry and expiry<=now and not (hazard_end and hazard_end>now))
+    return not report.get('future_dated') and not (published and published>now) and not expired_without_ongoing_hazard
 
 
 def _retry_seconds(value, now):
+    # Honor Retry-After up to a finite 24h circuit-breaker; do not permanently
+    # disable official affected-zone lookups for huge dates or integer values.
     if isinstance(value,str):
         if value.isascii() and value.isdigit():
             # An unrepresentably large delay is a refusal, not a shorter retry.
-            return float('inf') if len(value)>12 else float(value)
+            return MAX_REFUSAL_COOLDOWN_SECONDS if len(value)>12 else min(float(value), MAX_REFUSAL_COOLDOWN_SECONDS)
         try:
             dt=parsedate_to_datetime(value)
-            if dt.tzinfo is not None:return max(0,(dt-now).total_seconds())
+            if dt.tzinfo is not None:return min(MAX_REFUSAL_COOLDOWN_SECONDS, max(0,(dt-now).total_seconds()))
         except (ValueError,TypeError,OverflowError):pass
     return 0.0
 
@@ -106,7 +115,11 @@ class ZoneResolver:
                     if response.headers.get('content-encoding','identity').lower() not in {'','identity'}:
                         raise ValueError('Unexpected compressed zone transfer')
                     length=response.headers.get('content-length','')
-                    if length.isdigit() and int(length)>MAX_RESPONSE_BYTES:raise ValueError('Zone response too large')
+                    if length and (not length.isascii() or not length.isdigit()):
+                        raise ValueError('Invalid zone response Content-Length')
+                    claimed_length=int(length) if length else None
+                    if claimed_length is not None and claimed_length>MAX_RESPONSE_BYTES:
+                        raise ValueError('Zone response too large')
                     raw=bytearray()
                     # Do not buffer 64KiB before checking elapsed time: a slow
                     # drip must be checked at each delivered transport chunk.
@@ -114,6 +127,11 @@ class ZoneResolver:
                         if self.clock()>=deadline or len(raw)+len(part)>MAX_RESPONSE_BYTES:
                             raise ValueError('Zone response bound exceeded')
                         raw.extend(part)
+                    # A syntactically valid JSON prefix is not proof of a
+                    # complete official zone response. Verify HTTP framing
+                    # before admitting its coordinates as warning evidence.
+                    if claimed_length is not None and len(raw)!=claimed_length:
+                        raise ValueError('Zone response Content-Length mismatch')
             payload=json.loads(raw)
             if not isinstance(payload,dict) or payload.get('type')!='Feature':raise ValueError('Expected zone Feature')
             props=payload.get('properties')
@@ -147,8 +165,13 @@ class ZoneResolver:
                     try:normalize_geometry(report['area_geometry']);continue
                     except ValueError:pass
                 refs=report.get('affected_zones',[])
-                if not isinstance(refs,list):continue
-                refs=list(dict.fromkeys(r for r in refs[:MAX_ZONE_REFS] if valid_nws_zone(r)))
+                if (not isinstance(refs,list) or len(refs)>MAX_ZONE_REFS
+                        or any(not valid_nws_zone(ref) for ref in refs)):
+                    if refs and not report.get('area_geometry'):
+                        report['area_status']='invalid_zone_references'
+                        stats['unresolved_alerts']+=1
+                    continue
+                refs=list(dict.fromkeys(refs))
                 if not refs:continue
                 polygons=[];used=[]
                 for url in refs:

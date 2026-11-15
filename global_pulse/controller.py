@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal
+from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox, QInputDialog
 
@@ -29,6 +29,17 @@ def in_quiet_hours(settings, now=None):
 
 class Controller(QObject):
     data_changed = Signal()
+    # Real collector evidence is batched on the GUI event loop. Explicit user
+    # settings/filters keep the existing immediate data_changed semantics.
+    evidence_changed = Signal()
+    # Source health/status-only callbacks never re-query the entire map for
+    # each provider ping. MainWindow coalesces this GUI-thread update.
+    source_status_changed = Signal()
+    # Native notification delivery/status is NOT news ingest. Distinct signal
+    # avoids synchronous 500 feed + 5k map + 5k country refresh on each toast.
+    notification_changed = Signal()
+    # Bookmark-only updates must not repaint the entire 5,000-record map.
+    situation_changed = Signal(str, bool)
     status_changed = Signal(str)
     alert_received = Signal(dict)
     translation_ready = Signal(str, str)
@@ -88,9 +99,13 @@ class Controller(QObject):
     def _apply_sources(self):
         from .source_availability import enabled_ids
         enabled = enabled_ids(self.catalog, self.get_setting("enabled_sources", None))
-        self.scheduler.set_sources([dict(source, enabled=source["id"] in enabled and not (
-            self.get_setting("gdelt_batches_enabled", False) is True and source.get("adapter") == "gdelt_doc"))
-                                    for source in self.catalog])
+        gdelt_batched = self.get_setting("gdelt_batches_enabled", False) is True
+        effective = [dict(source, enabled=source["id"] in enabled and not (
+            gdelt_batched and source.get("adapter") == "gdelt_doc")) for source in self.catalog]
+        self.scheduler.set_sources(effective)
+        # Native tray must reflect the SAME capability-filtered/owner-selected
+        # sources actually passed to Scheduler, not stale catalog defaults.
+        self._enabled_collection_ids = frozenset(s["id"] for s in effective if s["enabled"])
 
     def set_source_enabled(self, source_id, enabled):
         """Explicit provider-ID action; never starts monitoring or bypasses due times."""
@@ -202,7 +217,9 @@ class Controller(QObject):
             return False
         return self._gdelt.request_cleanup()
 
+    @Slot(str)
     def _pause_for_storage(self, message):
+        """Handle collector-origin disk failure on Controller GUI thread."""
         if not self._closed:
             self.pause()
             self.status_changed.emit(message)
@@ -213,8 +230,10 @@ class Controller(QObject):
     def gdelt_review_retry(self):
         self._gdelt.review_retry()
 
-    def headline_view(self, event):
-        return self._headlines.view(event)
+    def headline_view(self, event, *, defer_language=False):
+        # Feed previews may route unknown languages after first GUI paint.
+        # Selected-event evidence still uses the synchronous, exact route.
+        return self._headlines.view(event, defer_language=defer_language)
 
     def events(self, **filters):
         return self.store.list_events(**filters)
@@ -273,18 +292,21 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # Source status callback can occur once per enabled feed and is not
+        # new evidence. MainWindow merges repeated status-only notifications.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
             if not self._closed and self.monitoring:
                 from .archive_storage import StorageBlocked
                 try:
-                    self.store.put_observations(observations)
+                    changed = self.store.put_observations(observations)
                 except StorageBlocked as error:
                     self.storage_problem.emit(str(error))
                     return
-                self.data_changed.emit()
+                if changed:
+                    self.evidence_changed.emit()
 
     def _watched(self, event, previous=None, *, reason=None):
         # Persisted/imported JSON can bypass the Settings UI's list validation.
@@ -364,7 +386,11 @@ class Controller(QObject):
                     self.store.update_alert_delivery(alert["id"], "Quiet hours: retained in internal history")
                 elif self.monitoring:
                     self.native_alert.emit(dict(event, _alert_id=alert["id"]), reason)
-            self.data_changed.emit()
+            # Store.ingest still runs even on empty input: clock-only evidence
+            # transitions must be materialized. A true no-op is not a reason
+            # to rebuild a 5k-item GUI map or source tab.
+            if changed:
+                self.evidence_changed.emit()
 
     @staticmethod
     def _has_fresh_change(event, now=None, *, reason=None):
@@ -426,7 +452,10 @@ class Controller(QObject):
         if self._closed:
             raise ValueError("Archive is closed")
         state = self.store.set_situation_saved(identifier, saved)
-        self.data_changed.emit()
+        # The evidence archive and geolocation did not change. Only the
+        # bookmark state needs to update; full data_changed would synchronously
+        # run every map/feed/GDELT query from the Star button's click handler.
+        self.situation_changed.emit(state["event_id"], state["saved"])
         return state
 
     def save_situation(self, identifier):

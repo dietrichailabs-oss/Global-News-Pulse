@@ -11,7 +11,7 @@ import math
 import sys
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import Qt, Signal, Slot, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QPainter, QPen, QFont, QKeySequence, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
 )
 
-from .map_widget import WorldMap
+from .map_widget import WorldMap, CATEGORY_COLORS
 from .situation_actions import SituationActions
 from .theme import STYLE, SEVERITY
 
@@ -267,10 +267,16 @@ class MainWindow(SituationActions, QMainWindow):
         self.controller=controller
         self._close_handler=None
         self._selected_id=""
+        # User-cleared selection is distinct from an initially empty feed.
+        # Delayed headline/collector repaint must not silently re-star a row.
+        self._feed_explicitly_cleared=False
         self._events=[]
         self._historical=False
         self._history_at=None
         self._refreshing=False
+        # Hidden workspaces are populated once per real data revision, not
+        # synchronously on every back-and-forth tab switch.
+        self._dirty_pages=set(range(1,6))
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -313,9 +319,29 @@ class MainWindow(SituationActions, QMainWindow):
         self.statusBar().addPermanentWidget(self.count_label)
         self.statusBar().setSizeGripEnabled(True)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        # Collector events may arrive in bursts while the user is switching
+        # tabs. Start the first-due timer once (never restart on every signal).
+        # No widgets or QTimer are touched from the collector's worker thread.
+        self._evidence_refresh_timer=QTimer(self)
+        self._evidence_refresh_timer.setSingleShot(True)
+        self._evidence_refresh_timer.setInterval(160)
+        self._evidence_refresh_timer.timeout.connect(self.refresh_data)
+        # A burst of status-only callbacks (one per collector) can overwhelm
+        # a normal interactive session. Coalesce them on the GUI event loop.
+        self._collection_refresh_timer=QTimer(self)
+        self._collection_refresh_timer.setSingleShot(True)
+        self._collection_refresh_timer.setInterval(500)
+        self._collection_refresh_timer.timeout.connect(self._refresh_source_status_ui)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
         controller.data_changed.connect(self.refresh_data)
+        controller.evidence_changed.connect(self._schedule_evidence_refresh)
+        if hasattr(controller, "notification_changed"):
+            controller.notification_changed.connect(self._notification_status_only)
+        if hasattr(controller, "source_status_changed"):
+            controller.source_status_changed.connect(self._schedule_collected_refresh)
+        if hasattr(controller, "situation_changed"):
+            controller.situation_changed.connect(self._situation_state_changed)
         controller.status_changed.connect(self._status_update)
         controller.alert_received.connect(self._on_alert)
         controller.translation_ready.connect(self._translation_done)
@@ -381,8 +407,24 @@ class MainWindow(SituationActions, QMainWindow):
         for key,title in (("critical","Critical"),("high","High"),("moderate","Moderate"),("informational","Info"),("unassessed","Unassessed")):
             w=label(f"● {title}");w.setStyleSheet(f"color:{SEVERITY[key]};font-size:10px;");legend.addWidget(w)
         legend.addStretch()
-        w=label("◌ Unverified   ◔ Developing   ○ Corroborated   □ Official source","Muted");w.setToolTip("Importance uses color. Evidence uses ring patterns. Official means an attributed statement or measurement, not blanket confirmation of underlying claims.");legend.addWidget(w)
+        w=label("◌ Unverified   ◔ Developing   ◎ Official","Muted")
+        w.setToolTip("Incident-pin color is importance; circular ring pattern is source status. Official is an attributed source, not independent corroboration.")
+        legend.addWidget(w)
         self.map_panel.layout.addLayout(legend)
+        country_legend=QHBoxLayout()
+        country_legend.setSpacing(8)
+        for kind in ("Government","Economy","Health","Humanitarian","Infrastructure","News"):
+            dot=label(f"● {kind}", "Muted")
+            dot.setStyleSheet(
+                f"color:{CATEGORY_COLORS[kind]};font-size:9px;"
+            )
+            dot.setToolTip(
+                "Country-colored circular badge: source reporting/observations "
+                "attributed to the country, NOT a precise incident coordinate."
+            )
+            country_legend.addWidget(dot)
+        country_legend.addStretch()
+        self.map_panel.layout.addLayout(country_legend)
         crisis_legend=QHBoxLayout();crisis_legend.setSpacing(8)
         for text,color in (("//// Conflict / war","#d84a52"),("//// Protest / unrest","#e3bd4d"),("==== Migration / displacement","#9a6748")):
             item=label(text);item.setStyleSheet(f"color:{color};font-size:9px;");crisis_legend.addWidget(item)
@@ -405,6 +447,11 @@ class MainWindow(SituationActions, QMainWindow):
         feed.heading.addWidget(self.english_headlines)
         self.sort_combo=QComboBox();self.sort_combo.addItems(["Latest first","Highest importance","Most reports"]);self.sort_combo.currentIndexChanged.connect(self._populate_feed);feed.heading.addWidget(self.sort_combo)
         self.feed_list=QListWidget();self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
+        # Clicking even an already-selected item is an explicit request for
+        # its evidence view; initial auto-selection does NOT hide World Overview.
+        self.feed_list.itemClicked.connect(
+            lambda _item: self.intelligence_mode.setCurrentIndex(1)
+        )
         self.feed_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.feed_list.customContextMenuRequested.connect(self._show_feed_situation_menu)
         feed.layout.addWidget(self.feed_list,1)
@@ -422,10 +469,39 @@ class MainWindow(SituationActions, QMainWindow):
         media.layout.addWidget(self.media_scroll,1)
         self.lower_split.addWidget(media)
         intel=Panel("INTELLIGENCE BRIEF")
-        self.save_button=button("☆ Star",self._toggle_selected_situation,"Star the selected event in Situations",checkable=True);intel.heading.addWidget(self.save_button)
+        intel.setMinimumWidth(0)
+        # Keep mode/Star controls beneath the heading: putting three labels
+        # side-by-side forced the sidebar to 322px at the 960px minimum window.
+        intel_controls=QHBoxLayout()
+        intel_controls.setContentsMargins(0,0,0,0)
+        intel_controls.setSpacing(4)
+        self.intelligence_mode=QComboBox()
+        self.intelligence_mode.addItems(["World overview","Selected event"])
+        self.intelligence_mode.setObjectName("intelligence_brief_mode")
+        self.intelligence_mode.setAccessibleName("World intelligence overview or selected event evidence")
+        self.intelligence_mode.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.intelligence_mode.setMinimumContentsLength(5)
+        self.intelligence_mode.setMinimumWidth(0)
+        self.intelligence_mode.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed
+        )
+        intel_controls.addWidget(self.intelligence_mode,1)
+        self.save_button=button("☆ Star",self._toggle_selected_situation,"Star the selected event in Situations",checkable=True)
         self.save_button.setObjectName("situation_star")
+        intel_controls.addWidget(self.save_button)
+        intel.layout.addLayout(intel_controls)
         self.intel_browser=QTextBrowser();self.intel_browser.setOpenExternalLinks(False);self.intel_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));self.intel_browser.setAccessibleName("Selected event evidence brief")
         self.intel_stack=QSplitter(Qt.Orientation.Vertical);self.intel_stack.setHandleWidth(3)
+        # A small bottom gutter gives ensureWidgetVisible() enough range to
+        # bring the final status card fully into the QScrollArea viewport.
+        # Without it the final card center can stay 5px offscreen in native Qt.
+        self.intel_stack.setContentsMargins(0,0,0,20)
+        self.intel_stack.setMinimumWidth(0)
+        self.intel_stack.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
         self.intel_stack.addWidget(self.intel_browser)
         self.evidence_status=Panel("EVIDENCE STATUS")
         self.evidence_status_text=QTextBrowser();self.evidence_status_text.setPlainText("No event selected");self.evidence_status_text.setStyleSheet("font-size:10px;")
@@ -435,13 +511,23 @@ class MainWindow(SituationActions, QMainWindow):
         self.change_status_text=QTextBrowser();self.change_status_text.setPlainText("Select a source-linked situation.");self.change_status_text.setStyleSheet("font-size:10px;")
         self.change_status.layout.addWidget(self.change_status_text)
         self.intel_stack.addWidget(self.change_status)
+        # A QTextBrowser's native minimumSizeHint defaults to about 256px.
+        # Nested under two scroll/splitter layers that kept 960px windows at
+        # a 257px minimum right pane, exceeding the original <25% contract.
+        # Keep *height* readable while allowing text to wrap at narrow widths.
+        for panel in (self.evidence_status,self.change_status):
+            panel.setMinimumWidth(0)
+            panel.setSizePolicy(
+                QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+            )
         # Every expanded card must have real text space. A splitter alone can
         # shrink the nested panel headers until its text viewport is zero.
         # Keep a readable minimum and scroll the whole stack on small windows;
         # do not grow the main window or distort the reference's 40/40/20 split.
         for browser in (self.intel_browser,self.evidence_status_text,self.change_status_text):
             browser.ensurePolished()
-            browser.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+            browser.setMinimumWidth(0)
+            browser.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding)
             browser.setMinimumHeight(3 * browser.fontMetrics().lineSpacing() + 24)
         self.intel_stack.setChildrenCollapsible(False)
         self.intel_stack.setSizes([220,100,100])
@@ -450,8 +536,35 @@ class MainWindow(SituationActions, QMainWindow):
         self.intel_scroll.setWidgetResizable(True)
         self.intel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.intel_scroll.setMinimumSize(0,0)
+        self.intel_scroll.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
         self.intel_scroll.setWidget(self.intel_stack)
-        intel.layout.addWidget(self.intel_scroll,1)
+        self.overview_browser=QTextBrowser()
+        self.overview_browser.setObjectName("world_intelligence_overview")
+        self.overview_browser.setAccessibleName("Balanced local world intelligence overview")
+        self.overview_browser.setOpenExternalLinks(False)
+        self.overview_browser.setOpenLinks(False)  # Local event anchors are handled exactly once below.
+        self.overview_browser.anchorClicked.connect(self._open_overview_event)
+        self.overview_browser.setHtml(
+            "<p>World overview will appear when local reports are loaded.</p>"
+        )
+        self.intelligence_pages=QStackedWidget()
+        self.intelligence_pages.setMinimumWidth(0)
+        self.intelligence_pages.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
+        self.overview_browser.setMinimumWidth(0)
+        self.overview_browser.setSizePolicy(
+            QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
+        )
+        self.intelligence_pages.addWidget(self.overview_browser)
+        self.intelligence_pages.addWidget(self.intel_scroll)
+        self.intelligence_mode.currentIndexChanged.connect(
+            self.intelligence_pages.setCurrentIndex
+        )
+        self._overview_html_cached=""
+        intel.layout.addWidget(self.intelligence_pages,1)
         actionrow=QHBoxLayout()
         self.original_button=button("Source ↗",self._open_original);self.translate_button=button("Translate",self._translate_selected)
         actionrow.addWidget(self.original_button);actionrow.addWidget(self.translate_button);intel.layout.addLayout(actionrow)
@@ -461,6 +574,8 @@ class MainWindow(SituationActions, QMainWindow):
         layout.addWidget(self.vertical_split);self.pages.addWidget(page)
         self.world_map.event_selected.connect(self.navigate_event)
         self.world_map.country_selected.connect(self._country_selected)
+        self.world_map.economic_country_requested.connect(self._open_economic_country)
+        self.world_map.global_search_requested.connect(self._search_full_archive)
 
     def _build_situations(self):
         panel=Panel("SITUATION ROOMS")
@@ -557,14 +672,72 @@ class MainWindow(SituationActions, QMainWindow):
     def _configure_table(table):
         table.setAlternatingRowColors(True);table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents);table.horizontalHeader().setStretchLastSection(True)
 
+    def prepare_initial_workspaces(self):
+        """Populate bounded local workspaces before releasing startup splash.
+
+        A cold first click on Economy/Sources/Alerts/Briefs previously ran the
+        entire SQLite/table/brief construction on the visible UI thread.
+        This runs once while the dashboard is hidden, no live media starts,
+        and future report or settings changes still mark workspaces dirty.
+        """
+        current=self.pages.currentIndex()
+        for index in (1,2,3,4,5):
+            if index in self._dirty_pages:
+                self.open_page(index)
+        self.open_page(current)
+        return not (self._dirty_pages & {1,2,3,4,5})
+
     def open_page(self,index):
+        previous=self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
         for i,b in enumerate(self.nav_buttons.values()):b.setChecked(i==index)
+        # Data hasn't changed: switching tabs must not repeatedly read SQLite,
+        # reconstruct tables or re-render brief HTML on the main Qt thread.
+        # Stale pages stay marked dirty until they're next actually displayed.
+        if index not in self._dirty_pages:
+            return
         if index==1:self._populate_situations()
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
         elif index==5:self._generate_brief()
+        self._dirty_pages.discard(index)
+
+    @Slot()
+    def _notification_status_only(self):
+        """Refresh the Alerts view only, never the 5,000-event world map."""
+        self._dirty_pages.add(4)
+        if self.pages.currentIndex()==4:
+            self._populate_alerts()
+            self._dirty_pages.discard(4)
+
+    def _situation_state_changed(self, event_id, saved):
+        """Update a bookmark without re-querying/repainting the world map.
+
+        The archive's events and provenance are unchanged. Only the starred
+        marker on matching feed entries and (when visible) Situations view need
+        to change; all other expensive views remain untouched.
+        """
+        identity=str(event_id or "")
+        if not identity:
+            return
+        if hasattr(self,"feed_list"):
+            for index in range(self.feed_list.count()):
+                item=self.feed_list.item(index)
+                event=item.data(Qt.ItemDataRole.UserRole)
+                if not isinstance(event,dict) or str(event.get("id") or "")!=identity:
+                    continue
+                row=dict(event,_situation_starred=bool(saved))
+                item.setData(Qt.ItemDataRole.UserRole,row)
+                self.feed_list.viewport().update(self.feed_list.visualItemRect(item))
+                break
+        if self._selected_id==identity:
+            self._sync_situation_star({"id":identity})
+        self._dirty_pages.add(1)
+        if self.pages.currentIndex()==1:
+            # Situations query is bounded by user's own bookmarks, not map size.
+            self._populate_situations()
+            self._dirty_pages.discard(1)
 
     def events_filters(self):
         self._history_at=None
@@ -586,10 +759,58 @@ class MainWindow(SituationActions, QMainWindow):
                 self._history_at=at.isoformat();filters["before"]=self._history_at;self.history_label.setText(timestamp(at.isoformat()))
         return filters
 
+    @Slot()
+    def _schedule_evidence_refresh(self):
+        """Batch real collector changes; keep explicit filter/user refresh immediate.
+
+        The first signal fixes the deadline: a continuous source burst cannot
+        starve the UI by continually pushing that deadline into the future.
+        """
+        if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        if not self._evidence_refresh_timer.isActive():
+            self._evidence_refresh_timer.start()
+
+    @Slot()
+    def _schedule_collected_refresh(self):
+        """Queue worker-origin source status to this GUI QObject thread."""
+        if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        if not self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.start()
+
+    def _refresh_source_status_ui(self):
+        """A provider polling status is not a reason to reload 5k map events."""
+        self._dirty_pages.add(3)
+        self.last_label.setText(
+            "Last collection  " +
+            timestamp(getattr(self.controller,"last_collection",""))
+        )
+        # Source details are only needed if that tab is actually on screen.
+        # Actual material report ingest uses Controller.evidence_changed and a
+        # bounded, coalesced full event/map refresh. No location is invented.
+        if self.pages.currentIndex()==3 and self.isVisible():
+            self._populate_sources()
+            self._dirty_pages.discard(3)
+
     def refresh_data(self,*args):
-        if self._refreshing:return
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        if self._refreshing:
+            # A newer revision arrived during a reentrant Qt paint. Never
+            # drop it; run one more coalesced refresh after this pass.
+            self._schedule_evidence_refresh()
+            return
+        # Explicit user/filter refresh subsumes a pending collector refresh.
+        if self._evidence_refresh_timer.isActive():
+            self._evidence_refresh_timer.stop()
+        # An evidence/user-triggered refresh already includes latest status;
+        # cancel its redundant queued status-only repaint.
+        if self._collection_refresh_timer.isActive():
+            self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
+            self._dirty_pages.update(range(1,6))
             filters=self.events_filters()
             self._events=self.controller.events(**filters)
             # A filter or historical-time change can remove the previously
@@ -602,9 +823,21 @@ class MainWindow(SituationActions, QMainWindow):
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
             country_evidence=self.controller.events(**dict(map_filters,map_evidence=True))
-            self.world_map.set_events(self.controller.events(**map_filters),country_events=country_evidence)
+            # Economic observations have their own dated country-level layer.
+            # Hide it during search/region/history replay because observations
+            # do not share those event-filter semantics.
+            show_observations = (not self._history_at and not filters.get("query")
+                                 and not filters.get("region")
+                                 and filters.get("category") in {"", "Economy"})
+            observations=self.controller.store.list_observations() if show_observations else []
+            self.world_map.set_events(
+                self.controller.events(**map_filters),
+                country_events=country_evidence,
+                observations=observations,
+            )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
             self._populate_feed()
+            self._update_world_overview()
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
             count=len(self._events);self.feed_count.setText(str(count))
@@ -622,6 +855,8 @@ class MainWindow(SituationActions, QMainWindow):
             elif page==2:self._populate_economy()
             elif page==3:self._populate_sources()
             elif page==4:self._populate_alerts()
+            elif page==5:self._generate_brief()
+            self._dirty_pages.discard(page)
         except Exception as exc:
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
@@ -655,11 +890,12 @@ class MainWindow(SituationActions, QMainWindow):
             order={"critical":4,"high":3,"moderate":2,"informational":1,"unassessed":0};events.sort(key=lambda e:(order.get(e.get("severity"),0),str(e.get("updated_at",""))),reverse=True)
         elif self.sort_combo.currentIndex()==2:events.sort(key=lambda e:int(e.get("report_count",0)),reverse=True)
         self.feed_list.blockSignals(True);self.feed_list.clear()
-        if not self._selected_id and events:self._selected_id=str(events[0].get("id",""))
+        if not self._selected_id and events and not self._feed_explicitly_cleared:
+            self._selected_id=str(events[0].get("id",""))
         selected_item=None
         for e in events:
             e=dict(e,_situation_starred=str(e.get("id","")) in saved_ids)
-            view=self.controller.headline_view(e) if hasattr(self.controller,"headline_view") else {"title":str(e.get("title","Untitled event")),"original":str(e.get("title","")),"label":"Original headline"}
+            view=self.controller.headline_view(e, defer_language=True) if hasattr(self.controller,"headline_view") else {"title":str(e.get("title","Untitled event")),"original":str(e.get("title","")),"label":"Original headline"}
             e=dict(e,_display_title=view["title"],_translation_label=view["label"])
             item=QListWidgetItem(view["title"]);item.setData(Qt.ItemDataRole.UserRole,e);item.setToolTip("<div style='white-space:pre-wrap'>"+esc(view["label"]+"\nOriginal: "+view["original"]+"\n"+str(e.get("recap","")))+"</div>");self.feed_list.addItem(item)
             if str(e.get("id"))==self._selected_id:selected_item=item
@@ -667,16 +903,71 @@ class MainWindow(SituationActions, QMainWindow):
         self.feed_list.blockSignals(False)
         self.feed_empty.setVisible(not events);self.feed_list.setVisible(bool(events))
 
+    @Slot()
     def _refresh_translated_headlines(self):
-        # Presentation only: no collection, map reload, or media retuning.
-        feed_scroll=self.feed_list.verticalScrollBar().value()
-        brief_scroll=self.intel_browser.verticalScrollBar().value()
-        self._populate_feed()
+        """Refresh display text IN PLACE, preserving Qt row object ownership.
+
+        Language-worker notifications may arrive during a context-menu modal
+        event loop or Star/tab navigation. Clearing the list deletes its
+        QListWidgetItems and invalidates the row a pending click still owns.
+        This method never changes ordering, selection, media, evidence, or map.
+        """
+        if not hasattr(self,"feed_list"):
+            return
+        for index in range(self.feed_list.count()):
+            item=self.feed_list.item(index)
+            if item is None:
+                continue
+            event=item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(event,dict):
+                continue
+            view=(self.controller.headline_view(event,defer_language=True)
+                  if hasattr(self.controller,"headline_view")
+                  else {"title":str(event.get("title","Untitled event")),
+                        "original":str(event.get("title","")),
+                        "label":"Original headline"})
+            title=str(view["title"])
+            if title != item.text():
+                item.setText(title)
+            if event.get("_display_title") != title or event.get("_translation_label") != view["label"]:
+                item.setData(Qt.ItemDataRole.UserRole,dict(
+                    event,_display_title=title,_translation_label=view["label"]
+                ))
+                item.setToolTip(
+                    "<div style='white-space:pre-wrap'>" +
+                    esc(view["label"]+"\nOriginal: "+view["original"]+
+                        "\n"+str(event.get("recap",""))) + "</div>"
+                )
         if self._selected_id:
             event=self._selected_event()
-            if event:self._render_event(event,update_media=False)
-        self.feed_list.verticalScrollBar().setValue(feed_scroll)
-        self.intel_browser.verticalScrollBar().setValue(brief_scroll)
+            if event:
+                brief_scroll=self.intel_browser.verticalScrollBar().value()
+                self._render_event(event,update_media=False)
+                self.intel_browser.verticalScrollBar().setValue(brief_scroll)
+
+    def _update_world_overview(self):
+        """Format current bounded feed rows without new DB/map/network queries."""
+        from .brief_selection import overview_html
+        scope=(self.time_range.currentText().lower() +
+               (", filtered" if self.category.currentData() or
+                self.region.currentData() or self.search.text().strip()
+                else ", all categories"))
+        updated=overview_html(self._events, label=scope)
+        if updated != self._overview_html_cached:
+            position=self.overview_browser.verticalScrollBar().value()
+            self.overview_browser.setHtml(updated)
+            self.overview_browser.verticalScrollBar().setValue(position)
+            self._overview_html_cached=updated
+
+    def _open_overview_event(self, url):
+        """Only local event IDs are actionable; never treat links as web URLs."""
+        if url.scheme() != "pulse-event" or url.host() != "open":
+            return
+        from urllib.parse import unquote
+        identity=unquote(url.path().lstrip("/"))
+        if identity and any(str(e.get("id"))==identity for e in self._events):
+            self.navigate_event(identity)
+            self.intelligence_mode.setCurrentIndex(1)
 
     def _render_empty_brief(self):
         self.intel_browser.setHtml("<p style='color:#a78bfa;font-size:18px'><b>Connect the evidence.</b></p><p style='color:#a5afc1'>Select an event to inspect its recap, original sources, verification state, and competing claims.</p><p style='color:#748198'>Official attribution and independent corroboration are shown separately. Coverage gaps remain visible.</p>")
@@ -742,10 +1033,13 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _feed_selected(self,item,previous):
         if item:
+            self._feed_explicitly_cleared=False
+            self.intelligence_mode.setCurrentIndex(1)
             e=item.data(Qt.ItemDataRole.UserRole);self._selected_id=str(e.get("id",""));self.world_map.select_event(self._selected_id);full=self._selected_event() or e;self._render_event(full)
         else:
-            # Clearing the highlighted feed row must clear its Brief/Star
-            # target too; a hidden archived event is not a user selection.
+            # Explicit deselection survives queued headline and source refresh.
+            # It must never silently bind the Star button to another event.
+            self._feed_explicitly_cleared=True
             self._selected_id=""
             self._render_empty_brief()
 
@@ -755,17 +1049,85 @@ class MainWindow(SituationActions, QMainWindow):
         return self.controller.event(self._selected_id)
 
     def navigate_event(self,event_id):
-        event=self.controller.event(event_id)
+        """Navigate from map/alerts without repeated full archive/map rebuilds.
+
+        The old map-click path could emit four filter signals followed by one
+        explicit refresh, then rebuild all 500 feed rows again. On an active
+        collector with thousands of country-evidence reports, those synchronous
+        refreshes stall the Windows GUI event loop.
+        """
+        identity = str(event_id or "")
+        event = self.controller.event(identity)
         if not event:
-            self.status_label.setText("This event is no longer in the local archive.");return
-        self._selected_id=str(event_id)
+            self.status_label.setText("This event is no longer in the local archive.")
+            return
+        self._selected_id = identity
+        self._feed_explicitly_cleared=False
         self.open_page(0)
-        if self.history_slider.value()!=1000:self.history_slider.setValue(1000)
-        if not any(str(e.get("id"))==self._selected_id for e in self._events):
-            self.search.clear();self.category.setCurrentIndex(0);self.region.setCurrentIndex(0);self.time_range.setCurrentIndex(3);self.history_slider.setValue(1000);self.refresh_data()
-        self._populate_feed();self._render_event(event);self.world_map.select_event(event_id,center=True)
-        if self.isMinimized():self.showNormal()
-        self.show();self.raise_();self.activateWindow()
+        self.intelligence_mode.setCurrentIndex(1)
+
+        # Historical replay or an event outside the current feed requires one
+        # deliberate broaden-to-All archive navigation. Change ALL dimensions
+        # atomically, without invoking every combo's refresh_data slot.
+        visible = any(str(e.get("id")) == identity for e in self._events)
+        reset_view = not visible or self.history_slider.value() != 1000
+        if reset_view:
+            self.search_timer.stop()
+            updates = (
+                (self.search, "text", ""),
+                (self.category, "index", 0),
+                (self.region, "index", 0),
+                (self.time_range, "index", 3),
+                (self.history_slider, "value", 1000),
+            )
+            for control, mode, value in updates:
+                before = control.blockSignals(True)
+                try:
+                    if mode == "text":
+                        control.setText(value)
+                    elif mode == "index":
+                        control.setCurrentIndex(value)
+                    else:
+                        control.setValue(value)
+                finally:
+                    control.blockSignals(before)
+            self.history_label.setText("Latest")
+            # This refresh also populates the feed and renders the selected
+            # record if it is inside the 500-row feed window.
+            self.refresh_data()
+            if not any(str(e.get("id")) == identity for e in self._events):
+                # A country/incident map may expose any of 5,000 positions;
+                # it is normal for the clicked archived record to fall outside
+                # the first 500 feed rows. Explicitly include only that chosen
+                # event in the current feed (one list construction), so the
+                # selected Brief/Star remains bound to a visible canonical row.
+                self._events = [event] + list(self._events[:499])
+                self._selected_id = identity
+                self._populate_feed()
+                self._render_event(event)
+                self.feed_count.setText(str(len(self._events)))
+        else:
+            # The selected row already exists; only synchronize its selection
+            # and the brief. Never reconstruct 500 QListWidgetItems for a
+            # single map click.
+            previous = self.feed_list.blockSignals(True)
+            try:
+                for row_index in range(self.feed_list.count()):
+                    row = self.feed_list.item(row_index)
+                    data = row.data(Qt.ItemDataRole.UserRole) or {}
+                    if str(data.get("id") or "") == identity:
+                        self.feed_list.setCurrentItem(row)
+                        break
+            finally:
+                self.feed_list.blockSignals(previous)
+            self._render_event(event)
+
+        self.world_map.select_event(identity,center=True)
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def _open_original(self):
         e=self._selected_event()
@@ -778,6 +1140,7 @@ class MainWindow(SituationActions, QMainWindow):
             self.status_label.setText("Translating available source text locally…")
             self.controller.translate_report(report)
 
+    @Slot(str, str)
     def _translation_done(self,report_id,text):
         self.status_label.setText("Translation request completed.")
         box=QMessageBox(self);box.setWindowTitle("English translation");box.setTextFormat(Qt.TextFormat.PlainText);box.setText(str(text));box.setIcon(QMessageBox.Icon.Information);box.exec()
@@ -894,6 +1257,7 @@ class MainWindow(SituationActions, QMainWindow):
         values["alert_threshold"]=self.setting_threshold.currentData()
         try:
             for key,value in values.items():self.controller.set_setting(key,value)
+            self._dirty_pages.update((2,3,4,5))
             self.settings_result.setText("Settings saved. Provider rate limits still apply; existing history stays available.")
         except Exception as exc:self.settings_result.setText(f"Settings could not be saved: {exc}")
 
@@ -943,6 +1307,7 @@ class MainWindow(SituationActions, QMainWindow):
     def _toggle_monitoring(self):
         self.controller.pause() if self.controller.monitoring else self.controller.resume();self._status_update("")
 
+    @Slot(str)
     def _status_update(self,text):
         monitoring=bool(getattr(self.controller,"monitoring",False))
         self.titlebar.status.setText("MONITORING" if monitoring else "PAUSED")
@@ -950,11 +1315,20 @@ class MainWindow(SituationActions, QMainWindow):
         self.titlebar.status.setStyleSheet("color:#7fdbb2;background:#173029;border:1px solid #284d40;border-radius:9px;padding:3px 9px;font-size:10px;" if monitoring else "color:#d3bd8f;background:#30291e;border:1px solid #514532;border-radius:9px;padding:3px 9px;font-size:10px;")
         self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
         if text:self.status_label.setText(str(text)[:250])
-        if self.pages.currentIndex()==3:self._populate_sources()
+        if self.pages.currentIndex()==3:
+            self._dirty_pages.add(3)
+            self._populate_sources()
+            self._dirty_pages.discard(3)
+        else:
+            self._dirty_pages.add(3)
 
+    @Slot(dict)
     def _on_alert(self,alert):
         self.status_label.setText("New alert saved in Alerts.")
-        if self.pages.currentIndex()==4:self._populate_alerts()
+        self._dirty_pages.add(4)
+        if self.pages.currentIndex()==4:
+            self._populate_alerts()
+            self._dirty_pages.discard(4)
 
     def _find_country(self,*args):
         name=args[0] if args and isinstance(args[0],str) else self.country_search.text().strip()
@@ -963,6 +1337,52 @@ class MainWindow(SituationActions, QMainWindow):
     def _country_selected(self,name):
         self.country_search.setText(name)
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
+
+    def _open_economic_country(self, name):
+        """Open sourced dated measurements; never turn them into event pins."""
+        from .crisis_overlay import normalize_country
+        target = normalize_country(name)
+        self.open_page(2)  # Populates the real stored Economy observations.
+        for index in range(1, self.economy_country.count()):
+            if normalize_country(self.economy_country.itemText(index)) == target:
+                self.economy_country.setCurrentIndex(index)
+                self.status_label.setText(
+                    f"Economy: dated sourced observations for {name}; not a verified crisis."
+                )
+                return
+        self.status_label.setText(
+            f"Economy data for {name} is no longer in the local archive."
+        )
+
+    def _search_full_archive(self, phrase):
+        """Search all local headlines with one refresh and no invented geography."""
+        phrase=str(phrase or "").strip()[:200]
+        if not phrase:
+            return
+        self.open_page(0)
+        # Change the full-archive search dimensions atomically: the normal
+        # search timer and each combo callback would otherwise rebuild map
+        # evidence several times on one country-dialog click.
+        self.search_timer.stop()
+        for control, value in (
+            (self.search, phrase),
+            (self.category, 0),
+            (self.region, 0),
+            (self.time_range, 3),
+            (self.history_slider, 1000),
+        ):
+            blocked=control.blockSignals(True)
+            try:
+                if control is self.search:
+                    control.setText(value)
+                else:
+                    control.setCurrentIndex(value) if hasattr(control,"setCurrentIndex") else control.setValue(value)
+            finally:
+                control.blockSignals(blocked)
+        self.refresh_data()
+        self.status_label.setText(
+            f"Full archive search: {phrase}. Results have no implied country coordinates."
+        )
 
     def _reset_map(self):
         self.world_map.reset_view();self.country_search.clear()
@@ -1068,10 +1488,12 @@ class MainWindow(SituationActions, QMainWindow):
     def closeEvent(self,event):
         if self._force_close or getattr(self.controller,"_closed",False):
             event.accept();return
-        self.save_layout()
         if self._close_handler and not self._force_close:
+            # Close-to-tray policy and one deferred settings save belong to
+            # bootstrap; avoid blocking the X click with duplicate SQLite IO.
             event.ignore();self._close_handler()
         else:
+            self.save_layout()
             if hasattr(self.media,"shutdown"):self.media.shutdown()
             event.accept()
 

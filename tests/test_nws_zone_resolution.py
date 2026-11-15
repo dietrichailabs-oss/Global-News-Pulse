@@ -5,7 +5,7 @@ from datetime import datetime,timezone
 import socket
 import httpx
 import pytest
-from global_pulse.nws_zone_resolver import ZoneResolver,MAX_REQUESTS,MAX_CACHE_ENTRIES
+from global_pulse.nws_zone_resolver import ZoneResolver,MAX_REQUESTS,MAX_CACHE_ENTRIES,MAX_REFUSAL_COOLDOWN_SECONDS
 from global_pulse.map_evidence import normalize_map_fields,event_areas,wrapped_polygons
 from global_pulse.sources import Collector,load_catalog
 from global_pulse.core import Store
@@ -107,6 +107,32 @@ def test_provider_refusal_cools_whole_zone_origin(status):
     assert len(calls)==1 and 'area_geometry' not in out[0]
     if status==429:assert r.blocked_until>=7200
 
+
+@pytest.mark.parametrize('status,retry_after',[
+    (429, '999999999999999999999999999999999999999999'),
+    (503, 'Fri, 01 Jan 2099 00:00:00 GMT'),
+    (429, '86401'),
+])
+def test_official_zone_refusal_retry_after_is_finite_and_recovery_is_possible(status,retry_after):
+    r,clock=resolver()
+    def handler(req):
+        if str(req.url)==ZONE:
+            return httpx.Response(status,headers={'Retry-After':retry_after},request=req)
+        return httpx.Response(200,json=zone_payload(str(req.url)),request=req)
+    factory,calls=transport(handler)
+    rejected,stats=r.enrich([report([ZONE,OTHER])],client_factory=factory)
+    assert stats['provider_refusals']==1 and len(calls)==1
+    assert 'area_geometry' not in rejected[0]
+    assert r.blocked_until==MAX_REFUSAL_COOLDOWN_SECONDS
+    clock.value=MAX_REFUSAL_COOLDOWN_SECONDS-1
+    r.enrich([report([OTHER])],client_factory=factory)
+    assert len(calls)==1  # No traffic before the bounded cooldown ends.
+    clock.value=MAX_REFUSAL_COOLDOWN_SECONDS+1
+    recovered,stats=r.enrich([report([OTHER])],client_factory=factory)
+    assert len(calls)==2 and stats['resolved_alerts']==1
+    assert recovered[0]['area_geometry_basis']=='nws_affected_zones'
+    assert recovered[0]['area_zone_sources'][0]['url']==OTHER
+
 @pytest.mark.parametrize('kind',['redirect','wrong_id','missing_geometry','oversize','malformed'])
 def test_failed_zone_keeps_alert_and_does_not_retry_loop(kind):
     r,clock=resolver()
@@ -152,6 +178,52 @@ def test_actual_collector_store_reopen_and_map_provenance(tmp_path):
     finally:store.close()
 
 
+
+def test_expired_bulletin_with_future_hazard_end_retains_official_area_without_reactivation(tmp_path):
+    # The bulletin expires at 08:30, while the publisher explicitly dates the
+    # hazard end at 14:00. Keep the sourced area in archived evidence without
+    # promoting the expired CAP notice to a current map alert.
+    source=next(s for s in load_catalog() if s['id']=='nws')
+    payload={'features':[{'id':'https://api.weather.gov/alerts/expired-bulletin-fixture',
+        'geometry':None,'properties':{
+        'id':'https://api.weather.gov/alerts/expired-bulletin-fixture',
+        'status':'Actual','messageType':'Alert',
+        'headline':'Synthetic Alaska offshore hazardous spray warning',
+        'event':'Heavy Freezing Spray Warning','severity':'Severe',
+        'sent':'2026-11-11T08:00:00Z','expires':'2026-11-11T08:30:00Z',
+        'ends':'2026-11-11T14:00:00Z','description':'Synthetic offline only',
+        'areaDesc':'Alaska offshore test area','affectedZones':[ZONE]}}]}
+    def handler(req):
+        return httpx.Response(200,json=zone_payload() if '/zones/' in str(req.url) else payload,request=req)
+    factory,calls=transport(handler)
+    area_resolver,_=resolver()
+    collected=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=area_resolver).collect()
+    assert collected['state']['status']=='available' and len(calls)==2
+    reports=collected['reports']
+    assert len(reports)==1
+    assert reports[0]['expires_at']=='2026-11-11T08:30:00Z'
+    assert reports[0]['ends_at']=='2026-11-11T14:00:00Z'
+    assert reports[0]['area_geometry_basis']=='nws_affected_zones'
+    assert reports[0].get('latitude') is None and reports[0].get('longitude') is None
+    path=tmp_path/'expired_offshore.sqlite3'
+    store=Store(path,mode='live')
+    try: store.ingest(reports,now='2026-11-11T09:00:00Z')
+    finally: store.close()
+    store=Store(path,mode='live')
+    try:
+        events=store.list_events()  # Historical archive; map evidence may filter an expired notice.
+        assert len(events)==1
+        restored=events[0]['reports'][0]
+        assert restored['evidence_status']=='expired'
+        assert restored['ends_at']=='2026-11-11T14:00:00Z'
+        assert restored['expires_at']=='2026-11-11T08:30:00Z'
+        assert restored['area_geometry_basis']=='nws_affected_zones'
+        assert restored['area_zone_sources'][0]['url']==ZONE
+        assert len(list(wrapped_polygons(restored['area_geometry'])))==2
+        assert event_areas([restored])==[]  # Historical geometry is not a live alert.
+    finally:store.close()
+
+
 def test_pending_geometry_does_not_get_stuck_behind_304():
     source=next(s for s in load_catalog() if s['id']=='nws')
     factory,calls=transport(lambda req:httpx.Response(200,json={'features':[]},request=req))
@@ -159,3 +231,229 @@ def test_pending_geometry_does_not_get_stuck_behind_304():
     result=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=r).collect({'etag':'old','last_modified':'yesterday','nws_zones_pending':True})
     assert 'if-none-match' not in calls[0].headers and 'if-modified-since' not in calls[0].headers
     assert result['state']['nws_zones_pending'] is False
+
+@pytest.mark.parametrize('refs', [
+    [ZONE, 'https://api.weather.gov.evil.test/zones/marine/PKZ802'],
+    [f'https://api.weather.gov/zones/marine/PKZ{i:03d}' for i in range(1, 130)],
+])
+def test_incomplete_explicit_affected_zones_never_claim_complete_area(tmp_path, refs):
+    # Reproduce the actual source -> collector -> stored report path: neither
+    # an invalid neighbor nor a reference past the cap can be discarded to
+    # make a deceptively complete polygon. UGC cannot override bad explicit refs.
+    source=next(s for s in load_catalog() if s['id']=='nws')
+    alert_id='https://api.weather.gov/alerts/synthetic-zone-integrity'
+    payload={'features':[{'id':alert_id,'geometry':None,'properties':{
+        'id':alert_id,'status':'Actual','messageType':'Alert',
+        'headline':'Synthetic Alaska offshore warning','event':'Heavy Freezing Spray Warning',
+        'severity':'Severe','sent':'2026-11-11T08:00:00Z',
+        'expires':'2026-11-11T12:00:00Z','ends':'2026-11-11T14:00:00Z',
+        'description':'Synthetic fixture','areaDesc':'Alaska offshore',
+        'affectedZones':refs,'geocode':{'UGC':['PKZ801']}}}]}
+    def handler(req):
+        assert '/zones/' not in str(req.url), 'Partial/unsafe NWS boundary lookup'
+        return httpx.Response(200,json=payload,request=req)
+    factory,calls=transport(handler)
+    r,_=resolver()
+    received=Collector(source,client_factory=factory,now=lambda:NOW,zone_resolver=r).collect()
+    assert len(calls)==1 and len(received['reports'])==1
+    row=received['reports'][0]
+    assert row['affected_zones']==[] and row['area_status']=='invalid_zone_references'
+    assert not row.get('area_geometry') and row.get('area_zone_reference_basis') is None
+    assert row['expires_at']=='2026-11-11T12:00:00Z'
+    assert row['ends_at']=='2026-11-11T14:00:00Z'
+    path=tmp_path/'zone_integrity.sqlite3'
+    with Store(path,mode='live') as db:
+        db.ingest(received['reports'],now='2026-11-11T09:00:00Z')
+    with Store(path,mode='live') as db:
+        saved=db.list_events(map_evidence=True)
+        assert len(saved)==1
+        stored=saved[0]['reports'][0]
+        assert stored['area_status']=='invalid_zone_references'
+        assert event_areas([stored])==[]
+
+
+def test_unsafe_preparsed_zone_input_is_not_partially_resolved():
+    r,_=resolver()
+    factory,calls=transport(lambda req:pytest.fail('Unsafe provider list must never be requested'))
+    out,stats=r.enrich([report([ZONE, 'bad zone'])],client_factory=factory)
+    assert not calls and not out[0].get('area_geometry')
+    assert out[0]['area_status']=='invalid_zone_references'
+    assert stats['unresolved_alerts']==1
+
+
+def test_original_provider_polygon_still_wins_over_malformed_zone_list():
+    from global_pulse.map_evidence import normalize_map_fields, nws_map_fields
+    fields=normalize_map_fields({'area_geometry':GEO,'affected_zones':[ZONE,'bad zone']})
+    assert fields['area_geometry']==GEO and fields['area_status']=='provider_geometry'
+    feature={'geometry':GEO}
+    props={'status':'Actual','messageType':'Alert','affectedZones':[ZONE,'bad zone'],
+           'geocode':{'UGC':['PKZ801']},'event':'Heavy Freezing Spray Warning'}
+    selected=nws_map_fields(feature,props)
+    assert selected['area_geometry']==GEO and selected['affected_zones']==[]
+    assert 'area_zone_reference_basis' not in selected
+
+@pytest.mark.parametrize('length_delta', [-1, 1])
+def test_nws_zone_200_length_mismatch_never_admits_partial_transfer(length_delta):
+    """Valid JSON with incorrect HTTP framing must not become official map evidence."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    claimed = len(payload) + length_delta
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(claimed)}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1
+    assert stats['lookup_failures'] == 1
+    assert stats['unresolved_alerts'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
+
+@pytest.mark.parametrize('bad_length', ['not-a-number', '-42', '1, 2'])
+def test_nws_zone_malformed_http_length_cannot_become_official_zone_evidence(bad_length):
+    """Ambiguous/invalid framing is not accepted as a complete publisher polygon."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': bad_length}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['lookup_failures'] == 1
+    assert result[0]['affected_zones'] == [ZONE]
+    assert 'area_geometry' not in result[0]
+    assert event_areas(result) == []
+
+
+def test_nws_zone_matching_200_length_still_admits_valid_offshore_area():
+    """Correctly framed official zone transfers keep working with the same parser."""
+    payload = json.dumps(zone_payload(), separators=(',', ':')).encode()
+    r, _ = resolver()
+    factory, calls = transport(lambda req: httpx.Response(
+        200, content=payload, headers={'Content-Length': str(len(payload))}, request=req))
+    result, stats = r.enrich([report()], client_factory=factory)
+    assert len(calls) == 1 and stats['resolved_alerts'] == 1
+    assert result[0]['area_zone_sources'][0]['url'] == ZONE
+    assert event_areas(result)[0]['basis'] == 'provider_affected_zone_geometry'
+    assert len(list(wrapped_polygons(result[0]['area_geometry']))) == 2
+
+
+# Historical independently engineered PR19 provenance tests, restored without weakening the source checks.
+@pytest.mark.parametrize('receipts', [
+    [],
+    [{'url': ZONE, 'retrieved_at': 'not-a-timestamp'}],
+    [{'url': OTHER, 'retrieved_at': '2026-11-11T09:00:00Z'}],
+    [{'url': 'https://api.weather.gov.evil.test/zones/forecast/PKZ801',
+      'retrieved_at': '2026-11-11T09:00:00Z'}],
+])
+def test_zone_derived_polygon_without_matching_dated_zone_evidence_is_not_direct_geometry(receipts):
+    """Do not launder an unattributed zone composite into a provider alert polygon."""
+    raw = report([ZONE], area_geometry=GEO,
+                 area_geometry_basis='nws_affected_zones', area_zone_sources=receipts)
+    normalized = normalize_map_fields(raw)
+    assert normalized['affected_zones'] == [ZONE]
+    assert normalized['area_status'] == 'zone_geometry_not_resolved'
+    assert 'area_geometry' not in normalized
+    assert 'area_geometry_basis' not in normalized
+    assert event_areas([dict(raw, **normalized, area_geometry=normalized.get('area_geometry'))]) == []
+
+
+def test_zone_geometry_with_no_zone_refs_cannot_gain_direct_provider_attribution():
+    raw = report([], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[{'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}])
+    result = normalize_map_fields(raw)
+    assert not result['affected_zones'] and 'area_geometry' not in result
+    assert result['area_status'] == 'zone_geometry_not_resolved'
+
+
+def test_valid_dated_zone_receipt_still_admits_true_dateline_geometry():
+    raw = report([ZONE], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[{'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}])
+    result = normalize_map_fields(raw)
+    assert result['area_geometry'] == GEO
+    assert result['area_status'] == 'provider_zone_geometry'
+    assert result['area_geometry_basis'] == 'nws_affected_zones'
+    assert len(list(wrapped_polygons(result['area_geometry']))) == 2
+
+
+def test_unverified_derived_geometry_fails_closed_through_collector_store_and_map(tmp_path):
+    """Synthetic resolver regression: source -> Collector -> persisted SQLite -> map."""
+    source = next(s for s in load_catalog() if s['id'] == 'nws')
+    alert_id = 'https://api.weather.gov/alerts/synthetic-unattributed-zone'
+    payload = {'features': [{'id': alert_id, 'geometry': None, 'properties': {
+        'id': alert_id, 'status': 'Actual', 'messageType': 'Alert',
+        'headline': 'Synthetic Alaska offshore warning provenance check',
+        'event': 'Heavy Freezing Spray Warning', 'severity': 'Severe',
+        'sent': '2026-11-11T08:00:00Z',
+        'expires': '2026-11-11T12:00:00Z', 'ends': '2026-11-11T14:00:00Z',
+        'description': 'Synthetic warning, no actual provider area fetch',
+        'areaDesc': 'Synthetic Alaska offshore',
+        'affectedZones': [ZONE]}}]}
+
+    class MissingReceiptResolver:
+        def enrich(self, rows, *, client_factory=None):
+            # Model an incomplete resolver/store handoff; there is no second
+            # zone HTTP request and no verified geometry source receipt.
+            return [dict(row, area_geometry=copy.deepcopy(GEO),
+                         area_geometry_basis='nws_affected_zones',
+                         area_zone_sources=[]) for row in rows], {'unresolved_alerts': 1}
+
+    def handler(request):
+        assert '/zones/' not in str(request.url)
+        return httpx.Response(200, json=payload, request=request)
+
+    factory, calls = transport(handler)
+    result = Collector(source, client_factory=factory, now=lambda: NOW,
+                       zone_resolver=MissingReceiptResolver()).collect()
+    assert result['state']['status'] == 'available' and len(calls) == 1
+    assert len(result['reports']) == 1
+    assert result['reports'][0]['area_geometry_basis'] == 'nws_affected_zones'
+    db_path = tmp_path / 'unverified-zone-provenance.sqlite3'
+    with Store(db_path, mode='live') as store:
+        stored = store.ingest(result['reports'], now='2026-11-11T09:00:00Z')
+        assert stored and not store.last_ingest_errors
+    with Store(db_path, mode='live') as store:
+        events = store.list_events(limit=50)
+        assert len(events) == 1
+        report_row = events[0]['reports'][0]
+        assert report_row['affected_zones'] == [ZONE]
+        assert report_row['area_status'] == 'zone_geometry_not_resolved'
+        assert not report_row.get('area_geometry')
+        assert report_row['expires_at'] == '2026-11-11T12:00:00Z'
+        assert report_row['ends_at'] == '2026-11-11T14:00:00Z'
+        assert event_areas([report_row]) == []
+        assert all(not e.get('map_areas') for e in store.list_events(map_evidence=True))
+
+
+@pytest.mark.parametrize('bad_receipts', [
+    [],
+    [{'url': ZONE, 'retrieved_at': 'not-a-date'}],
+    [{'url': OTHER, 'retrieved_at': '2026-11-11T09:00:00Z'}],
+    [{'url': 'https://api.weather.gov.evil.test/zones/forecast/PKZ801',
+      'retrieved_at': '2026-11-11T09:00:00Z'}],
+])
+def test_map_renderer_refuses_legacy_unvalidated_zone_composite_without_store_pass(bad_receipts):
+    """Direct map projection of an old saved report must enforce provenance too."""
+    raw = report([ZONE], area_geometry=GEO, area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=bad_receipts)
+    original = copy.deepcopy(raw)
+    assert event_areas([raw]) == []
+    assert raw == original
+
+
+def test_map_renderer_retains_valid_offshore_zone_and_honest_partial_coverage():
+    valid = {'url': ZONE, 'retrieved_at': '2026-11-11T09:00:00Z'}
+    raw = report([ZONE, OTHER], area_geometry=GEO,
+                 area_geometry_basis='nws_affected_zones',
+                 area_zone_sources=[valid])
+    areas = event_areas([raw])
+    assert len(areas) == 1
+    assert areas[0]['basis'] == 'provider_affected_zone_geometry'
+    assert '1/2 zones' in areas[0]['description']
+    assert 'partial area' in areas[0]['description']
+    assert len(list(wrapped_polygons(areas[0]['geometry']))) == 2
+    # An invalid neighbor cannot make the one verified zone look complete.
+    invalid = dict(raw, affected_zones=[ZONE, 'untrusted zone'])
+    assert event_areas([invalid]) == []
+    # Actual direct NWS bulletin area does not require fetched zone receipts.
+    direct = report([ZONE], area_geometry=GEO)
+    assert event_areas([direct])[0]['basis'] == 'provider_alert_geometry'

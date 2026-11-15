@@ -21,6 +21,7 @@ from uuid import uuid4
 
 
 MANIFEST_URL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+MASTER_LIST_URL = "https://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
 HOST = "data.gdeltproject.org"
 MAX_MANIFEST_BYTES = 8192
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
@@ -99,10 +100,14 @@ def parse_manifest(raw: str | bytes) -> dict[str, GdeltBatch]:
         size = int(size_text)
         if size < 1:
             raise GdeltBatchError("Invalid GDELT advertised archive size")
-        # The GDELT listing may contain HTTP links; constrain host/path, then
-        # upgrade exactly those links to HTTPS without following redirects.
-        entries[kind] = GdeltBatch(filename, kind, match.group("stamp"),
-                                    f"https://{HOST}{parsed.path}", size, checksum.lower())
+        # GDELT's HTTPS manifest may still print historical http:// archive
+        # links. Constrain host/path and request the equivalent HTTPS object;
+        # HTTP currently redirects to HTTPS and redirects are intentionally
+        # never followed by the collector.
+        entries[kind] = GdeltBatch(
+            filename, kind, match.group("stamp"),
+            f"https://{HOST}{parsed.path}", size, checksum.lower()
+        )
     if not entries or set(entries) - set(KINDS):
         raise GdeltBatchError("No supported GDELT manifest entries")
     return entries
@@ -245,10 +250,25 @@ class GdeltBatchCache:
         return False
 
     def is_complete(self, batch: GdeltBatch) -> bool:
+        """A completed filename is immutable only for the SAME manifest identity.
+
+        An upstream checksum/size revision with the same filename must not be
+        presented as an already-imported CURRENT export. Keep the validated
+        historical rows and checkpoint intact for explicit review instead of
+        silently replacing evidence or returning a false success.
+        """
         row = self.connection.execute(
-            "SELECT status FROM gdelt_batches WHERE filename=?", (batch.filename,)
+            "SELECT kind,batch_timestamp,source_url,advertised_bytes,advertised_md5,status "
+            "FROM gdelt_batches WHERE filename=?", (batch.filename,)
         ).fetchone()
-        return bool(row and row[0] == "complete")
+        if not row or row[5] != "complete":
+            return False
+        if row[:5] != (batch.kind, batch.timestamp, batch.url,
+                       batch.advertised_bytes, batch.advertised_md5):
+            raise GdeltBatchError(
+                "GDELT completed archive metadata changed; original checkpoint retained for review"
+            )
+        return True
 
     @staticmethod
     def _validate_batch(batch: GdeltBatch) -> None:

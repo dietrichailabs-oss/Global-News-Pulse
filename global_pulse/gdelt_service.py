@@ -55,6 +55,11 @@ class GdeltService(QObject):
             return
         self.active = value
         if value:
+            try:
+                self.schedule.recover_legacy_transport_failure()
+            except (sqlite3.Error, OSError, ValueError):
+                # Normal schedule handling below will surface storage failures.
+                pass
             self.timer.start()
             self.tick()
         else:

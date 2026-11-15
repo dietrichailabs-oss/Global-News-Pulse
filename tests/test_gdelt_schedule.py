@@ -83,6 +83,39 @@ def test_access_refusal_suspends_without_automatic_retry(tmp_path,status):
     s.finish(t,{'status':'error','http_status':status},now=NOW)
     assert s.status()['suspended'] and s.claim(now=NOW+86400,jitter=0) is None
 
+def test_upgrade_recovers_only_never_successful_legacy_404_suspension(tmp_path):
+    p=tmp_path/'archive';s=Schedule(p)
+    with s.db() as db,db:
+        db.execute("UPDATE gdelt_schedule SET suspended=1,failures=5,state='suspended',http_status=404,next_at=? WHERE id=1",
+                   (NOW+3600,))
+    assert s.recover_legacy_transport_failure()
+    row=s.status()
+    assert not row['suspended'] and row['failures']==0 and row['state']=='waiting'
+    assert row['next_at']==NOW+3600
+    assert s.claim(now=NOW+3599,jitter=0) is None
+    assert s.claim(now=NOW+3600,jitter=0)
+
+
+@pytest.mark.parametrize("status",[301,404])
+def test_upgrade_recovery_does_not_touch_prior_success_or_cached_rows(tmp_path,status):
+    p=tmp_path/f'archive-{status}';s=Schedule(p)
+    with s.db() as db,db:
+        db.execute("UPDATE gdelt_schedule SET suspended=1,failures=5,state='suspended',http_status=?,last_success=?,cached_rows=10 WHERE id=1",
+                   (status,NOW))
+    before=s.status()
+    assert not s.recover_legacy_transport_failure()
+    assert s.status()==before
+
+
+def test_upgrade_recovery_never_reopens_access_denial(tmp_path):
+    p=tmp_path/'archive';s=Schedule(p)
+    with s.db() as db,db:
+        db.execute("UPDATE gdelt_schedule SET suspended=1,failures=1,state='suspended',http_status=403 WHERE id=1")
+    before=s.status()
+    assert not s.recover_legacy_transport_failure()
+    assert s.status()==before
+
+
 def test_long_retry_after_persists_and_toggle_cannot_override(tmp_path):
     p=tmp_path/'archive';s=Schedule(p);t=s.claim(now=NOW,jitter=0)
     s.finish(t,{'status':'error','http_status':429,'retry_after_seconds':172800},now=NOW)

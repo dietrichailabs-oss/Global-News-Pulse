@@ -1,0 +1,98 @@
+name: Source Expansion - Netherlands South Africa India Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-nl-za-in-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publisher-direct-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Probe unadmitted official publisher RSS (no catalog modification)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          families = {
+            "nl_cbs": {
+              "allowed_domains":["www.cbs.nl"],"article_domains":["www.cbs.nl","cbs.nl"],
+              "country":"Netherlands","region":"Europe","language":"en",
+              "attribution":"Statistics Netherlands (CBS), CC BY 4.0; original link and date; no endorsement"},
+            "za_sanews": {
+              "allowed_domains":["www.sanews.gov.za"],"article_domains":["www.sanews.gov.za","sanews.gov.za"],
+              "country":"South Africa","region":"Africa","language":"en",
+              "attribution":"South African Government Communication and Information System (SAnews); source credited"},
+            "in_pib": {
+              "allowed_domains":["pib.gov.in","www.pib.gov.in"],
+              "article_domains":["pib.gov.in","www.pib.gov.in"],
+              "country":"India","region":"South Asia","language":"en",
+              "attribution":"Press Information Bureau, Government of India; original link and publication date"},
+          }
+          endpoints=[
+            ("nl_cbs","nl_cbs_all_probe","https://www.cbs.nl/en-gb/rss-feeds/all-news-items","Economy"),
+            ("nl_cbs","nl_cbs_economy_probe","https://www.cbs.nl/en-gb/rss-feeds/economie","Economy"),
+            ("nl_cbs","nl_cbs_health_probe","https://www.cbs.nl/en-gb/rss-feeds/gezondheid-en-welzijn","Health"),
+            ("nl_cbs","nl_cbs_energy_probe","https://www.cbs.nl/en-gb/rss-feeds/industrie-en-energie","Infrastructure"),
+            ("za_sanews","za_sanews_news_probe","https://www.sanews.gov.za/south-africa-news-stories.xml","Government"),
+            ("za_sanews","za_sanews_features_probe","https://www.sanews.gov.za/features.xml","News"),
+            ("in_pib","in_pib_reg1_probe","https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=1","Government"),
+            ("in_pib","in_pib_reg3_probe","https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3","Government"),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          passed=[]
+          for i,(family,identity,url,category) in enumerate(endpoints):
+              if i: time.sleep(4)
+              source=dict(adapter="rss",enabled=True,metadata_only=True,access_status="reviewed_public",
+                independence="original",official=True,min_interval=3600,stale_after_days=30,
+                retention_days=180,category=category,publisher_origin_id=family,
+                id=identity,name=identity,url=url,**families[family])
+              try:
+                  output=Collector(source).collect()
+                  state=output["state"]; reports=output.get("reports",[])
+                  recent=[r for r in reports if r.get("published_at")
+                    and 0<=now-timestamp(r["published_at"])<=30*86400]
+                  invalid=[r for r in reports if not r.get("title") or not r.get("published_at")
+                    or not r.get("attribution") or r.get("summary") or r.get("media")
+                    or r.get("origin_id")!=family or r.get("country_basis")!="publisher_coverage"
+                    or urlsplit(r.get("url","")).scheme!="https"
+                    or urlsplit(r.get("url","")).hostname not in source["article_domains"]
+                    or r.get("original_url") != r.get("url")]
+                  passed_this=bool(state.get("status")=="available" and state.get("http_status")==200
+                    and reports and recent and not invalid)
+                  result=dict(id=identity,origin=family,url=url,passed=passed_this,
+                    status=state.get("status"),http_status=state.get("http_status"),
+                    reports=len(reports),recent_30d=len(recent),latest=state.get("latest_publication") or "",
+                    violations=len(invalid),error=state.get("error") or "")
+                  if passed_this: passed.append(identity)
+              except Exception as exc:
+                  result=dict(id=identity,origin=family,url=url,passed=False,error=type(exc).__name__+": "+str(exc)[:140])
+              print("SOURCE_EXPANSION_PRE_ADMISSION",json.dumps(result,sort_keys=True),flush=True)
+          print("SOURCE_EXPANSION_PROBE_COMPLETE",json.dumps({"passed":passed,
+            "tested":len(endpoints),"note":"Probe-only. Admission requires separately reviewed rights and strict post-admission checks."},sort_keys=True),flush=True)
+          PY

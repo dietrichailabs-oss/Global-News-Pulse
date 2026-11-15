@@ -8,9 +8,9 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSystemTrayIcon, QVBoxLayout
+from PySide6.QtCore import QObject, Qt, QTimer, Slot
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
 from . import __version__, BUILD_ID
 from .security import event_id, redact
@@ -20,6 +20,36 @@ def data_directory():
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "DietrichAILabs" / "GlobalPulse"
     return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "global-pulse"
+
+
+def _tray_health_state(controller):
+    """Preserve alerts > paused > active-source errors > active precedence."""
+    if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
+        return "alerts"
+    if not controller.monitoring:
+        return "paused"
+    # _apply_sources caches the exact IDs passed to Scheduler. A disabled or
+    # unavailable old source error must not color the live tray icon red.
+    return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
+            else "active")
+
+
+class _TrayRefreshBridge(QObject):
+    """GUI-affine slot: collector threads never start a tray QTimer directly."""
+
+    def __init__(self, timer: QTimer, controller, should_stop=None):
+        super().__init__(timer)
+        self.timer = timer
+        self.controller = controller
+        self.stopping = False
+        self.should_stop = should_stop or (lambda: False)
+
+    @Slot()
+    def schedule(self):
+        if self.stopping or self.should_stop() or self.controller._closed:
+            return
+        if not self.timer.isActive():
+            self.timer.start()
 
 
 def pulse_icon(state="active", size=64):
@@ -85,6 +115,93 @@ def onboarding(controller, parent):
     return False
 
 
+
+class _StartupSplash(QSplashScreen):
+    """Non-dismissible notice painted before opening heavy local source data."""
+
+    def mousePressEvent(self, event):
+        # Splash clicks during slow loading must not expose an unfinished UI.
+        event.accept()
+
+
+def show_initializing(app):
+    background = QPixmap(560, 186)
+    background.fill(QColor("#17161e"))
+    painter = QPainter(background)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#9169d9"), 2))
+    painter.drawRoundedRect(5, 5, 550, 176, 14, 14)
+    painter.end()
+    splash = _StartupSplash(background, Qt.WindowType.WindowStaysOnTopHint)
+    splash.setAccessibleName("Global Pulse initializing")
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Preparing your local archive and source settings.\n"
+        "The dashboard will open when its data is ready.",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7")
+    )
+    splash.show()
+    # Draw before Controller construction or SQLite/Qt resource setup.
+    app.processEvents()
+    return splash
+
+
+def prepare_initial_dashboard(app, splash, window, controller):
+    """Finish bounded LOCAL UI startup work before showing the dashboard.
+
+    First load has already queried the local archive and painted the map
+    while MainWindow was constructed. Cold headlines deliberately queue
+    language identification after the first paint; drain that finite queue
+    while the non-dismissable splash remains visible, rather than running
+    500 Qt ticks against the newly interactive main window. Pre-populate
+    all deferred local workspace tables now; no network/media is opened.
+    Ongoing live collection is NOT a startup prerequisite.
+    """
+    splash.showMessage(
+        "INITIALIZING GLOBAL PULSE\n"
+        "Preparing local source tables and intelligence views...",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    app.processEvents()
+    if hasattr(window, "prepare_initial_workspaces"):
+        window.prepare_initial_workspaces()
+    headlines = getattr(controller, "_headlines", None)
+    if headlines is not None and not getattr(headlines, "closed", False):
+        pending = getattr(headlines, "deferred", None)
+        # MAX_DEFERRED is intentionally finite (512). No provider access,
+        # model installation or article-body processing is permitted here.
+        limit = int(getattr(headlines, "MAX_DEFERRED", 512)) + 8
+        initial = len(pending) if pending is not None else 0
+        for processed in range(limit):
+            if not pending:
+                break
+            if processed % 24 == 0:
+                splash.showMessage(
+                    "INITIALIZING GLOBAL PULSE\n"
+                    f"Preparing source headlines {processed}/{initial}...",
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                    QColor("#eee8f7"),
+                )
+                app.processEvents()
+            headlines._drain_deferred()
+        if pending:
+            # Fail closed: never show a dashboard marked ready if a changed
+            # worker implementation breaks the finite startup invariant.
+            raise RuntimeError("Initial local headline queue did not settle")
+        headlines.deferred_timer.stop()
+    app.processEvents()
+    splash.showMessage(
+        "GLOBAL PULSE READY\n"
+        "Local archive, workspaces and headline queue prepared.\n"
+        "Live source collection remains subject to provider availability.",
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        QColor("#eee8f7"),
+    )
+    return True
+
+
 def main(argv=None):
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["--gdelt-worker"]:
@@ -147,24 +264,52 @@ def main(argv=None):
     except RuntimeError as error:
         QMessageBox.warning(None, "Global Pulse", str(error))
         return 1
-    from .controller import Controller, in_quiet_hours
-    from .native_notifications import NativeNotifications
-    from .ui import MainWindow
-    controller = Controller(directory, demo=args.demo)
-    window = MainWindow(controller)
-    window.setWindowIcon(pulse_icon())
+    splash = show_initializing(app)
+    controller = None
+    try:
+        from .controller import Controller, in_quiet_hours
+        from .native_notifications import NativeNotifications
+        from .ui import MainWindow
+        controller = Controller(directory, demo=args.demo)
+        splash.showMessage(
+            "INITIALIZING GLOBAL PULSE\nPreparing the world map, media, and reports…",
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            QColor("#eee8f7")
+        )
+        app.processEvents()
+        window = MainWindow(controller)
+        window.setWindowIcon(pulse_icon())
+    except BaseException:
+        splash.close()
+        if controller is not None:
+            try:
+                controller.close()
+            except Exception:
+                logging.getLogger("global_pulse").exception(
+                    "Controller cleanup failed during initial desktop construction"
+                )
+        instance.close()
+        handler.close()
+        log.removeHandler(handler)
+        raise
     def native_allowed():
         return controller.monitoring and controller.get_setting("notifications_enabled", True) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
 
     notifier = NativeNotifications(enabled=not args.demo, predicate=native_allowed)
     controller.native_alert.connect(notifier.notify)
-    notifier.status_changed.connect(lambda status: setattr(controller, "notification_status", status))
-    notifier.status_changed.connect(lambda _: controller.data_changed.emit())
+    def notification_status_only(status):
+        if not controller._closed:
+            controller.notification_status = status
+            controller.notification_changed.emit()
+
+    notifier.status_changed.connect(notification_status_only)
 
     def delivered(identifier, status):
         if not controller._closed:
             controller.store.update_alert_delivery(identifier, status)
-            controller.data_changed.emit()
+            # Delivery state changes the Alerts card, not the event archive,
+            # source clustering or 5,000-point world map.
+            controller.notification_changed.emit()
 
     notifier.delivery_changed.connect(delivered)
 
@@ -193,19 +338,68 @@ def main(argv=None):
     menu.addSeparator()
     menu.addAction("Exit Completely", controller.quit)
     tray.setContextMenu(menu)
-    tray.activated.connect(lambda reason: activate() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+    # Keep the native Windows right-click menu. Some taskbar overflow icons
+    # swallow the first context click; single LEFT click now offers the same
+    # menu via non-blocking popup, with double click still restoring the app.
+    def tray_activated(reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            menu.hide()
+            activate()
+        elif reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if not menu.isVisible() and not controller._closed:
+                menu.popup(QCursor.pos())
+    tray.activated.connect(tray_activated)
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray.show()
 
-    def update_tray(*_):
-        unread = any(not a.get("read", False) for a in controller.store.list_alerts(limit=50))
-        errors = any(controller.store.get_source_state(s["id"]).get("status") in {"error", "rate_limited", "failed"} for s in controller.catalog if s.get("enabled"))
-        state = "alerts" if unread else "paused" if not controller.monitoring else "error" if errors else "active"
-        tray.setIcon(pulse_icon(state))
-        tray.setToolTip("Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused"))
-
-    controller.data_changed.connect(update_tray)
     shutting_down = False
+    tray_last_state = None
+    tray_last_tip = None
+    tray_pending_menu = False
+
+    def update_tray(*_):
+        nonlocal tray_last_state, tray_last_tip, tray_pending_menu
+        if shutting_down or controller._closed:
+            return
+        # Replacing Explorer's icon while its native context popup is open
+        # can make right-click/Exit Completely appear unreliable.
+        if menu.isVisible():
+            tray_pending_menu = True
+            return
+        tray_pending_menu = False
+        state = _tray_health_state(controller)
+        if state != tray_last_state:
+            tray.setIcon(pulse_icon(state))
+            tray_last_state = state
+        tip = "Global Pulse · " + ("monitoring active" if controller.monitoring else "monitoring paused")
+        if tip != tray_last_tip:
+            tray.setToolTip(tip)
+            tray_last_tip = tip
+
+    # Collector events, source health and native alerts arrive in bursts.
+    # Never restart a pending first-due refresh or scan per enabled source.
+    tray_refresh_timer = QTimer(tray)
+    tray_refresh_timer.setSingleShot(True)
+    tray_refresh_timer.setInterval(700)
+    tray_refresh_timer.timeout.connect(update_tray)
+    tray_refresh_bridge = _TrayRefreshBridge(tray_refresh_timer, controller,
+                                            should_stop=lambda: shutting_down)
+
+    def menu_hidden():
+        nonlocal tray_pending_menu
+        if not tray_pending_menu:
+            return
+        tray_pending_menu = False
+        # Defer beyond menu.hide()'s synchronous quit signal. Shutdown may be
+        # called next; schedule_tray checks it before any Store access.
+        QTimer.singleShot(0, tray_refresh_bridge.schedule)
+
+    menu.aboutToHide.connect(menu_hidden)
+    controller.data_changed.connect(tray_refresh_bridge.schedule)
+    controller.evidence_changed.connect(tray_refresh_bridge.schedule)
+    controller.source_status_changed.connect(tray_refresh_bridge.schedule)
+    controller.notification_changed.connect(tray_refresh_bridge.schedule)
+    controller.alert_received.connect(tray_refresh_bridge.schedule)
 
     def shutdown():
         nonlocal shutting_down
@@ -233,22 +427,56 @@ def main(argv=None):
 
     # Imported here to avoid including a GUI object in the pure helper functions.
     from PySide6.QtWidgets import QWidget
+    # Keep GUI-only cleanup on the quit signal rather than adding
+    # more hidden closure dependencies to the native shutdown body.
+    # The latter also has an independent camera/consent lifecycle test.
+    controller.quit_requested.connect(tray_refresh_timer.stop)
+    controller.quit_requested.connect(menu.hide)
     controller.quit_requested.connect(shutdown)
 
+    tray_save_pending = False
+
+    def persist_tray_layout():
+        nonlocal tray_save_pending
+        tray_save_pending = False
+        if shutting_down or getattr(controller, "_closed", False):
+            return
+        try:
+            window.save_layout()
+        except (OSError, RuntimeError, ValueError) as error:
+            logging.warning("Could not persist tray layout: %s", error)
+
     def close_window():
+        nonlocal tray_save_pending
         if shutting_down:
             return
         if controller.get_setting("close_to_tray", True) and tray.isVisible():
-            if not controller.get_setting("tray_explained", False):
-                QMessageBox.information(window, "Global Pulse keeps monitoring", "Closing this window hides Global Pulse in the system tray. Monitoring and alerts continue. Double-click the purple radar to return, or choose Exit Completely from its menu to stop.")
-                controller.set_setting("tray_explained", True)
-            window.save_layout()
+            first_close = not controller.get_setting("tray_explained", False)
+            # Hide before any database write; no duplicated synchronous saves.
             window.hide()
+            if not tray_save_pending:
+                tray_save_pending = True
+                QTimer.singleShot(0, persist_tray_layout)
+            if first_close:
+                def show_tray_notice():
+                    if shutting_down or getattr(controller, "_closed", False):
+                        return
+                    try:
+                        controller.set_setting("tray_explained", True)
+                    except (OSError, RuntimeError, ValueError):
+                        logging.warning("Could not save tray explanation flag")
+                    if QSystemTrayIcon.supportsMessages():
+                        tray.showMessage(
+                            "Global Pulse keeps monitoring",
+                            "Global Pulse is now in the system tray. Double-click to reopen, "
+                            "or choose Exit Completely from the tray menu.",
+                            QSystemTrayIcon.MessageIcon.Information, 5000
+                        )
+                QTimer.singleShot(0, show_tray_notice)
         else:
-            shutdown()
+            controller.quit()
 
     window.set_close_handler(close_window)
-    window.show()
     if args.fixture:
         controller.load_fixture(args.fixture)
     if args.snapshot_first_fixture_event:
@@ -258,6 +486,27 @@ def main(argv=None):
         window.navigate_event(fixture_events[0]["id"])
     if snapshot_size is not None:
         window.resize(*snapshot_size)
+    # Never reveal an interactive dashboard until its expensive local
+    # workspace construction AND deferred cold headline queue have settled.
+    # This cannot and does not preload live media or future source updates.
+    try:
+        prepare_initial_dashboard(app, splash, window, controller)
+    except BaseException:
+        # Failure before app.exec() must not strand a singleton lock, splash,
+        # translation thread, media session, or open local SQLite handles.
+        splash.close()
+        try:
+            window.media.shutdown()
+            window._force_close=True
+            window.close()
+            controller.close()
+        finally:
+            instance.close()
+            handler.close()
+            log.removeHandler(handler)
+        raise
+    window.show()
+    splash.finish(window)
     if args.activate:
         QTimer.singleShot(150, lambda: activate(args.activate))
     if args.snapshot:
@@ -275,7 +524,7 @@ def main(argv=None):
             diagnostics["image_saved"] = window.grab().save(str(args.snapshot))
             args.snapshot.with_suffix(".json").write_text(
                 json.dumps(diagnostics, indent=2) + "\n", encoding="utf-8")
-            shutdown()
+            controller.quit()
         QTimer.singleShot(800, snapshot)
     elif args.demo:
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
@@ -299,7 +548,7 @@ def main(argv=None):
         result = app.exec()
     finally:
         if not shutting_down:
-            shutdown()
+            controller.quit()
         handler.close()
         log.removeHandler(handler)
     return result
