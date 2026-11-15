@@ -434,7 +434,22 @@ def main(argv=None):
     # Never reveal an interactive dashboard until its expensive local
     # workspace construction AND deferred cold headline queue have settled.
     # This cannot and does not preload live media or future source updates.
-    prepare_initial_dashboard(app, splash, window, controller)
+    try:
+        prepare_initial_dashboard(app, splash, window, controller)
+    except BaseException:
+        # Failure before app.exec() must not strand a singleton lock, splash,
+        # translation thread, media session, or open local SQLite handles.
+        splash.close()
+        try:
+            window.media.shutdown()
+            window._force_close=True
+            window.close()
+            controller.close()
+        finally:
+            instance.close()
+            handler.close()
+            log.removeHandler(handler)
+        raise
     window.show()
     splash.finish(window)
     if args.activate:
