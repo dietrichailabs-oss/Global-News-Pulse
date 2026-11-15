@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QProcess, QTimer, Signal
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QWindow
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _MAX_STATUS = 8192
@@ -28,6 +29,11 @@ class NativeTvHost(QWidget):
         self.setMinimumHeight(180)
         self.setStyleSheet("background:#111111;")
         self._child_window = 0
+        self._foreign_window = None
+        self._window_container = None
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
         self._process = None
         self._pending = b""
 
@@ -82,8 +88,10 @@ class NativeTvHost(QWidget):
             if event["type"] == "ready":
                 hwnd = event.get("hwnd")
                 if isinstance(hwnd, int) and hwnd > 0 and event.get("in_private") is True:
-                    self._child_window = hwnd
-                    self._resize_child()
+                    if not self._attach_window(process, hwnd):
+                        self.status_received.emit({"type": "error", "reason": "native_window_attach_failed"})
+                        self.stop()
+                        return
                 else:
                     self.status_received.emit({"type": "error", "reason": "private_window_not_ready"})
                     self.stop()
@@ -97,24 +105,61 @@ class NativeTvHost(QWidget):
 
     def _finished(self, process, code):
         if process is self._process:
-            self._child_window = 0
+            self._release_window()
             self._process = None
             self.status_received.emit({"type": "stopped", "exit_code": code})
         process.deleteLater()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._resize_child()
+    def _attach_window(self, process, hwnd: int) -> bool:
+        """Let Qt manage native child clipping and stacking inside QScrollArea.
 
-    def _resize_child(self):
-        if sys.platform == "win32" and self._child_window:
-            try:
-                ctypes.windll.user32.MoveWindow(
-                    ctypes.c_void_p(self._child_window), 0, 0,
-                    max(1, self.width()), max(1, self.height()), True
-                )
-            except (OSError, ValueError):
-                pass
+        The old MoveWindow-only embedding left a decoded WebView2 surface black
+        because Qt never owned the foreign HWND's container. The attached HWND
+        must belong to the exact QProcess we just launched, not an arbitrary
+        address supplied over stdout.
+        """
+        if sys.platform != "win32" or process is not self._process:
+            return False
+        try:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.IsWindow.argtypes = (ctypes.c_void_p,)
+            user32.IsWindow.restype = ctypes.c_bool
+            user32.GetWindowThreadProcessId.argtypes = (
+                ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)
+            )
+            user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+            handle = ctypes.c_void_p(hwnd)
+            owner_pid = ctypes.c_ulong()
+            if (not user32.IsWindow(handle)
+                    or not user32.GetWindowThreadProcessId(handle, ctypes.byref(owner_pid))
+                    or owner_pid.value != int(process.processId())):
+                return False
+            foreign = QWindow.fromWinId(hwnd)
+            if foreign is None:
+                return False
+            container = QWidget.createWindowContainer(foreign, self)
+            if container is None:
+                return False
+            container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self._foreign_window = foreign
+            self._window_container = container
+            self._child_window = hwnd
+            self._layout.addWidget(container)
+            container.show()
+            container.raise_()
+            return True
+        except (OSError, TypeError, ValueError, RuntimeError):
+            return False
+
+    def _release_window(self):
+        container = self._window_container
+        self._window_container = None
+        self._foreign_window = None
+        self._child_window = 0
+        if container is not None:
+            container.hide()
+            self._layout.removeWidget(container)
+            container.deleteLater()
 
     def command(self, value: str):
         process = self._process
@@ -124,7 +169,7 @@ class NativeTvHost(QWidget):
     def stop(self):
         process = self._process
         self._process = None
-        self._child_window = 0
+        self._release_window()
         self._pending = b""
         if process is not None:
             if process.state() != QProcess.ProcessState.NotRunning:
