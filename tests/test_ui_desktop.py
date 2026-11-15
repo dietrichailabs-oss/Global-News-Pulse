@@ -156,6 +156,12 @@ def test_historical_view_does_not_show_later_retraction(desktop,qtapp):
 def test_search_filters_actual_local_archive(desktop,qtapp):
     window,controller=desktop
     load_scenario(controller)
+    # The fixture is anchored to 2026-11-08: preserve deterministic archive
+    # search even after the default rolling seven-day view has elapsed.
+    # Setting All history preserves the user-facing time filter contract.
+    window.time_range.setCurrentIndex(3)
+    window.refresh_data()
+    assert window.feed_list.count()>0
     window.search.setText("zzzzNoSuchStory");window.refresh_data()
     assert window.feed_list.count()==0
     window.search.clear();window.refresh_data()

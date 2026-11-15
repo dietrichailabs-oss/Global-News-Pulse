@@ -54,15 +54,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify PR99 exact source and two-path native test-contract reconciliation
+      - name: Verify PR99 source and three-path exact native test contract reconciliation
         run: |
           $ErrorActionPreference='Stop'
           git merge-base --is-ancestor ad151f38e23b5bc2aab753f9e45b240e952dab96 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Issue82 PR99 exact NA5B parent source absent' }
           $changed=@(git diff --name-only ad151f38e23b5bc2aab753f9e45b240e952dab96..HEAD)
-          $allowed=@('.github/workflows/issue82-na5b-stacked-native-package.yml','tests/test_issue22_owner_media_lineup.py')
+          $allowed=@('.github/workflows/issue82-na5b-stacked-native-package.yml','tests/test_issue22_owner_media_lineup.py','tests/test_ui_desktop.py')
           $unexpected=@($changed | Where-Object { $_ -notin $allowed })
-          if ($unexpected.Count -gt 0 -or $changed.Count -ne 2) { throw ('Unreviewed product/test modification: ' + ($changed -join ',')) }
+          if ($unexpected.Count -gt 0 -or $changed.Count -ne 3) { throw ('Unreviewed product/test modification: ' + ($changed -join ',')) }
           Write-Host 'ISSUE82_NA5B_STACKED_PRODUCT=ad151f38e23b5bc2aab753f9e45b240e952dab96'
           Write-Host 'PR99_WINDOWS_LINUX_FOCUSED=67_PASS_EACH'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
