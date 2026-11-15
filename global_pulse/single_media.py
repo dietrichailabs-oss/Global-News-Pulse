@@ -24,6 +24,7 @@ class Television(_MediaTile):
         self._player_loaded=False
         self._had_playback=False
         self._player_signal_connected=False
+        self._last_decode_info=""
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -254,6 +255,9 @@ class Television(_MediaTile):
             self.mute.setChecked(True)
             if not self._player_signal_connected:
                 self.view.loadFinished.connect(self._tv_load_finished)
+                self.view.renderProcessTerminated.connect(
+                    self._renderer_terminated
+                )
                 self._player_signal_connected=True
             self._begin_observation()
             page=self.view.page()
@@ -331,9 +335,53 @@ class Television(_MediaTile):
         self._progress_at=time.monotonic()
         self._player_loaded=False
         self._had_playback=False
+        self._last_decode_info=""
         self.tv_status.setText("CONNECTING · YouTube player")
         self._poll_timer.start()
         self.view.page().setAudioMuted(self.mute.isChecked())
+
+    def _renderer_terminated(self, status, exit_code):
+        """Distinguish WebEngine renderer failure from an ordinary black video."""
+        if not self._requested:
+            return
+        # Qt enum and numeric code are runtime diagnostics, not source URLs.
+        self.stop()
+        self.tv_status.setText("RENDERER EXITED · video unavailable")
+        self.note.setText(
+            "The embedded Chromium render process ended. This is a player "
+            "failure, not a valid playing news stream. Try the normal "
+            "YouTube browser link or inspect Windows graphics/Qt codecs."
+        )
+
+    @staticmethod
+    def _media_diagnostics(value):
+        """Safe codec/element summary from read-only YouTube page properties."""
+        if not isinstance(value,dict):
+            return ""
+        codecs=value.get("codecs") or {}
+        if not isinstance(codecs,dict):
+            codecs={}
+        def codec(name):
+            raw=str(codecs.get(name) or "").lower()
+            return raw if raw in {"probably","maybe"} else "not reported"
+        parts=[
+            "Decoder: H.264 "+codec("h264")+
+            ", VP9 "+codec("vp9")+
+            ", AV1 "+codec("av1")
+        ]
+        if value.get("missing"):
+            parts.append("YouTube video element missing")
+        elif "video_width" in value:
+            width=value.get("video_width",0)
+            height=value.get("video_height",0)
+            parts.append(
+                "video dimensions "+str(width)+"×"+str(height)
+            )
+            parts.append("network state "+str(value.get("network", "?")))
+            parts.append("ready state "+str(value.get("ready", "?")))
+            if value.get("controls_visible") is False:
+                parts.append("YouTube controls hidden")
+        return " · ".join(parts)[:320]
 
     def _poll(self):
         if not self._requested or not self.view:return
@@ -347,12 +395,16 @@ class Television(_MediaTile):
         # YouTube can successfully load its embed shell while reporting
         # "Video unavailable" for a rotated/ended livestream. Read only the
         # provider's displayed error element, never arbitrary page content.
-        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap, .ytp-error, .ytp-error-message');if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250)};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error:!!v.error}:{missing:true};})()"""
+        script="""(()=>{const e=document.querySelector('.ytp-error-content-wrap,.ytp-error,.ytp-error-message');const probe=document.createElement('video');const codecs={h264:probe.canPlayType('video/mp4; codecs="avc1.42E01E,mp4a.40.2"'),vp9:probe.canPlayType('video/webm; codecs="vp9,opus"'),av1:probe.canPlayType('video/webm; codecs="av01.0.08M.08"')};const chrome=document.querySelector('.ytp-chrome-bottom');const controls_visible=chrome?getComputedStyle(chrome).visibility!=='hidden'&&getComputedStyle(chrome).display!=='none':false;if(e&&e.textContent&&e.textContent.trim())return{provider_error:e.textContent.trim().slice(0,250),codecs};const v=document.querySelector('video');return v?{time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,error_code:v.error?v.error.code:0,video_width:v.videoWidth,video_height:v.videoHeight,network:v.networkState,controls_visible,codecs}:{missing:true,controls_visible,codecs};})()"""
         self.view.page().runJavaScript(script,lambda value,g=generation:self._observed(g,value))
 
     def _observed(self,generation,value):
         if generation!=self._generation or not self._requested:return
         self._poll_pending=False
+        summary=self._media_diagnostics(value)
+        if summary and summary!=self._last_decode_info:
+            self._last_decode_info=summary
+            self.note.setText(summary+" · Picture/audio not yet proven")
         if isinstance(value,dict) and value.get("provider_error"):
             # A displayed provider error is stronger evidence than loadFinished.
             # Never treat a dead live-video recording as a playing channel.
@@ -370,8 +422,20 @@ class Television(_MediaTile):
                 else "PAGE LOADING"
             )
             return
-        if value.get("error"):
-            self.stop();self.tv_status.setText("ERROR");self.note.setText("The embedded video reported a playback error; connection stopped.");return
+        error_code=value.get("error_code") or (3 if value.get("error") else 0)
+        if error_code:
+            self.stop()
+            reason={1:"aborted",2:"network",3:"decoder",4:"unsupported media"}
+            self.tv_status.setText(
+                "VIDEO ERROR · "+reason.get(error_code,"unknown")
+            )
+            self.note.setText(
+                "The YouTube HTMLMediaElement reported error code " +
+                str(error_code) +
+                ". Provider restrictions, missing Qt codecs or graphics "
+                "rendering may be involved. Try the official browser page."
+            )
+            return
         current=value.get("time")
         if isinstance(current,bool) or not isinstance(current,(int,float)) or not math.isfinite(current):return
         if value.get("ended"):
@@ -383,10 +447,16 @@ class Television(_MediaTile):
             if self._had_playback:
                 self._progress_at=time.monotonic()
         elif value.get("ready",0)<2:
-            self.tv_status.setText("BUFFERING")
+            self.tv_status.setText("BUFFERING · no decoded frame yet")
+        elif (value.get("video_width")==0 or value.get("video_height")==0):
+            self.tv_status.setText("NO VIDEO FRAME · renderer/codec unverified")
         elif self._last_time is not None and current>self._last_time:
             self._had_playback=True
-            self.tv_status.setText("PLAYING");self.note.setText("In-app video time advancing")
+            self.tv_status.setText("VIDEO TIME ADVANCING · picture unverified")
+            self.note.setText(
+                "Video clock is advancing. Audio and displayed picture are "
+                "NOT confirmed by this measurement. "+(summary or "")
+            )
             self._progress_at=time.monotonic()
         self._last_time=current
 
