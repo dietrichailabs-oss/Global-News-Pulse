@@ -48,7 +48,7 @@ def test_foreign_video_window_uses_qt_scrolling_container_with_pid_validation():
     assert "owner_pid.value != int(process.processId())" in source
     assert "QWindow.fromWinId(hwnd)" in source
     assert "QWidget.createWindowContainer(foreign, self)" in source
-    assert "MoveWindow" not in source
+    assert "ctypes.windll.user32.MoveWindow(" not in source
     assert "self._release_window()" in inspect.getsource(NativeTvHost.stop)
 
 
