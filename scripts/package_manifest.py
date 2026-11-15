@@ -76,7 +76,7 @@ TOP_FILES = {
     "KNOWN_LIMITATIONS.md", "SOURCE_ACCESS_MATRIX.md", "THIRD_PARTY_NOTICES.md",
     "LICENSE.txt", "MANIFEST.json", "SBOM.cdx.json",
 }
-TOP_DIRECTORIES = {"_internal", "notifications", "licenses"}
+TOP_DIRECTORIES = {"_internal", "notifications", "tv", "licenses"}
 FORBIDDEN_PARTS = {
     ".git", ".github", ".venv", "venv", "tests", "test", "fixtures", "checkpoints",
     "node_modules", "__pycache__", ".pytest_cache", "user data", "browser_cache",
@@ -177,6 +177,9 @@ def scan(root, *, require_complete=True):
         count+=1;total+=path.stat().st_size
     required=["GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/GlobalPulse.Notifications.deps.json",
               "notifications/GlobalPulse.Notifications.runtimeconfig.json","notifications/pulse.png",
+              "tv/GlobalPulse.TV.exe","tv/GlobalPulse.TV.deps.json","tv/GlobalPulse.TV.runtimeconfig.json",
+              "tv/coreclr.dll","tv/Microsoft.Web.WebView2.Core.dll","tv/Microsoft.Web.WebView2.WinForms.dll",
+              "tv/runtimes/win-x64/native/WebView2Loader.dll","tv/licenses/NATIVE_PACKAGE_NOTICES.json",
               "_internal/global_pulse/resources/world_countries.geojson","_internal/global_pulse/resources/sources.json",
               "_internal/global_pulse/resources/translation_models.json","_internal/global_pulse/resources/context_cameras.json","USER_GUIDE.md","KNOWN_LIMITATIONS.md","THIRD_PARTY_NOTICES.md"]
     if require_complete:
@@ -184,12 +187,21 @@ def scan(root, *, require_complete=True):
             if not (root/relative).is_file():errors.append(relative+": required runtime file is missing")
         # A framework-dependent helper must never be passed off as self-contained.
         if not (root/"notifications"/"coreclr.dll").is_file():errors.append("notifications/coreclr.dll: self-contained .NET runtime is missing")
-        for relative in ("GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/coreclr.dll","_internal/python312.dll"):
+        if not (root/"tv"/"coreclr.dll").is_file():errors.append("tv/coreclr.dll: self-contained .NET runtime is missing")
+        for relative in ("GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/coreclr.dll",
+                         "tv/GlobalPulse.TV.exe","tv/coreclr.dll","tv/runtimes/win-x64/native/WebView2Loader.dll",
+                         "_internal/python312.dll"):
             path=root/relative
             if not path.is_file() or not is_x64_pe(path):errors.append(relative+": required x64 Windows PE binary is missing or invalid")
         deps=root/"notifications"/"GlobalPulse.Notifications.deps.json"
         if deps.exists() and not any("microsoft.windowsappsdk" in name.lower() for name in json.loads(deps.read_text(encoding="utf-8-sig")).get("libraries",{})):
             errors.append("Native helper dependency identity does not include Microsoft.WindowsAppSDK")
+        tv_deps=root/"tv"/"GlobalPulse.TV.deps.json"
+        if tv_deps.exists():
+            libraries=json.loads(tv_deps.read_text(encoding="utf-8-sig")).get("libraries",{})
+            if not any(name.lower().startswith("microsoft.web.webview2/") and info.get("type")=="package"
+                       for name,info in libraries.items()):
+                errors.append("Native television dependency identity does not include Microsoft.Web.WebView2")
     if errors:raise ValueError("Runtime package rejected:\n"+"\n".join(errors[:100]))
     return {"status":"PASS","files":count,"bytes":total,"scope":"Allowlist, required native payload, filenames, and selected embedded-secret patterns; not a complete security audit"}
 
@@ -348,11 +360,18 @@ def sbom(root):
     for normalized,dist in sorted(distributions.items()):
         names=[canonical(re.split(r"[\s(<>=!~\[]",requirement,maxsplit=1)[0]) for requirement in dist.requires or []]
         dependencies.append({"ref":refs[normalized],"dependsOn":sorted({refs[name] for name in names if name in refs})})
-    for deps_path in sorted((root/"notifications").glob("*.deps.json")):
+    # Both independent self-contained helpers contribute native/runtime NuGet components.
+    # Deduplicate identical package identities if the same runtime is used by both.
+    native_seen=set()
+    native_deps=(sorted((root/"notifications").glob("*.deps.json")) +
+                 sorted((root/"tv").glob("*.deps.json")))
+    for deps_path in native_deps:
         document=json.loads(deps_path.read_text(encoding="utf-8-sig"))
         for name,info in document.get("libraries",{}).items():
             if "/" not in name:continue
             package,version=name.rsplit("/",1);ref=f"pkg:nuget/{quote(package)}@{quote(version)}"
+            if ref in native_seen:continue
+            native_seen.add(ref)
             components.append({"type":"library","name":package,"version":version,"bom-ref":ref,"purl":ref,
                                "properties":[{"name":"globalpulse:evidence","value":"Published .NET deps.json"},
                                              {"name":"globalpulse:license-review","value":"NOASSERTION — consult NuGet package licenses and notices"}]})
