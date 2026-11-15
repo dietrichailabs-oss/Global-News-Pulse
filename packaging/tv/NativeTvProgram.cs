@@ -38,6 +38,10 @@ internal static class Program
                 return 2;
             Console.SetIn(new StreamReader(Console.OpenStandardInput()));
             Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+            // Qt's Windows native widgets use a per-monitor DPI context. A
+            // mismatched cross-process SetParent can reset or misplace the
+            // WebView2 composition surface on mixed-DPI monitors.
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             using var form = new TvForm(probe ? "YE7VzlLtp-4" : args[0], new IntPtr(parent), fullWatch, probe);
@@ -84,6 +88,8 @@ internal sealed class TvForm : Form
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetParent(IntPtr child, IntPtr parent);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetParent(IntPtr child);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(IntPtr handle, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
@@ -163,6 +169,8 @@ internal sealed class TvForm : Form
         var style = GetWindowLongPtr(Handle, -16).ToInt64();
         SetWindowLongPtr(Handle, -16, new IntPtr((style | WsChild) & ~WsPopup));
         SetParent(Handle, parentHwnd);
+        if (GetParent(Handle) != parentHwnd)
+            throw new InvalidOperationException("Native TV child window parent mismatch");
         SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,
                      SwpFrameChanged | SwpNoMove | SwpNoSize | SwpNoZOrder);
     }
