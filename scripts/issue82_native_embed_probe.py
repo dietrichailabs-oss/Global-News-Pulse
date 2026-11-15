@@ -8,11 +8,12 @@ It is synthetic display QA, not a claim that YouTube video/audio played.
 from __future__ import annotations
 
 import json
+import ctypes
 import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QPoint, QProcess
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -65,23 +66,54 @@ def run(helper: Path) -> int:
         QTest.qWait(800)
         app.processEvents()
         screen = host.screen()
-        shot = screen.grabWindow(parent)
-        image = shot.toImage()
-        if image.isNull() or image.width() < 200 or image.height() < 150:
+        image = screen.grabWindow(parent).toImage()
+        desktop_image = screen.grabWindow(0).toImage()
+        child_image = screen.grabWindow(host._child_window).toImage()
+        if (image.isNull() or image.width() < 200 or image.height() < 150
+                or desktop_image.isNull()):
             raise RuntimeError("Native desktop screenshot unavailable")
         samples = [(0.25, 0.25), (0.5, 0.25), (0.5, 0.5),
                    (0.75, 0.5), (0.75, 0.75)]
-        pixels = []
-        for x, y in samples:
-            color = image.pixelColor(int(image.width()*x), int(image.height()*y))
-            pixels.append([color.red(), color.green(), color.blue()])
+        def get_pixels(picture, transform):
+            pixels=[]
+            for x, y in samples:
+                px, py=transform(x, y)
+                if picture.isNull() or not (0 <= px < picture.width() and 0 <= py < picture.height()):
+                    pixels.append([-1, -1, -1])
+                else:
+                    color=picture.pixelColor(px,py)
+                    pixels.append([color.red(),color.green(),color.blue()])
+            return pixels
+
+        host_pixels=get_pixels(image,lambda x,y:(int(image.width()*x),int(image.height()*y)))
+        child_pixels=get_pixels(child_image,lambda x,y:(int(child_image.width()*x),int(child_image.height()*y)))
+        desktop_pixels=get_pixels(desktop_image,lambda x,y:(
+            host.mapToGlobal(QPoint(int(host.width()*x),int(host.height()*y))).x()-screen.geometry().x(),
+            host.mapToGlobal(QPoint(int(host.width()*x),int(host.height()*y))).y()-screen.geometry().y()
+        ))
+        user32=ctypes.WinDLL("user32",use_last_error=True)
+        user32.GetParent.argtypes=(ctypes.c_void_p,)
+        user32.GetParent.restype=ctypes.c_void_p
+        user32.IsWindowVisible.argtypes=(ctypes.c_void_p,)
+        user32.IsWindowVisible.restype=ctypes.c_bool
+        native_parent=user32.GetParent(ctypes.c_void_p(host._child_window))
+        native_visible=user32.IsWindowVisible(ctypes.c_void_p(host._child_window))
         expected = [0xF2, 0x1A, 0x9A]
         visible = sum(max(abs(channel-target) for channel, target in zip(pixel,expected)) <= 30
-                      for pixel in pixels)
+                      for pixel in desktop_pixels)
         result.update({"embedded": True, "image_size": [image.width(), image.height()],
-                       "samples": pixels, "visible_marker_samples": visible})
+                       "host_samples": host_pixels, "child_samples": child_pixels,
+                       "desktop_samples": desktop_pixels, "visible_marker_samples": visible,
+                       "qt_host_visible": host.isVisible(),
+                       "qt_container_visible": host._window_container.isVisible(),
+                       "foreign_visible": host._foreign_window.isVisible(),
+                       "native_child_visible": native_visible,
+                       "native_parent": int(native_parent or 0),
+                       "qt_container_hwnd": int(host._window_container.winId()),
+                       "qt_container_size": [host._window_container.width(),host._window_container.height()],
+                       "foreign_window_size": [host._foreign_window.width(),host._foreign_window.height()]})
         if visible < 3:
-            raise AssertionError("The decoded WebView2 window is still visually black/obscured")
+            raise AssertionError("The embedded WebView2 surface is not visibly painted on desktop")
         result["passed"] = True
         print(json.dumps(result, sort_keys=True))
         return 0
