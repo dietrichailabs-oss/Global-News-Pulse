@@ -1175,8 +1175,11 @@ class Store:
             if (event.get("status") == "active"
                 and event.get("evidence_policy_version") == 2
                 and not event.get("merged_source_events")
-                and not event.get("map_areas"))
+                and not event.get("map_areas")
+                and isinstance(event.get("report_count"), int)
+                and event["report_count"] <= 64)
         ]
+        common_ids = set(common)
         grouped = defaultdict(list)
         if common:
             # A page is at most 256 IDs; SQLite parameter bounds and ordering
@@ -1190,7 +1193,7 @@ class Store:
         output = []
         for row, event in saved:
             identity = row["id"]
-            if identity not in grouped and identity not in common:
+            if identity not in common_ids:
                 output.append(self._get_event_unlocked(identity, map_projection=True))
                 continue
             at = event["updated_at"]
