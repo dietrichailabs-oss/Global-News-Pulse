@@ -1,4 +1,6 @@
 import importlib.util
+import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -128,7 +130,10 @@ def test_unreviewed_windows_sdk_reference_version_still_fails_closed(tmp_path, m
         notices.collect(deps, nuget, tmp_path / "out" / "licenses")
 
 
-def _webview2_lock(tmp_path, monkeypatch, version="1.0.4314.35", package_hash="LOCKED_TEST_SHA512"):
+def _webview2_lock(tmp_path, monkeypatch, version="1.0.4314.35", package_hash=None):
+    package_hash = package_hash or base64.b64encode(
+        hashlib.sha512(b"synthetic WebView2 SDK locked archive").digest()
+    ).decode("ascii")
     lock_path = tmp_path / "webview2" / "packages.lock.json"
     lock_path.parent.mkdir()
     lock_path.write_text(json.dumps({
@@ -157,6 +162,9 @@ def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monk
     nuget = tmp_path / "packages"
     parent = _package(nuget, "Microsoft.Web.WebView2", "1.0.4314.35")
     lock_hash = _webview2_lock(tmp_path, monkeypatch)
+    (parent / "microsoft.web.webview2.1.0.4314.35.nupkg").write_bytes(
+        b"synthetic WebView2 SDK locked archive"
+    )
     (parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512").write_text(lock_hash)
     deps = tmp_path / "app.deps.json"
     _deps(deps, [
@@ -185,6 +193,7 @@ def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monk
     "unreviewed_reference_version",
     "unreviewed_reference_name",
     "wrong_parent_deps_kind",
+    "tampered_archive",
 ])
 def test_webview2_reference_provenance_fail_closed(tmp_path, monkeypatch, violation):
     nuget = tmp_path / "packages"
@@ -195,6 +204,11 @@ def test_webview2_reference_provenance_fail_closed(tmp_path, monkeypatch, violat
     lock_hash = _webview2_lock(
         tmp_path, monkeypatch,
         version="1.0.4314.36" if violation == "wrong_locked_version" else "1.0.4314.35",
+    )
+    archive = parent / "microsoft.web.webview2.1.0.4314.35.nupkg"
+    archive.write_bytes(
+        b"modified content" if violation == "tampered_archive"
+        else b"synthetic WebView2 SDK locked archive"
     )
     hash_file = parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512"
     if violation != "missing_restored_hash":
