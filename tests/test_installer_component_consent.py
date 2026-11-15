@@ -60,16 +60,20 @@ def test_one_shot_generator_cannot_reintroduce_application_license_gate():
 
 
 def run_exact_startup(monkeypatch, *, accepted, no_start=False,
-                      skip_setup=True, onboarding_answer=True):
+                      requested=False, skip_setup=True, onboarding_answer=True):
     source = (ROOT / "global_pulse/__main__.py").read_text(encoding="utf-8")
+    # Test the exact production startup and preference callback together.
+    names = {"begin", "apply_native_preference"}
     functions = [node for node in ast.walk(ast.parse(source))
-                 if isinstance(node, ast.FunctionDef) and node.name == "begin"]
-    assert len(functions) == 1
+                 if isinstance(node, ast.FunctionDef) and node.name in names]
+    assert {node.name for node in functions} == names
     module = ast.fix_missing_locations(ast.Module(body=functions, type_ignores=[]))
     events = []
+    settings = {"notifications_enabled": requested}
     controller = SimpleNamespace(
         start=lambda: events.append("news-start"),
-        get_setting=lambda key, default=None: default,
+        get_setting=lambda key, default=None: settings.get(key, default),
+        set_setting=lambda key, value: settings.__setitem__(key, value),
     )
     notifier = SimpleNamespace(
         start=lambda: events.append("notification-start"),
@@ -84,30 +88,39 @@ def run_exact_startup(monkeypatch, *, accepted, no_start=False,
         events.append("onboarding")
         return onboarding_answer
     monkeypatch.setattr(terms, "accept_windows_sdk_terms", decide)
+    window = SimpleNamespace(setting_notify=SimpleNamespace(setChecked=lambda value: None))
+    mute = SimpleNamespace(blockSignals=lambda value: False, setChecked=lambda value: None)
     namespace = {"__package__": "global_pulse", "controller": controller,
-                 "window": object(), "notifier": notifier,
-                 "args": SimpleNamespace(no_start=no_start, skip_setup=skip_setup),
+                 "window": window, "mute": mute, "notifier": notifier,
+                 "args": SimpleNamespace(no_start=no_start, skip_setup=skip_setup, demo=False),
                  "onboarding": onboard}
-    exec(compile(module, "<exact-committed-begin>", "exec"), namespace)
+    exec(compile(module, "<exact-committed-start-and-preference>", "exec"), namespace)
     namespace["begin"]()
     return events
 
 
+@pytest.mark.parametrize("requested", [False, True])
 @pytest.mark.parametrize("accepted", [False, True])
 @pytest.mark.parametrize("no_start", [False, True])
-def test_notification_decision_is_independent_of_news_and_pause(monkeypatch, accepted, no_start):
-    events = run_exact_startup(monkeypatch, accepted=accepted, no_start=no_start)
-    assert events[0] == "component-consent"
-    assert ("notification-start" in events) is accepted
+def test_notification_decision_is_independent_of_news_and_pause(monkeypatch, accepted, no_start, requested):
+    events = run_exact_startup(monkeypatch, accepted=accepted, no_start=no_start, requested=requested)
+    if requested:
+        assert events[0] == "component-consent"
+        assert ("notification-start" in events) is accepted
+        if not accepted:
+            assert any(isinstance(event, tuple) and "terms declined" in event[1] for event in events)
+    else:
+        # Default-off never creates a native helper or requests component terms.
+        assert "component-consent" not in events
+        assert "notification-start" not in events
+        assert any(isinstance(event, tuple) and "off" in event[1] for event in events)
     assert ("news-start" in events) is (not no_start)
-    if not accepted:
-        assert any(isinstance(event, tuple) and "not accepted" in event[1] for event in events)
 
 
 @pytest.mark.parametrize("onboarding_answer", [False, True])
 def test_declining_component_terms_does_not_skip_or_override_news_onboarding(monkeypatch, onboarding_answer):
-    events = run_exact_startup(monkeypatch, accepted=False, skip_setup=False,
-                               onboarding_answer=onboarding_answer)
+    events = run_exact_startup(monkeypatch, accepted=False, requested=True,
+                               skip_setup=False, onboarding_answer=onboarding_answer)
     assert "onboarding" in events
     assert "notification-start" not in events
     assert ("news-start" in events) is onboarding_answer

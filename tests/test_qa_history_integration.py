@@ -117,6 +117,8 @@ def test_muted_historical_source_cannot_lend_significance_to_other_source(contro
 def test_repeat_corrections_keep_history_without_violating_delivery_controls(controller, quiet):
     emitted = []
     controller.native_alert.connect(lambda *args: emitted.append(args))
+    # Exercise quiet/mute controls against an explicitly enabled channel.
+    controller.set_setting("notifications_enabled", True)
     if quiet:
         controller.set_setting("quiet_enabled", True)
         controller.set_setting("quiet_start", "00:00")
