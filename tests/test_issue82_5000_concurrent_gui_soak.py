@@ -1,0 +1,192 @@
+"""Diagnostic-only 500-feed / 5,000-map SQLite + real Qt concurrent soak.
+
+All reports and positions are fictional test fixtures. This records raw host
+timings, not physical Windows 11 acceptance or a hardware-specific PASS gate.
+No network, playback, native notification or public build is performed here.
+"""
+from __future__ import annotations
+
+import json
+import os
+import platform
+import statistics
+import threading
+import time
+from datetime import datetime, timezone
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+from global_pulse.controller import Controller
+from global_pulse.ui import MainWindow
+
+
+def fixture_report(index: int, now: str) -> dict:
+    return {
+        "id": f"fictional-gui-soak-{index}",
+        "event_key": f"fictional-gui-soak:event-{index}",
+        "title": f"SYNTHETIC Qt performance fixture {index}",
+        "summary": "Offline synthetic evidence only, not a real incident",
+        "source_id": "offline-qt-performance-catalog",
+        "publisher": "SYNTHETIC local-only test publisher",
+        "url": f"https://example.invalid/qt-soak/{index}",
+        "published_at": now,
+        "retrieved_at": now,
+        "country": "United States",
+        "region": "Synthetic test coordinates",
+        "category": "Infrastructure",
+        "latitude": 25 + (index % 50) * 0.6,
+        "longitude": -125 + ((index // 50) % 100) * 0.6,
+        "synthetic": True,
+        "official": False,
+        "severity": "informational",
+        "kind": "report",
+    }
+
+
+def distribution(values: list[float]) -> dict:
+    if not values:
+        return {"n": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+    ordered = sorted(values)
+    return {
+        "n": len(ordered),
+        "p50_ms": round(statistics.median(ordered), 2),
+        "p95_ms": round(ordered[max(0, (95 * len(ordered) + 99) // 100 - 1)], 2),
+        "max_ms": round(ordered[-1], 2),
+    }
+
+
+def test_real_5000_map_qt_heartbeat_with_worker_updates_and_tabs(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    window = None
+    heartbeat = QTimer()
+    pages = QTimer()
+    metrics = {
+        "qt_backend": os.environ.get("QT_QPA_PLATFORM", ""),
+        "host_os": platform.system(),
+        "seed_events": 5000,
+        "worker_revisions_requested": 10,
+    }
+    writer_errors = []
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        started = time.perf_counter()
+        changed = controller.store.ingest([fixture_report(i, now) for i in range(5000)])
+        metrics["seed_sqlite_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        assert len(changed) == 5000, "Seed must represent 5k distinct real Store events"
+        started = time.perf_counter()
+        window = MainWindow(controller)
+        window.show()
+        app.processEvents()
+        metrics["first_full_ui_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        assert len(window._events) == 500, "Exercise the actual 500-row feed cap"
+        assert len(window.world_map.events) == 5000, "Exercise all 5k map entries"
+
+        map_times = []
+        original_map = window.world_map.set_events
+        def measured_map(*args, **kwargs):
+            at = time.perf_counter()
+            try:
+                return original_map(*args, **kwargs)
+            finally:
+                map_times.append((time.perf_counter() - at) * 1000)
+        window.world_map.set_events = measured_map
+
+        gaps = []
+        last_beat = [None]
+        def beat():
+            at = time.perf_counter()
+            if last_beat[0] is not None:
+                gaps.append((at - last_beat[0]) * 1000)
+            last_beat[0] = at
+        heartbeat.setInterval(16)
+        heartbeat.timeout.connect(beat)
+
+        tab_times = []
+        targets = [0, 3, 2, 0]
+        page_number = [0]
+        def switch_page():
+            at = time.perf_counter()
+            window.open_page(targets[page_number[0] % len(targets)])
+            tab_times.append((time.perf_counter() - at) * 1000)
+            page_number[0] += 1
+        pages.setInterval(120)
+        pages.timeout.connect(switch_page)
+
+        def write_real_revisions():
+            try:
+                for index in range(10):
+                    evidence_time = datetime.now(timezone.utc).isoformat()
+                    source = {
+                        **fixture_report(5100, evidence_time),
+                        "id": "fictional-gui-soak-live",
+                        "event_key": "fictional-gui-soak:live-revision",
+                        "source_id": "offline-qt-live-burst",
+                        "title": "SYNTHETIC active revision during Qt soak",
+                        "summary": f"Synthetic revised local value {index}",
+                    }
+                    controller._on_reports(
+                        [source], allow_synthetic=True, now=evidence_time
+                    )
+                    time.sleep(0.1)
+            except Exception as error:
+                writer_errors.append(f"{type(error).__name__}: {error}")
+
+        heartbeat.start()
+        pages.start()
+        worker = threading.Thread(target=write_real_revisions, daemon=True)
+        started = time.perf_counter()
+        worker.start()
+        QTest.qWait(4500)
+        pages.stop()
+        heartbeat.stop()
+        worker.join(timeout=60)
+        metrics["soak_plus_writer_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        assert not worker.is_alive(), "Bounded worker must finish and release archive"
+        assert not writer_errors, writer_errors
+        QTest.qWait(700)
+        app.processEvents()
+
+        metrics["heartbeat_gap"] = distribution(gaps)
+        metrics["tab_switch_time"] = distribution(tab_times)
+        metrics["map_set_events_time"] = distribution(map_times)
+        metrics["map_count_after"] = len(window.world_map.events)
+        metrics["feed_count_after"] = len(window._events)
+        metrics["visible_live_source"] = any(
+            report.get("source_id") == "offline-qt-live-burst"
+            for event in window.world_map.events
+            for report in event.get("reports", [])
+        )
+        with controller.store._lock:
+            row = controller.store._conn.execute(
+                "SELECT body FROM reports WHERE source_id=?",
+                ("offline-qt-live-burst",),
+            ).fetchone()
+        assert row, "Actual background report must reach SQLite"
+        actual = json.loads(row["body"])
+        assert actual["summary"] == "Synthetic revised local value 9"
+        assert len(gaps) >= 2, "The GUI heartbeat must actually run"
+        assert len(tab_times) >= 2, "Tab navigation must actually execute"
+        assert map_times, "Real evidence must cause a real map recomposition"
+        assert metrics["map_count_after"] == 5000
+        assert metrics["feed_count_after"] == 500
+        assert metrics["visible_live_source"], "Latest source revision must reach visible map"
+        print("PULSE_5000_CONCURRENT_GUI_SOAK=" + json.dumps(metrics, sort_keys=True), flush=True)
+    finally:
+        heartbeat.stop()
+        pages.stop()
+        if window is not None:
+            window._force_close = True
+            window.media.shutdown()
+            window.close()
+        controller.close()
+        if window is not None:
+            window.deleteLater()
+        heartbeat.deleteLater()
+        pages.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
