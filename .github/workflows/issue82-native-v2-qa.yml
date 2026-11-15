@@ -111,6 +111,9 @@ jobs:
           $receipt=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_EMBED_PIXELS.jsonl'
           python -m scripts.issue82_native_embed_probe $exe 2>&1 | Tee-Object -FilePath $receipt
           if ($LASTEXITCODE -ne 0) { throw 'Qt/Win32 visual embed probe failed: no visible WebView2 pixels' }
+          $inapp=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_INAPP_PIXELS.jsonl'
+          python -m scripts.issue82_native_embed_probe --inapp $exe 2>&1 | Tee-Object -FilePath $inapp
+          if ($LASTEXITCODE -ne 0) { throw 'Actual QScrollArea/Television WebView2 composition failed' }
       - name: Verify exact shipped Microsoft SDK notice provenance after native publish
         run: |
           $ErrorActionPreference='Stop'
@@ -224,6 +227,7 @@ jobs:
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_PROBE.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_STDERR.txt
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_EMBED_PIXELS.jsonl
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_INAPP_PIXELS.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_SELF_TEST.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_STDERR.txt
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_OVERRIDE_REFUSAL.jsonl
