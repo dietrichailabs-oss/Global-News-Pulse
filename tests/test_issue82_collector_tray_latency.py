@@ -12,11 +12,13 @@ from datetime import datetime, timezone
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from global_pulse.__main__ import _TrayRefreshBridge, _tray_health_state
 from global_pulse.controller import Controller
+from global_pulse.source_availability import capability
 from global_pulse.core import Store
 from global_pulse.ui import MainWindow
 
@@ -84,16 +86,25 @@ def test_real_observation_ingest_keeps_separate_collector_notification(tmp_path)
     c.data_changed.connect(lambda: immediate.append(True))
     try:
         c.monitoring = True
-        c._on_observations([{
+        source = {
             "source_id": "offline-observations",
             "indicator": "consumer-index",
             "country": "Testland",
             "date": "2026-11",
             "value": 12.5,
             "synthetic": True,
-        }])
+        }
+        c._on_observations([source])
         assert len(c.store.list_observations()) == 1
         assert evidence == [True] and not immediate
+        c._on_observations([source])
+        assert evidence == [True], "Duplicate observation fingerprint must not repaint 5k map"
+        assert len(c.store.list_observations()[0]["revisions"]) == 1
+        c._on_observations([{**source, "value": 14.0}])
+        assert evidence == [True, True], "Corrected indicator value must update the GUI"
+        obs = c.store.list_observations()[0]
+        assert obs["value"] == 14.0 and obs["revision_count"] == 2
+        assert not immediate
     finally:
         c.monitoring = False
         c.close()
@@ -138,6 +149,12 @@ def test_tray_error_scan_one_bounded_query_per_400_sources(tmp_path):
                     ("corrupt", "this is not JSON"),
                 )
             assert s.any_source_error(["corrupt"]) is True
+            for invalid in ([], {}, None):
+                key = f"malformed-{type(invalid).__name__}"
+                s.set_source_state(key, {"status": invalid})
+                assert s.any_source_error([key]) is True, (
+                    "Unhashable or null status must be a conservative error, not crash tray"
+                )
         finally:
             s._conn.set_trace_callback(None)
 
@@ -259,4 +276,95 @@ def test_pending_collector_timer_never_reads_closed_archive(app, tmp_path, monke
         c.close()
         w.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
+def test_native_tray_uses_effective_scheduler_sources_and_state_precedence(tmp_path):
+    c = Controller(tmp_path, demo=True)
+    try:
+        configured = next(
+            (source for source in c.catalog
+             if capability(source)[0] and source.get("adapter") != "gdelt_doc"),
+            None,
+        )
+        assert configured, "Test catalog requires one eligible automatic provider"
+        source_id = configured["id"]
+        c.set_setting("enabled_sources", [source_id])
+        c.monitoring = True
+        assert source_id in c._enabled_collection_ids
+        c.store.set_source_state(source_id, {"status": "error"})
+        assert _tray_health_state(c) == "error"
+        # Old source-status errors must no longer color the owner-disabled tray.
+        c.set_setting("enabled_sources", [])
+        assert source_id not in c._enabled_collection_ids
+        assert _tray_health_state(c) == "active"
+        c.monitoring = False
+        assert _tray_health_state(c) == "paused"
+        # An unread saved alert has priority even over monitoring paused.
+        changed = c.store.ingest([report(9001)], now=NOW)
+        assert changed
+        alert = c.store.add_alert(changed[0], "Official synthetic test alert")
+        assert alert and not alert["read"]
+        assert _tray_health_state(c) == "alerts"
+        # GDELT delegated batches must not also count as scheduler-enabled.
+        gdelt = next(
+            (source for source in c.catalog
+             if source.get("adapter") == "gdelt_doc" and capability(source)[0]),
+            None,
+        )
+        if gdelt:
+            c.set_setting("enabled_sources", [gdelt["id"]])
+            assert gdelt["id"] in c._enabled_collection_ids
+            c.set_setting("gdelt_batches_enabled", True)
+            assert gdelt["id"] not in c._enabled_collection_ids
+    finally:
+        c.monitoring = False
+        c.close()
+
+
+def test_worker_origin_status_and_tray_bridge_run_on_gui_thread(desktop, app):
+    w, c = desktop
+    tray_timer = QTimer()
+    tray_timer.setSingleShot(True)
+    tray_timer.setInterval(700)
+    bridge = _TrayRefreshBridge(tray_timer, c)
+    c.source_status_changed.connect(bridge.schedule)
+    c.evidence_changed.connect(bridge.schedule)
+    try:
+        w._collection_refresh_timer.stop()
+        w._evidence_refresh_timer.stop()
+        # Python sender genuinely outside the GUI thread. QObject @Slot
+        # receivers must be queued, never start QTimers in this worker.
+        worker = threading.Thread(target=c.source_status_changed.emit, daemon=True)
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert not tray_timer.isActive()
+        assert not w._collection_refresh_timer.isActive()
+        QTest.qWait(50)
+        assert tray_timer.isActive()
+        assert w._collection_refresh_timer.isActive()
+        tray_timer.stop()
+        w._collection_refresh_timer.stop()
+        worker = threading.Thread(target=c.evidence_changed.emit, daemon=True)
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert not tray_timer.isActive()
+        QTest.qWait(50)
+        assert tray_timer.isActive()
+        assert w._evidence_refresh_timer.isActive()
+        # No delayed popup or worker signal can resurrect a tray after stop.
+        bridge.stopping = True
+        tray_timer.stop()
+        worker = threading.Thread(target=c.source_status_changed.emit, daemon=True)
+        worker.start()
+        worker.join(timeout=2)
+        QTest.qWait(50)
+        assert not tray_timer.isActive()
+    finally:
+        c.source_status_changed.disconnect(bridge.schedule)
+        c.evidence_changed.disconnect(bridge.schedule)
+        tray_timer.stop()
+        tray_timer.deleteLater()
         app.processEvents()
