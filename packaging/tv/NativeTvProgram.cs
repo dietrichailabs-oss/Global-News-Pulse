@@ -194,10 +194,13 @@ internal sealed class TvForm : Form
             // never leave the explicitly consented provider-host family.
             web.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             web.WebResourceRequested += (_, e) => {
+                if (offlineProbe && e.Request.Uri == "about:blank")
+                    return;
                 if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var u) || !Allowed(u))
                     e.Response = web.Environment.CreateWebResourceResponse(null, 403, "Blocked", "Content-Type: text/plain");
             };
             web.NavigationStarting += (_, e) => {
+                if (offlineProbe && e.Uri == "about:blank") return;
                 if (!ExactVideoNavigation(e.Uri, videoId, fullWatch)) e.Cancel = true;
             };
             web.FrameNavigationStarting += (_, e) => {
@@ -217,7 +220,7 @@ internal sealed class TvForm : Form
             {
                 var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 web.NavigationCompleted += (_, e) => done.TrySetResult(e.IsSuccess);
-                web.NavigateToString("<!doctype html><html><body>Codec probe without network</body></html>");
+                web.Navigate("about:blank");
                 var first = await Task.WhenAny(done.Task, Task.Delay(10000));
                 if (first != done.Task || !await done.Task)
                     throw new InvalidOperationException("Offline HTML failed");
