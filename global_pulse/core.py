@@ -1635,10 +1635,28 @@ class Store:
             params.append(country)
         with self._lock:
             sql = "SELECT id,body FROM observations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY observation_date DESC,country LIMIT 10000"
+            rows = self._conn.execute(sql, params).fetchall()
+            # Old code issued one separate revision SELECT per observation:
+            # 3,200 rows meant 3,200 SQLite round-trips on the Qt GUI thread.
+            # Fetch revisions in bounded batches while retaining per-record
+            # revision order, previous_value and the exact returned schema.
+            revisions_by_id: dict[str, list[dict]] = {}
+            for offset in range(0, len(rows), 400):
+                chunk = rows[offset:offset + 400]
+                identities = [row["id"] for row in chunk]
+                placeholders = ",".join("?" for _ in identities)
+                query = (
+                    "SELECT observation_id,body FROM observation_revisions "
+                    f"WHERE observation_id IN ({placeholders}) ORDER BY id"
+                )
+                for revision in self._conn.execute(query, identities):
+                    revisions_by_id.setdefault(revision["observation_id"], []).append(
+                        json.loads(revision["body"])
+                    )
             result = []
-            for row in self._conn.execute(sql, params):
+            for row in rows:
                 body = json.loads(row["body"])
-                revisions = [json.loads(r[0]) for r in self._conn.execute("SELECT body FROM observation_revisions WHERE observation_id=? ORDER BY id", (row["id"],))]
+                revisions = revisions_by_id.get(row["id"], [])
                 body["revisions"] = revisions
                 body["revision_count"] = len(revisions)
                 body["previous_value"] = revisions[-2]["value"] if len(revisions) > 1 else None
