@@ -92,6 +92,24 @@ jobs:
             throw 'No successful offline WebView2 H.264+InPrivate capability receipt'
           }
           Get-Content -LiteralPath $receipt
+      - name: Run compiled network-free native browser policy cases
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $env:RUNNER_TEMP 'globalpulse-tv-native-probe/GlobalPulse.TV.exe'
+          $receipt=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_POLICY_SELF_TEST.jsonl'
+          $stderr=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_POLICY_STDERR.txt'
+          $process=Start-Process -FilePath $exe -ArgumentList '--self-test-policy' -PassThru -RedirectStandardOutput $receipt -RedirectStandardError $stderr
+          if (-not $process.WaitForExit(15000)) {
+            $process.Kill()
+            throw 'Native browser policy test timed out'
+          }
+          if ($process.ExitCode -ne 0) { throw ('Native policy test failed: ' + $process.ExitCode + ', stderr: ' + (Get-Content $stderr -Raw)) }
+          $messages=@(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() })
+          $checks=@($messages | ConvertFrom-Json | Where-Object { $_.type -eq 'policy_self_test' })
+          if ($checks.Count -ne 1 -or $checks[0].passed -ne $true -or $checks[0].cases -lt 27 -or $checks[0].failures -ne 0 -or $checks[0].network -ne 'none') {
+            throw 'Native browser policy self-test did not pass all network-free cases'
+          }
+          Get-Content -LiteralPath $receipt
       - name: Preserve prototype QA receipts and dependency lock (not a release)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -101,5 +119,7 @@ jobs:
             packaging/tv/packages.lock.json
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_PROBE.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_STDERR.txt
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_SELF_TEST.jsonl
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_STDERR.txt
           retention-days: 7
           if-no-files-found: warn
