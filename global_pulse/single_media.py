@@ -28,6 +28,7 @@ class Television(_MediaTile):
         self._had_playback=False
         self._player_signal_connected=False
         self._last_decode_info=""
+        self._last_native_status_at=0.0
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -386,6 +387,7 @@ class Television(_MediaTile):
         self._native_tv_active=True
         self._had_playback=False
         self._progress_at=time.monotonic()
+        self._last_native_status_at=0.0
         self.tv_status.setText("CONNECTING · native Windows video decoder")
         self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
         started=self.native_tv.play(video,full_watch=full_watch)
@@ -421,6 +423,10 @@ class Television(_MediaTile):
                 else "PAGE ERROR · video not loaded"
             )
         elif kind=="waiting":
+            now=time.monotonic()
+            if now-self._last_native_status_at<5.0:
+                return
+            self._last_native_status_at=now
             codec=str(event.get("h264") or "unknown")
             self.tv_diagnostics.setText(
                 "Windows decoder H.264: "+codec+
@@ -429,7 +435,15 @@ class Television(_MediaTile):
             )
         elif kind=="advancing":
             self._had_playback=True
-            self._progress_at=time.monotonic()
+            now=time.monotonic()
+            self._progress_at=now
+            # The native helper reports at 1 Hz. Reflowing wrapped labels on
+            # every receipt forced Qt's scroll-area/native-child geometry to
+            # change while frames were being composited. Telemetry remains
+            # live; only the visible diagnostic label is rate-limited.
+            if now-self._last_native_status_at<5.0:
+                return
+            self._last_native_status_at=now
             self.tv_status.setText("VIDEO TIME ADVANCING · decoded frames reported")
             self.tv_diagnostics.setText(
                 "Native Edge H.264 "+str(event.get("h264") or "unknown")+
