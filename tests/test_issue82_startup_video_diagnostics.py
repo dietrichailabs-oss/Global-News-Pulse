@@ -31,6 +31,7 @@ def _archive(n):
     return [{
         "id":f"deferred-synthetic-{i}",
         "source_id":"offline-cold-profile",
+        "publisher":"Synthetic Publisher",
         "event_key":f"deferred-synthetic:{i}",
         "title":f"SYNTHETIC UI profile {cats[i%len(cats)]} #{i}",
         "summary":"Fictional source evidence, no real-world event",
