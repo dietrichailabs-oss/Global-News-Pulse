@@ -59,11 +59,11 @@ jobs:
           $ErrorActionPreference='Stop'
           git merge-base --is-ancestor cb30a6c034ab9be5636f6606f7a3f41ebd0e8b8b HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Issue82 collector/tray focused source absent' }
-          $changed=@(git diff --name-only 2dcb0e1c685a3f90e35141523178bdc03620a9bb..HEAD)
-          $allowed=@('.github/workflows/issue82-native-owner-perf-package.yml')
+          $changed=@(git diff --name-only cb30a6c034ab9be5636f6606f7a3f41ebd0e8b8b..HEAD)
+          $allowed=@('.github/workflows/issue82-native-owner-perf-corrected-package.yml')
           $unexpected=@($changed | Where-Object { $_ -notin $allowed })
           if ($unexpected.Count -gt 0 -or $changed.Count -ne 1) { throw ('Unreviewed product/test modification: ' + ($changed -join ',')) }
-          Write-Host 'ISSUE82_FOCUSED_PERFORMANCE_PRODUCT=2dcb0e1c685a3f90e35141523178bdc03620a9bb'
+          Write-Host 'ISSUE82_FOCUSED_PERFORMANCE_PRODUCT=cb30a6c034ab9be5636f6606f7a3f41ebd0e8b8b'
           Write-Host 'PR85_WINDOWS_LINUX_FOCUSED=136_PASS_EACH'
           Write-Host 'FULL_NATIVE_PYTEST_EXIT_REQUIRED=true'
           Write-Host 'PUBLIC_RELEASE_RIGHTS_HOLD=unchanged'
