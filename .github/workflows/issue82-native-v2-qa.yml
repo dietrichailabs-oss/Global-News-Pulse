@@ -1,4 +1,4 @@
-name: Issue82 Native TV Codec and Virtual Economy QA
+name: Issue82 Native TV Codec, Visual Embed and Virtual Economy QA
 
 on:
   push:
@@ -13,6 +13,7 @@ on:
       - 'tests/test_issue82_native_tv_policy.py'
       - 'packaging/tv/**'
       - 'scripts/build_windows.ps1'
+      - 'scripts/issue82_native_embed_probe.py'
       - 'scripts/collect_dotnet_notices.py'
       - 'tests/test_dotnet_notices.py'
       - 'tests/test_tv_package_manifest_gate.py'
@@ -30,6 +31,7 @@ on:
       - 'tests/test_issue82_owner_tab_paint_cpu.py'
       - 'tests/test_issue82_startup_video_diagnostics.py'
       - 'tests/test_issue82_native_tv_policy.py'
+      - 'scripts/issue82_native_embed_probe.py'
       - 'scripts/collect_dotnet_notices.py'
       - 'tests/test_dotnet_notices.py'
       - 'tests/test_tv_package_manifest_gate.py'
@@ -102,6 +104,13 @@ jobs:
             throw 'No successful offline WebView2 H.264+InPrivate capability receipt'
           }
           Get-Content -LiteralPath $receipt
+      - name: Verify actual Qt-hosted WebView2 pixels without network
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $env:RUNNER_TEMP 'globalpulse-tv-native-probe/GlobalPulse.TV.exe'
+          $receipt=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_EMBED_PIXELS.jsonl'
+          python -m scripts.issue82_native_embed_probe $exe 2>&1 | Tee-Object -FilePath $receipt
+          if ($LASTEXITCODE -ne 0) { throw 'Qt/Win32 visual embed probe failed: no visible WebView2 pixels' }
       - name: Verify exact shipped Microsoft SDK notice provenance after native publish
         run: |
           $ErrorActionPreference='Stop'
@@ -214,6 +223,7 @@ jobs:
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_NOTICES/NATIVE_PACKAGE_NOTICES.json
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_PROBE.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_STDERR.txt
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_EMBED_PIXELS.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_SELF_TEST.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_STDERR.txt
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_OVERRIDE_REFUSAL.jsonl
