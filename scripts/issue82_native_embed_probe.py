@@ -112,6 +112,10 @@ def run(helper: Path) -> int:
                        "qt_container_hwnd": int(host._window_container.winId()),
                        "qt_container_size": [host._window_container.width(),host._window_container.height()],
                        "foreign_window_size": [host._foreign_window.width(),host._foreign_window.height()]})
+        if int(native_parent or 0) != int(host._window_container.winId()):
+            raise AssertionError("WebView2 is a desktop popup, not a native Qt child")
+        if not native_visible:
+            raise AssertionError("WebView2 is not natively visible inside its Qt parent")
         if visible < 3:
             raise AssertionError("The embedded WebView2 surface is not visibly painted on desktop")
         result["passed"] = True
