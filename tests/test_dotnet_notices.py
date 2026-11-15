@@ -126,3 +126,92 @@ def test_unreviewed_windows_sdk_reference_version_still_fails_closed(tmp_path, m
     monkeypatch.setattr(notices, "REVIEWED_REFERENCE_ROOT", tmp_path / "reviewed-empty")
     with pytest.raises(ValueError, match="Runtime package notice text missing"):
         notices.collect(deps, nuget, tmp_path / "out" / "licenses")
+
+
+def _webview2_lock(tmp_path, monkeypatch, version="1.0.4314.35", package_hash="LOCKED_TEST_SHA512"):
+    lock_path = tmp_path / "webview2" / "packages.lock.json"
+    lock_path.parent.mkdir()
+    lock_path.write_text(json.dumps({
+        "version": 1,
+        "dependencies": {
+            "net10.0-windows10.0.19041/win-x64": {
+                "Microsoft.Web.WebView2": {
+                    "type": "Direct",
+                    "requested": f"[{version}, )",
+                    "resolved": version,
+                    "contentHash": package_hash,
+                }
+            }
+        }
+    }))
+    monkeypatch.setattr(notices, "REVIEWED_PACKAGE_LOCK_PATH", lock_path)
+    return package_hash
+
+
+@pytest.mark.parametrize("assembly", [
+    "Microsoft.Web.WebView2.Core",
+    "Microsoft.Web.WebView2.WinForms",
+    "Microsoft.Web.WebView2.Wpf",
+])
+def test_exact_locked_webview2_reference_copies_parent_sdk_notice(tmp_path, monkeypatch, assembly):
+    nuget = tmp_path / "packages"
+    parent = _package(nuget, "Microsoft.Web.WebView2", "1.0.4314.35")
+    lock_hash = _webview2_lock(tmp_path, monkeypatch)
+    (parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512").write_text(lock_hash)
+    deps = tmp_path / "app.deps.json"
+    _deps(deps, [
+        ("Microsoft.Web.WebView2/1.0.4314.35", "package", [], []),
+        (f"{assembly}/1.0.4314.35", "reference", [assembly + ".dll"], []),
+    ])
+    result = notices.collect(deps, nuget, tmp_path / "out" / "licenses")
+    assert len(result["packages"]) == 1
+    record = result["packages"][0]
+    assert record["type"] == "reference"
+    assert record["notice_source_package"] == "Microsoft.Web.WebView2/1.0.4314.35"
+    assert record["notice_source_lock_sha512"] == lock_hash
+    assert record["evidence_kind"] == "package_notice_text"
+    assert len(record["notice_files"]) == 1
+    copied = record["notice_files"][0]
+    assert copied["sha256"] == notices.digest(parent / "LICENSE.txt")
+    assert (tmp_path / "out" / copied["packaged_relative"]).read_bytes() == (parent / "LICENSE.txt").read_bytes()
+
+
+@pytest.mark.parametrize("violation", [
+    "missing_lock",
+    "wrong_locked_version",
+    "restored_hash_mismatch",
+    "missing_restored_hash",
+    "missing_notice",
+    "unreviewed_reference_version",
+    "unreviewed_reference_name",
+    "wrong_parent_deps_kind",
+])
+def test_webview2_reference_provenance_fail_closed(tmp_path, monkeypatch, violation):
+    nuget = tmp_path / "packages"
+    parent = _package(
+        nuget, "Microsoft.Web.WebView2", "1.0.4314.35",
+        notice=(violation != "missing_notice"),
+    )
+    lock_hash = _webview2_lock(
+        tmp_path, monkeypatch,
+        version="1.0.4314.36" if violation == "wrong_locked_version" else "1.0.4314.35",
+    )
+    hash_file = parent / "microsoft.web.webview2.1.0.4314.35.nupkg.sha512"
+    if violation != "missing_restored_hash":
+        hash_file.write_text("BAD_HASH" if violation == "restored_hash_mismatch" else lock_hash)
+    if violation == "missing_lock":
+        notices.REVIEWED_PACKAGE_LOCK_PATH.unlink()
+    name = "Microsoft.Web.WebView2.Core"
+    version = "1.0.4314.35"
+    if violation == "unreviewed_reference_name":
+        name = "Microsoft.Web.WebView2.Obscure"
+    elif violation == "unreviewed_reference_version":
+        version = "1.0.4314.36"
+    kind = "project" if violation == "wrong_parent_deps_kind" else "package"
+    deps = tmp_path / "app.deps.json"
+    _deps(deps, [
+        ("Microsoft.Web.WebView2/1.0.4314.35", kind, [], []),
+        (f"{name}/{version}", "reference", [name + ".dll"], []),
+    ])
+    with pytest.raises((ValueError, FileNotFoundError)):
+        notices.collect(deps, nuget, tmp_path / "out" / "licenses")
