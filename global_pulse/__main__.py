@@ -364,7 +364,7 @@ def main(argv=None):
                         )
                 QTimer.singleShot(0, show_tray_notice)
         else:
-            shutdown()
+            controller.quit()
 
     window.set_close_handler(close_window)
     window.show()
@@ -395,7 +395,7 @@ def main(argv=None):
             diagnostics["image_saved"] = window.grab().save(str(args.snapshot))
             args.snapshot.with_suffix(".json").write_text(
                 json.dumps(diagnostics, indent=2) + "\n", encoding="utf-8")
-            shutdown()
+            controller.quit()
         QTimer.singleShot(800, snapshot)
     elif args.demo:
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
@@ -419,7 +419,7 @@ def main(argv=None):
         result = app.exec()
     finally:
         if not shutting_down:
-            shutdown()
+            controller.quit()
         handler.close()
         log.removeHandler(handler)
     return result
