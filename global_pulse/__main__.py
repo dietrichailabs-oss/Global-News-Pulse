@@ -37,15 +37,16 @@ def _tray_health_state(controller):
 class _TrayRefreshBridge(QObject):
     """GUI-affine slot: collector threads never start a tray QTimer directly."""
 
-    def __init__(self, timer: QTimer, controller):
+    def __init__(self, timer: QTimer, controller, should_stop=None):
         super().__init__(timer)
         self.timer = timer
         self.controller = controller
         self.stopping = False
+        self.should_stop = should_stop or (lambda: False)
 
     @Slot()
     def schedule(self):
-        if self.stopping or self.controller._closed:
+        if self.stopping or self.should_stop() or self.controller._closed:
             return
         if not self.timer.isActive():
             self.timer.start()
@@ -381,7 +382,8 @@ def main(argv=None):
     tray_refresh_timer.setSingleShot(True)
     tray_refresh_timer.setInterval(700)
     tray_refresh_timer.timeout.connect(update_tray)
-    tray_refresh_bridge = _TrayRefreshBridge(tray_refresh_timer, controller)
+    tray_refresh_bridge = _TrayRefreshBridge(tray_refresh_timer, controller,
+                                            should_stop=lambda: shutting_down)
 
     def menu_hidden():
         nonlocal tray_pending_menu
@@ -404,7 +406,6 @@ def main(argv=None):
         if shutting_down:
             return
         shutting_down = True
-        tray_refresh_bridge.stopping = True
         window.save_layout()
         for widget in window.findChildren(QWidget):
             if widget.__class__.__name__ == "MediaPanel":
@@ -414,7 +415,6 @@ def main(argv=None):
             controller.close()
         except RuntimeError as error:
             shutting_down = False
-            tray_refresh_bridge.stopping = False
             window.show()
             QMessageBox.critical(window, "Full exit not completed", str(error) + ". The window remains available; retry Exit Completely.")
             return
