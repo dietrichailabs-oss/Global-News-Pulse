@@ -23,19 +23,22 @@ def app():
 
 
 def _archive(n):
+    # Deliberately reuse the proven unlocated cold-headline archive shape from
+    # test_issue64_deferred_cold_headlines, with unique category/identity text.
     at=datetime.now(timezone.utc).isoformat()
+    cats=("Disaster","Conflict","Unrest","Health","Government",
+          "Economy","Humanitarian","Infrastructure","News")
     return [{
-        "id":f"qa82-cold-{i}",
-        "source_id":"qa82-inert-publication",
-        "event_key":f"qa82:local:{i}",
-        "title":f"SYNTHETIC headline language unknown {i} from the sample archive",
-        "summary":"Entirely fabricated offline source record.",
-        "url":f"https://example.org/qa82/{i}",
+        "id":f"deferred-synthetic-{i}",
+        "source_id":"offline-cold-profile",
+        "event_key":f"deferred-synthetic:{i}",
+        "title":f"SYNTHETIC UI profile {cats[i%len(cats)]} #{i}",
+        "summary":"Fictional source evidence, no real-world event",
+        "url":f"https://example.invalid/deferred/{i}",
         "published_at":at,"retrieved_at":at,
         "country":"","region":"Global",
-        "category":["Disaster","Health","Government","News"][i%4],
+        "category":cats[i%len(cats)],
         "severity":"unassessed","synthetic":True,
-        "language":"und",
     } for i in range(n)]
 
 
@@ -44,7 +47,9 @@ def test_initial_splash_drains_cold_headlines_and_prepares_all_tabs(app,tmp_path
     w=None
     splash=None
     try:
-        c.store.ingest(_archive(220))
+        ingested=c.store.ingest(_archive(220))
+        assert len(ingested)==220, c.store.last_ingest_errors[:3]
+        assert len(c.events(limit=500))==220
         splash=show_initializing(app)
         w=MainWindow(c)
         # The controller and widgets are constructed but main window is still
