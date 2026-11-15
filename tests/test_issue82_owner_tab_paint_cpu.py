@@ -254,8 +254,14 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app):
         window.open_page(steps[index])
         durations.append(time.perf_counter()-start)
         if index==36:
+            # The feed is capped at 500. A genuinely newer worker timestamp
+            # keeps this fixture in the visible slice, independently of UUID
+            # tie-breaking among the 900 seeded records.
+            new_now=datetime.now(timezone.utc).isoformat()
+            latest=report(9001)
+            latest.update(published_at=new_now,retrieved_at=new_now)
             worker=threading.Thread(target=lambda:controller._on_reports(
-                [report(9001)],allow_synthetic=True,now=now),daemon=True)
+                [latest],allow_synthetic=True,now=new_now),daemon=True)
             workers.append(worker);worker.start()
 
     navigator.timeout.connect(next_tab)
