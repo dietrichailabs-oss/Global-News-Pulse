@@ -15,6 +15,15 @@ import shutil
 from pathlib import Path
 
 REVIEWED_REFERENCE_ROOT = Path(__file__).resolve().parents[1] / "packaging" / "licenses"
+REVIEWED_PACKAGE_LOCK_PATH = Path(__file__).resolve().parents[1] / "packaging" / "tv" / "packages.lock.json"
+# Published WebView2 assembly identities are .deps.json "reference" entries, not
+# independently restored packages. Only these exact SDK version identities may
+# take their notice provenance from the pinned parent Microsoft.Web.WebView2.
+REVIEWED_WEBVIEW2_REFERENCE_PARENTS = {
+    ("microsoft.web.webview2.core", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
+    ("microsoft.web.webview2.winforms", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
+    ("microsoft.web.webview2.wpf", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
+}
 REVIEWED_EXTERNAL_LICENSE_REFERENCES = {
     ("runtimepack.microsoft.windows.sdk.net.ref", "10.0.19041.57"):
         "Microsoft.Windows.SDK.NET.Ref-10.0.19041.57-LICENSE-REFERENCE.txt",
@@ -58,6 +67,49 @@ def notice_files(root: Path) -> list[Path]:
     return sorted(found, key=lambda item: item.relative_to(root).as_posix().lower())
 
 
+def reviewed_reference_notice_root(
+    library_name: str, version: str, libraries: dict, nuget_root: Path,
+) -> tuple[Path, str, str]:
+    """Resolve only reviewed WebView2 assembly references to a locked NuGet source.
+
+    Validate both the source-locked package record and the restored NuGet
+    SHA-512 digest. Unknown references, missing lock proof, and mismatches STOP.
+    """
+    alias = REVIEWED_WEBVIEW2_REFERENCE_PARENTS.get((library_name.lower(), version))
+    if alias is None:
+        raise ValueError(
+            f"Shipped dependency has unsupported notice source: {library_name}/{version} (reference)"
+        )
+    parent, pinned_version = alias
+    parent_identity = f"{parent}/{pinned_version}"
+    if parent_identity in libraries:
+        parent_kind = str(libraries[parent_identity].get("type", "")).lower()
+        if parent_kind != "package":
+            raise ValueError(f"Reference parent dependency type mismatch: {parent_identity}")
+
+    lock = json.loads(REVIEWED_PACKAGE_LOCK_PATH.read_text(encoding="utf-8-sig"))
+    dependency_sets = (lock.get("dependencies") or {}).values()
+    records = [dep.get(parent) for dep in dependency_sets if isinstance(dep, dict)]
+    records = [record for record in records if isinstance(record, dict)]
+    if not records or any(
+        record.get("type") != "Direct"
+        or record.get("resolved") != pinned_version
+        or record.get("requested") != f"[{pinned_version}, )"
+        or not isinstance(record.get("contentHash"), str)
+        for record in records
+    ):
+        raise ValueError(f"Exact WebView2 reference parent lock missing: {parent_identity}")
+    locked_hashes = {record["contentHash"].strip() for record in records}
+    if len(locked_hashes) != 1:
+        raise ValueError(f"WebView2 reference package lock hashes conflict: {parent_identity}")
+    locked_hash = locked_hashes.pop()
+    root = package_root(nuget_root, parent, pinned_version)
+    hash_file = root / f"{parent.lower()}.{pinned_version.lower()}.nupkg.sha512"
+    if not hash_file.is_file() or hash_file.read_text(encoding="utf-8").strip() != locked_hash:
+        raise ValueError(f"Restored WebView2 reference package hash differs from lock: {parent_identity}")
+    return root, parent_identity, locked_hash
+
+
 def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
     deps_path = deps_path.resolve(strict=True)
     nuget_root = nuget_root.resolve(strict=True)
@@ -88,9 +140,16 @@ def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
         kind = str(library.get("type", "")).lower()
         if kind == "project":
             continue
-        if kind not in {"package", "runtimepack"}:
+        notice_source_package = identity
+        reference_lock_hash = None
+        if kind == "reference":
+            root, notice_source_package, reference_lock_hash = reviewed_reference_notice_root(
+                package, version, libraries, nuget_root
+            )
+        elif kind in {"package", "runtimepack"}:
+            root = package_root(nuget_root, package, version)
+        else:
             raise ValueError(f"Shipped dependency has unsupported notice source: {identity} ({kind or 'unknown'})")
-        root = package_root(nuget_root, package, version)
         sources = notice_files(root)
         reference_name = REVIEWED_EXTERNAL_LICENSE_REFERENCES.get((package.lower(), version))
         if not sources and not reference_name:
@@ -130,6 +189,8 @@ def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
             "version": version,
             "type": kind,
             "evidence_kind": evidence_kind,
+            "notice_source_package": notice_source_package,
+            "notice_source_lock_sha512": reference_lock_hash,
             "runtime_files": sorted(runtime),
             "native_files": sorted(native),
             "notice_files": copied,
