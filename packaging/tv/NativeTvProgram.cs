@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Web.WebView2.Core;
@@ -57,6 +58,19 @@ internal static class Program
 
 internal sealed class TvForm : Form
 {
+    // Microsoft documents that these host-machine overrides can silently
+    // replace the requested private profile, redirect the runtime, or expose
+    // the page to script debuggers. The helper fails closed on any override.
+    private static readonly string[] WebView2OverrideNames = {
+        "WEBVIEW2_USER_DATA_FOLDER", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "WEBVIEW2_RELEASE_CHANNEL_PREFERENCE",
+        "WEBVIEW2_RELEASE_CHANNELS", "WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER",
+        "WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER",
+    };
+    private static readonly string[] WebView2PolicyOverrides = {
+        "UserDataFolder", "BrowserExecutableFolder", "AdditionalBrowserArguments",
+        "ReleaseChannelPreference", "ReleaseChannels",
+    };
     private static readonly string[] AllowedHosts = {
         "youtube.com", "youtube-nocookie.com", "youtubei.googleapis.com",
         "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com",
@@ -227,18 +241,58 @@ internal sealed class TvForm : Form
             || !Allowed(good)) failures++;
         if (!Uri.TryCreate("https://accounts.google.com/signin",UriKind.Absolute,out var bad)
             || Allowed(bad)) failures++;
+        if (!WebView2OverrideNames.Contains("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")) failures++;
+        if (!WebView2OverrideNames.Contains("WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER")) failures++;
+        if (!WebView2PolicyOverrides.Contains("AdditionalBrowserArguments")) failures++;
+        if (!WebView2PolicyOverrides.Contains("UserDataFolder")) failures++;
         Console.WriteLine(JsonSerializer.Serialize(new {
-            type="policy_self_test", cases=exact.Length * 2 + 7,
+            type="policy_self_test", cases=exact.Length * 2 + 11,
             passed=failures==0, failures, network="none"
         }));
         return failures==0 ? 0 : 1;
+    }
+
+    private static void RejectWebView2Overrides()
+    {
+        foreach (string name in WebView2OverrideNames)
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name)))
+                throw new InvalidOperationException("WebView2 override refused: " + name);
+        }
+        // The override registry fallback is consulted only if variables are
+        // absent. Examine both policy hives read-only, including wildcard and
+        // app-specific values; fail closed if a nonempty override exists.
+        // This may refuse playback on managed computers but leaves all other
+        // Pulse features running and never relaxes the video isolation.
+        foreach (RegistryKey root in new [] { Registry.LocalMachine, Registry.CurrentUser })
+        {
+            foreach (string key in WebView2PolicyOverrides)
+            {
+                using var policy = root.OpenSubKey(@"SOFTWARE\Policies\Microsoft\Edge\WebView2\" + key);
+                if (policy == null) continue;
+                foreach (string name in policy.GetValueNames())
+                    if (!string.IsNullOrWhiteSpace(policy.GetValue(name)?.ToString()))
+                        throw new InvalidOperationException("WebView2 policy override refused: " + key);
+            }
+        }
     }
 
     private async Task OpenAsync()
     {
         try
         {
-            var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: privateFolder);
+            RejectWebView2Overrides();
+            var environmentOptions = new CoreWebView2EnvironmentOptions {
+                ExclusiveUserDataFolderAccess = true,
+                AllowSingleSignOnUsingOSPrimaryAccount = false,
+            };
+            var environment = await CoreWebView2Environment.CreateAsync(
+                userDataFolder: privateFolder, options: environmentOptions);
+            if (!string.Equals(
+                    Path.GetFullPath(environment.UserDataFolder).TrimEnd(Path.DirectorySeparatorChar),
+                    Path.GetFullPath(privateFolder).TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("WebView2 redirected private folder");
             var options = environment.CreateCoreWebView2ControllerOptions();
             options.IsInPrivateModeEnabled = true;
             await browser.EnsureCoreWebView2Async(environment, options);
