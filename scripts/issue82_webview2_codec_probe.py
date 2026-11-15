@@ -68,8 +68,18 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
             return
         finished["value"] = True
         report["result"] = result
+        report["callback_type"] = type(payload).__name__
+        report["callback_sample"] = repr(payload)[:500]
+        for _ in range(2):
+            if not isinstance(payload, str):
+                break
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                break
         if isinstance(payload, dict):
             report["video_can_play_type"] = payload
+            report["result"] = "codec_capability_reported"
         webview.stop()
         host.close()
         app.quit()
@@ -77,13 +87,13 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
     javascript = """
     (() => {
       const video = document.createElement('video');
-      return {
+      return JSON.stringify({
         h264_aac: video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
         vp9_opus: video.canPlayType('video/webm; codecs="vp9, opus"'),
         av1_opus: video.canPlayType('video/webm; codecs="av01.0.08M.08, opus"'),
         media_source: typeof MediaSource !== 'undefined',
         location: String(location.href)
-      };
+      });
     })()
     """
 
@@ -92,7 +102,7 @@ def probe_codec_capabilities(report: dict[str, object]) -> dict[str, object]:
             webview.runJavaScript(
                 javascript,
                 lambda value: finish(
-                    "codec_capability_reported" if isinstance(value, dict) else "empty_codec_reply",
+                    "javascript_callback_received" if value is not None else "empty_codec_reply",
                     value,
                 ),
             )
