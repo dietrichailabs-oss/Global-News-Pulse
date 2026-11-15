@@ -1173,7 +1173,8 @@ class Store:
         common = [
             row["id"] for row, event in saved
             if (event.get("status") == "active"
-                and event.get("evidence_policy_version") == 2
+                and type(event.get("evidence_policy_version")) is int
+                and 2 <= event["evidence_policy_version"] <= 3
                 and not event.get("merged_source_events")
                 and not event.get("map_areas")
                 and isinstance(event.get("report_count"), int)
