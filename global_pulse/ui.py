@@ -845,6 +845,7 @@ class MainWindow(SituationActions, QMainWindow):
             return False
         previous_page = self.pages.currentIndex()
         was_enabled = self.isEnabled()
+        self._initial_painted_pages = set()
         self.setEnabled(False)
         try:
             # A hidden widget's geometry is not the real Windows viewport.
@@ -858,6 +859,19 @@ class MainWindow(SituationActions, QMainWindow):
                     or self.world_map.height() < 32):
                 return False
             self.world_map.grab()
+            self._initial_painted_pages.add(0)
+
+            # Data is already preloaded for every workspace. Force its
+            # initial Qt geometry/viewport draw under splash as well; a cold
+            # first click must not pay for Sources, Settings, Alerts or Briefs.
+            for index in (1, 3, 4, 5, 6):
+                self.open_page(index)
+                app.processEvents()
+                page = self.pages.currentWidget()
+                if page is None or not page.isVisible():
+                    return False
+                page.grab()
+                self._initial_painted_pages.add(index)
 
             self.open_page(2)
             app.processEvents()
@@ -868,6 +882,7 @@ class MainWindow(SituationActions, QMainWindow):
             # Initial QTableView viewport/layout must also complete under
             # splash, but only visible virtual rows are materialized.
             self.economy_table.viewport().grab()
+            self._initial_painted_pages.add(2)
 
             self.open_page(previous_page)
             app.processEvents()
@@ -885,6 +900,7 @@ class MainWindow(SituationActions, QMainWindow):
                 and len(world._projected_paths) == len(world._countries)
                 and chart._chart_pixmap is not None
                 and chart._chart_cache_key == expected_chart_key
+                and self._initial_painted_pages == set(range(7))
             )
         finally:
             if self.pages.currentIndex() != previous_page:
