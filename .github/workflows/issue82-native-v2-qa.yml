@@ -116,7 +116,17 @@ jobs:
               }
           }
           $lock=Get-Content -LiteralPath 'packaging/tv/packages.lock.json' -Raw | ConvertFrom-Json
-          Write-Host ('SDK_LOCK_HASH=' + $lock.dependencies.'net10.0-windows10.0.19041/win-x64'.'Microsoft.Web.WebView2'.contentHash)
+          $expectedNuget='x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=='
+          $expectedArchive='cOaiVqP3BmQHMnxGpZzANM22tUXgycrisyJHjIGNzIaMsm8iXj7Kx+ceYg+RbYwJtzT009qfcFTocvVLY+ekMw=='
+          $locked=$lock.dependencies.'net10.0-windows10.0.19041/win-x64'.'Microsoft.Web.WebView2'.contentHash
+          Write-Host ('SDK_NUGET_LOCK_CONTENT_SHA512=' + $locked)
+          $metadata=Get-Content -LiteralPath (Join-Path $sdk '.nupkg.metadata') -Raw | ConvertFrom-Json
+          Write-Host ('SDK_NUGET_CACHE_CONTENT_SHA512=' + $metadata.contentHash)
+          Write-Host ('SDK_NUGET_CACHE_SOURCE=' + $metadata.source)
+          if ($locked -ne $expectedNuget -or $metadata.contentHash -ne $expectedNuget -or
+              -not $metadata.source.StartsWith('https://api.nuget.org/v3/')) {
+            throw 'NuGet semantic package content and reviewed lock provenance differ'
+          }
           $archive=Join-Path $sdk 'microsoft.web.webview2.1.0.4314.35.nupkg'
           $stream=[System.IO.File]::OpenRead($archive)
           try { $archiveHash=[Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData($stream)) }
@@ -130,7 +140,10 @@ jobs:
           finally { $officialStream.Dispose() }
           Write-Host ('SDK_OFFICIAL_NUGET_SHA512=' + $upstreamHash)
           Write-Host ('SDK_OFFICIAL_NUGET_BYTES=' + (Get-Item -LiteralPath $upstreamArchive).Length)
-          if ($archiveHash -ne $upstreamHash) { throw 'Cached WebView2 package bytes do not match official NuGet' }
+          if ($archiveHash -ne $expectedArchive -or $upstreamHash -ne $expectedArchive -or
+              (Get-Content -LiteralPath (Join-Path $sdk 'microsoft.web.webview2.1.0.4314.35.nupkg.sha512') -Raw).Trim() -ne $expectedArchive) {
+            throw 'Reviewed signed WebView2 SDK archive does not match official NuGet bytes'
+          }
           python scripts/collect_dotnet_notices.py --deps $deps --nuget-root $nuget --output $output
           if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 notice provenance failed closed' }
           $receipt=Get-Content -LiteralPath (Join-Path $output 'NATIVE_PACKAGE_NOTICES.json') -Raw | ConvertFrom-Json
@@ -138,7 +151,8 @@ jobs:
           if ($refs.Count -eq 0) { throw 'No WebView2 assembly reference notice was accounted' }
           foreach($item in $refs) {
             if ($item.notice_source_package -ne 'Microsoft.Web.WebView2/1.0.4314.35' -or
-                -not $item.notice_source_lock_sha512 -or
+                $item.notice_source_lock_sha512 -ne $expectedNuget -or
+                $item.notice_source_archive_sha512 -ne $expectedArchive -or
                 @($item.notice_files).Count -eq 0 -or
                 $item.evidence_kind -ne 'package_notice_text') {
               throw 'WebView2 assembly reference notice has no exact SDK/license/hash proof'
