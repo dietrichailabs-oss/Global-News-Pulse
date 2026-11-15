@@ -1161,6 +1161,59 @@ class Store:
                 event["linked_event_histories"][linked] = snapshots
         return event
 
+    def _map_evidence_page_unlocked(self, page: list[sqlite3.Row]) -> list[dict | None]:
+        """Batch common stable map reports; preserve exact old projection for exceptions.
+
+        Map country/category circles need every labelled source report, not
+        merely the active subset. Historical, legacy, pending NWS, merged and
+        deferred-source cases still take the original read-only projection.
+        Called only while the Store lock is held.
+        """
+        saved = [(row, json.loads(row["body"])) for row in page]
+        common = [
+            row["id"] for row, event in saved
+            if (event.get("status") == "active"
+                and event.get("evidence_policy_version") == 2
+                and not event.get("merged_source_events")
+                and not event.get("map_areas"))
+        ]
+        grouped = defaultdict(list)
+        if common:
+            # A page is at most 256 IDs; SQLite parameter bounds and ordering
+            # are preserved. This replaces thousands of per-event/per-report
+            # SELECT calls without inventing or discarding source evidence.
+            sql = ("SELECT event_id,body FROM reports WHERE event_id IN (" +
+                   ",".join("?" for _ in common) +
+                   ") ORDER BY event_id,published_at,record_key")
+            for row in self._conn.execute(sql, common):
+                grouped[row["event_id"]].append(json.loads(row["body"]))
+        output = []
+        for row, event in saved:
+            identity = row["id"]
+            if identity not in grouped and identity not in common:
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            at = event["updated_at"]
+            reports = grouped.get(identity, [])
+            # The latest received revision may still be future by provider time.
+            # Only the old history-aware projection can select the earlier
+            # eligible immutable report_revisions entry in that case.
+            if any(_report_is_future(report, at) or report.get("source_id") == "nws"
+                   for report in reports):
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            selected = []
+            for raw in reports:
+                report = dict(raw)
+                report["future_dated"] = False
+                report["expired"] = is_expired(report, at)
+                selected.append(report)
+            _, event["reports"] = _evidence_reports(selected, at)
+            # project_warning_context is an identity projection for active
+            # records; pending or area-bearing events took the original path.
+            output.append(event)
+        return output
+
     def get_event(self, event_id: str, at: str | None = None) -> dict | None:
         with self._lock:
             return self._get_event_unlocked(event_id, at)
@@ -1224,7 +1277,8 @@ class Store:
                         params.append("%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
             order = ("CASE json_extract(body,'$.severity') WHEN 'critical' THEN 4 WHEN 'high' THEN 3 "
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
-            sql = ("SELECT body FROM events" if map_view and not map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
+            sql = ("SELECT body FROM events" if map_view and not map_evidence else
+                   "SELECT id,body FROM events" if map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
             if map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
@@ -1245,8 +1299,7 @@ class Store:
                     if not page:
                         break
                     offset += len(page)
-                    for row in page:
-                        event = self._get_event_unlocked(row[0], map_projection=True)
+                    for event in self._map_evidence_page_unlocked(page):
                         if event and (event.get("status") == "active" or
                                       event.get("map_history_incomplete") is True):
                             result.append(event)
