@@ -293,7 +293,7 @@ def main(argv=None):
         log.removeHandler(handler)
         raise
     def native_allowed():
-        return controller.monitoring and controller.get_setting("notifications_enabled", True) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
+        return controller.monitoring and controller.get_setting("notifications_enabled", False) and not in_quiet_hours({key: controller.get_setting(key, default) for key, default in [("quiet_enabled",False),("quiet_start","22:00"),("quiet_end","07:00")]})
 
     notifier = NativeNotifications(enabled=not args.demo, predicate=native_allowed)
     controller.native_alert.connect(notifier.notify)
@@ -331,8 +331,34 @@ def main(argv=None):
     menu.addAction("Resume Monitoring", controller.resume)
     mute = menu.addAction("Mute Notifications")
     mute.setCheckable(True)
-    mute.setChecked(not controller.get_setting("notifications_enabled", True))
+    mute.setChecked(not controller.get_setting("notifications_enabled", False))
     mute.toggled.connect(lambda value: controller.set_setting("notifications_enabled", not value))
+    def apply_native_preference(enabled):
+        # Sync the Settings checkbox and tray independently of which UI action
+        # the user chose. No cross-thread blocking helper stop on the UI path.
+        was_blocked = mute.blockSignals(True)
+        try:
+            mute.setChecked(not enabled)
+        finally:
+            mute.blockSignals(was_blocked)
+        window.setting_notify.setChecked(enabled)
+        if not enabled:
+            notifier.status_changed.emit(
+                "Windows pop-up notifications off · alerts remain in Pulse history"
+            )
+            return
+        if args.demo:
+            notifier.status_changed.emit("Synthetic review · Windows notifications disabled")
+            return
+        from .distribution_terms import accept_windows_sdk_terms
+        if accept_windows_sdk_terms(controller, window):
+            notifier.start()
+        else:
+            notifier.status_changed.emit(
+                "Windows notifications not activated · Microsoft component terms declined"
+            )
+            controller.set_setting("notifications_enabled", False)
+    controller.notification_preference_changed.connect(apply_native_preference)
     menu.addAction("View Alerts", lambda: (activate(), window.open_page(4)))
     menu.addAction("Open Settings", lambda: (activate(), window.open_page(6)))
     menu.addSeparator()
@@ -530,11 +556,15 @@ def main(argv=None):
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
     else:
         def begin():
-            from .distribution_terms import accept_windows_sdk_terms
-            if accept_windows_sdk_terms(controller, window):
-                notifier.start()
+            # A legacy profile may contain notifications_enabled=True from an
+            # earlier default. Without a fresh v2 opt-in this does not even
+            # launch the Windows helper or prompt for Microsoft component terms.
+            if controller.get_setting("notifications_enabled", False):
+                apply_native_preference(True)
             else:
-                notifier.status_changed.emit("Windows notifications off — Microsoft component terms not accepted")
+                notifier.status_changed.emit(
+                    "Windows pop-up notifications off · enable in Settings"
+                )
             if args.no_start:
                 return
             should_start = True
