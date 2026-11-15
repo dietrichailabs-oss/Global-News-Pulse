@@ -158,7 +158,9 @@ def test_actual_qprocess_optout_is_nonblocking_and_writes_exit_frame():
         assert notifier._stopped
         assert notifier.process is None
     finally:
-        if child.state() != QProcess.ProcessState.NotRunning:
+        # _finished() schedules the child for Qt deferred deletion.
+        # Never access a potentially deleted QProcess wrapper after exit.
+        if not ended and child.state() != QProcess.ProcessState.NotRunning:
             child.kill()
             child.waitForFinished(1000)
         notifier.deleteLater()
