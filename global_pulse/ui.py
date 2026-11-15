@@ -12,13 +12,13 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt, Signal, Slot, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QPainter, QPen, QFont, QKeySequence, QShortcut, QTextDocument
+from PySide6.QtCore import Qt, Signal, Slot, QByteArray, QTimer, QPoint, QPointF, QRect, QRectF, QSize, QAbstractTableModel, QModelIndex
+from PySide6.QtGui import QColor, QPainter, QPen, QFont, QKeySequence, QShortcut, QTextDocument, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton,
     QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QLineEdit, QComboBox,
     QSplitter, QStackedWidget, QListWidget, QListWidgetItem, QTextBrowser,
-    QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSpinBox, QTimeEdit,
+    QTableWidget, QTableWidgetItem, QTableView, QHeaderView, QCheckBox, QSpinBox, QTimeEdit,
     QSlider, QGroupBox, QScrollArea, QFileDialog, QMessageBox, QCompleter,
     QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
 )
@@ -209,6 +209,74 @@ class EventDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class EconomicTableModel(QAbstractTableModel):
+    """Virtual economic table: even a large archive creates no per-cell widgets."""
+
+    COLUMNS = (
+        "Country", "Observation date", "Value", "Prior value", "Revisions",
+        "Unit", "Release / update", "Retrieved", "Source ↗",
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []
+
+    def set_observations(self, observations):
+        self.beginResetModel()
+        self._rows = sorted(
+            observations,
+            key=lambda o: str(o.get("date") or o.get("observation_date") or o.get("period") or ""),
+            reverse=True,
+        )
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.COLUMNS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.COLUMNS):
+                return self.COLUMNS[section]
+        return None
+
+    def url_at(self, row):
+        if 0 <= row < len(self._rows):
+            return str(self._rows[row].get("url") or "")
+        return ""
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or not (0 <= index.row() < len(self._rows)):
+            return None
+        o = self._rows[index.row()]
+        if role == Qt.ItemDataRole.UserRole:
+            return self.url_at(index.row())
+        if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
+            return None
+        values = (
+            o.get("country_name") or o.get("country"),
+            o.get("date") or o.get("observation_date") or o.get("period"),
+            o.get("value"),
+            o.get("previous_value") if o.get("previous_value") is not None else "No recorded revision",
+            o.get("revision_count", 1),
+            o.get("unit") or "See indicator definition",
+            o.get("release_date") or o.get("last_updated") or "Not supplied",
+            timestamp(o.get("retrieved_at")),
+            o.get("source_id") or o.get("source") or o.get("url"),
+        )
+        value = values[index.column()]
+        return str(value if value is not None else "Missing")
+
+
+class EconomicTableView(QTableView):
+    """Retain the existing rowCount API used by desktop/QA view tests."""
+
+    def rowCount(self):
+        return self.model().rowCount() if self.model() is not None else 0
+
+
 class EconomicChart(QWidget):
     """Small native chart with actual values; missing observations stay missing."""
     def __init__(self, parent=None):
@@ -216,26 +284,59 @@ class EconomicChart(QWidget):
         self.setMinimumHeight(230)
         self.setAccessibleName("Economic observation history")
         self.observations = []
+        self._series = []
+        self._dates = ()
+        self._extents = (0, 1)
+        self._chart_pixmap = None
+        self._chart_cache_key = None
 
     def set_observations(self, data):
         self.observations = [d for d in data if isinstance(d.get("value"), (int,float)) and not isinstance(d.get("value"),bool) and math.isfinite(d["value"])]
+        groups = {}
+        for item in self.observations:
+            date = str(item.get("date") or item.get("observation_date") or item.get("period") or "")
+            if not date:
+                continue
+            country = str(item.get("country_name") or item.get("country") or "Global")
+            groups.setdefault(country, []).append((date, float(item["value"])))
+        self._dates = tuple(sorted({date for values in groups.values() for date, _ in values}))
+        positions = {date: index for index, date in enumerate(self._dates)}
+        self._series = tuple(
+            (country, tuple((positions[date], value) for date, value in sorted(values)))
+            for country, values in sorted(groups.items())
+        )
+        values = [value for _, series in self._series for _, value in series]
+        self._extents = (min(values), max(values)) if values else (0, 1)
+        self._chart_pixmap = None
         self.update()
 
     def paintEvent(self, event):
-        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ratio = self.devicePixelRatioF()
+        cache_key = (self.width(), self.height(), ratio)
+        if self._chart_pixmap is None or self._chart_cache_key != cache_key:
+            self._chart_cache_key = cache_key
+            size = QSize(max(1, round(self.width()*ratio)), max(1, round(self.height()*ratio)))
+            pixmap = QPixmap(size)
+            pixmap.setDevicePixelRatio(ratio)
+            pixmap.fill(QColor("#151619"))
+            painter = QPainter(pixmap)
+            try:
+                self._paint_chart(painter)
+            finally:
+                painter.end()
+            self._chart_pixmap = pixmap
+        p = QPainter(self)
+        p.drawPixmap(0, 0, self._chart_pixmap)
+        p.end()
+
+    def _paint_chart(self, p):
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(),QColor("#151619"))
         chart=QRectF(65,24,max(1,self.width()-90),max(1,self.height()-67))
-        if not self.observations:
+        if not self._series or not self._dates:
             p.setPen(QColor("#8995ac")); p.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"No numeric observations for this selection."); return
-        groups={}
-        for d in self.observations:
-            country=str(d.get("country_name") or d.get("country") or "Global")
-            date=str(d.get("date") or d.get("observation_date") or d.get("period") or "")
-            if date: groups.setdefault(country,[]).append((date,float(d["value"])))
-        dates=sorted({date for values in groups.values() for date,_ in values})
-        if not dates:return
-        vals=[v for values in groups.values() for _,v in values]
-        lo,hi=min(vals),max(vals)
+        dates=self._dates
+        lo,hi=self._extents
         pad=(hi-lo)*.1 if hi!=lo else max(1,abs(hi)*.1)
         lo-=pad;hi+=pad
         p.setFont(QFont("Segoe UI",8))
@@ -244,17 +345,25 @@ class EconomicChart(QWidget):
             p.setPen(QPen(QColor("#283144"),1));p.drawLine(QPointF(chart.left(),y),QPointF(chart.right(),y))
             p.setPen(QColor("#9aa8bf"));p.drawText(QRectF(0,y-8,55,16),Qt.AlignmentFlag.AlignRight,f"{lo+(hi-lo)*i/4:.2g}")
         colors=["#b59aea","#6ebccb","#e1bc74","#df8798","#87c7a0","#8da5ed"]
-        for n,(name,values) in enumerate(sorted(groups.items())):
+        # Thousands of observations are pre-indexed once when data changes.
+        # A cached raster means switching away and back only blits a pixmap.
+        p.save()
+        p.setClipRect(chart)
+        for n,(name,values) in enumerate(self._series):
             p.setPen(QPen(QColor(colors[n%len(colors)]),2))
             points=[]
-            for date,value in sorted(values):
-                x=chart.left()+chart.width()*dates.index(date)/max(1,len(dates)-1)
+            for date_index,value in values:
+                x=chart.left()+chart.width()*date_index/max(1,len(dates)-1)
                 y=chart.bottom()-chart.height()*(value-lo)/(hi-lo)
                 points.append(QPointF(x,y))
             for a,b in zip(points,points[1:]):p.drawLine(a,b)
             p.setBrush(QColor(colors[n%len(colors)]))
             for point in points:p.drawEllipse(point,3,3)
-            p.drawText(chart.left()+n*130,self.height()-9,name[:20])
+        p.restore()
+        p.setPen(QColor("#9aa8bf"))
+        p.drawText(QRectF(chart.left(),self.height()-19,chart.width(),17),
+                   Qt.AlignmentFlag.AlignRight,
+                   f"{len(self._series)} countries · select a country to isolate its series")
         p.setPen(QColor("#9aa8bf"))
         for i in sorted(set([0,len(dates)//2,len(dates)-1])):
             x=chart.left()+chart.width()*i/max(1,len(dates)-1)
@@ -330,7 +439,7 @@ class MainWindow(SituationActions, QMainWindow):
         self._evidence_refresh_timer=QTimer(self)
         self._evidence_refresh_timer.setSingleShot(True)
         self._evidence_refresh_timer.setInterval(160)
-        self._evidence_refresh_timer.timeout.connect(self.refresh_data)
+        self._evidence_refresh_timer.timeout.connect(self._refresh_evidence_when_idle)
         # A burst of status-only callbacks (one per collector) can overwhelm
         # a normal interactive session. Coalesce them on the GUI event loop.
         self._collection_refresh_timer=QTimer(self)
@@ -343,7 +452,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
         self.search.textChanged.connect(lambda:self.search_timer.start())
         for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
-        controller.data_changed.connect(self.refresh_data)
+        # Worker-sourced data changes are never a synchronous 5,000-event
+        # redraw. A queued revision can wait while the owner is navigating.
+        controller.data_changed.connect(self._schedule_evidence_refresh)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
@@ -606,9 +717,26 @@ class MainWindow(SituationActions, QMainWindow):
         tools.addWidget(self.indicator_combo,1);tools.addWidget(self.economy_country);panel.layout.addLayout(tools)
         self.economic_chart=EconomicChart();panel.layout.addWidget(self.economic_chart,1)
         self.economy_explanation=label("","Muted",True);panel.layout.addWidget(self.economy_explanation)
-        self.economy_table=QTableWidget(0,9);self.economy_table.setHorizontalHeaderLabels(["Country","Observation date","Value","Prior value","Revisions","Unit","Release / update","Retrieved","Source ↗"])
-        self._configure_table(self.economy_table);panel.layout.addWidget(self.economy_table,1)
-        self.economy_table.cellDoubleClicked.connect(self._open_economic_source)
+        self.economy_table=EconomicTableView()
+        self.economy_model=EconomicTableModel(self.economy_table)
+        self.economy_table.setModel(self.economy_model)
+        self._configure_table(self.economy_table)
+        # ResizeToContents walks *all* rows, even with a virtual model, and
+        # rebuilt thousands of cell geometries every time this tab appeared.
+        header=self.economy_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setDefaultSectionSize(140)
+        header.setStretchLastSection(True)
+        header.resizeSection(0,175)
+        header.resizeSection(1,140)
+        header.resizeSection(3,150)
+        header.resizeSection(6,160)
+        self.economy_table.verticalHeader().setDefaultSectionSize(23)
+        self.economy_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        panel.layout.addWidget(self.economy_table,1)
+        self.economy_table.doubleClicked.connect(
+            lambda index:self._open_economic_source(index.row(),index.column())
+        )
         self.indicator_combo.currentIndexChanged.connect(self._populate_economic_selection);self.economy_country.currentIndexChanged.connect(self._populate_economic_selection)
         self.pages.addWidget(panel)
 
@@ -817,6 +945,22 @@ class MainWindow(SituationActions, QMainWindow):
             return
         if not self._evidence_refresh_timer.isActive():
             self._evidence_refresh_timer.start()
+
+    @Slot()
+    def _refresh_evidence_when_idle(self):
+        """Delay costly live map/feed revisions until a navigation pause.
+
+        Source intake is independent of UI presentation. During fast tab
+        switching the last warmed snapshot is displayed without blocking
+        clicks on SQLite queries, map reconciliation, or chart updates.
+        """
+        if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        idle_for=time.monotonic()-self._last_navigation_at
+        if self._background_warm_enabled and idle_for < 1.1:
+            self._evidence_refresh_timer.start(max(100,int((1.1-idle_for)*1000)))
+            return
+        self.refresh_data()
 
     @Slot()
     def _schedule_collected_refresh(self):
@@ -1219,6 +1363,10 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _populate_economy(self):
         self._observations=self.controller.store.list_observations()
+        by_indicator={}
+        for observation in self._observations:
+            by_indicator.setdefault(str(observation.get("indicator","")),[]).append(observation)
+        self._observations_by_indicator=by_indicator
         current=self.indicator_combo.currentData();country=self.economy_country.currentData()
         self.indicator_combo.blockSignals(True);self.indicator_combo.clear();indicators={str(o.get("indicator", "")):str(o.get("indicator_name") or o.get("description") or o.get("indicator") or "Economic indicator") for o in self._observations}
         for key,value in sorted(indicators.items()):self.indicator_combo.addItem(value,key)
@@ -1229,23 +1377,21 @@ class MainWindow(SituationActions, QMainWindow):
 
     def _populate_economic_selection(self,*args):
         selected=self.indicator_combo.currentData();country=self.economy_country.currentData()
-        data=[o for o in getattr(self,"_observations",[]) if str(o.get("indicator",""))==selected and (not country or str(o.get("country_name") or o.get("country"))==country)]
+        data=[o for o in getattr(self,"_observations_by_indicator",{}).get(selected,())
+              if not country or str(o.get("country_name") or o.get("country"))==country]
         self.economic_chart.set_observations(data)
         if data:
             first=data[0];credit=" · ".join(str(first.get(key,"")) for key in ("attribution","source_license") if first.get(key))
             updated=" Provider dataset updated "+str(first["dataset_updated_at"])+"; individual release date shown only when supplied." if first.get("dataset_updated_at") else ""
             self.economy_explanation.setText(str(first.get("description") or selected or "")+" · Unit: "+str(first.get("unit") or "See source definition")+". "+credit+updated+" Double-click a row to open its original source.")
         else:self.economy_explanation.setText("No economic observations have been collected for this selection.")
-        data=sorted(data,key=lambda o:str(o.get("date") or o.get("observation_date") or o.get("period") or ""),reverse=True)
-        self.economy_table.setRowCount(len(data))
-        for i,o in enumerate(data):
-            values=[o.get("country_name") or o.get("country"),o.get("date") or o.get("observation_date") or o.get("period"),o.get("value"),o.get("previous_value") if o.get("previous_value") is not None else "No recorded revision",o.get("revision_count",1),o.get("unit") or "See indicator definition",o.get("release_date") or o.get("last_updated") or "Not supplied",timestamp(o.get("retrieved_at")),o.get("source_id") or o.get("source") or o.get("url")]
-            for j,value in enumerate(values):
-                item=QTableWidgetItem(str(value if value is not None else "Missing"));item.setData(Qt.ItemDataRole.UserRole,o.get("url",""));self.economy_table.setItem(i,j,item)
+        # All source records are already in RAM. QTableView materializes only
+        # visible cells: no per-row or per-cell Qt object creation on a tab.
+        self.economy_model.set_observations(data)
 
     def _open_economic_source(self,row,column):
-        item=self.economy_table.item(row,column)
-        if item and item.data(Qt.ItemDataRole.UserRole):self.controller.open_url(item.data(Qt.ItemDataRole.UserRole))
+        url=self.economy_model.url_at(row)
+        if url:self.controller.open_url(url)
 
     def _populate_sources(self):
         from .provider_actions import populate_sources
@@ -1637,3 +1783,4 @@ class MainWindow(SituationActions, QMainWindow):
                 self.titlebar.toggle_maximized();return True,0
         except (ValueError,TypeError,AttributeError,OSError):pass
         return super().nativeEvent(event_type,message)
+
