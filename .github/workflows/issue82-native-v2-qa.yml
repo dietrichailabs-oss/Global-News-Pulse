@@ -118,9 +118,14 @@ jobs:
           try { $archiveHash=[Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData($stream)) }
           finally { $stream.Dispose() }
           Write-Host ('SDK_ARCHIVE_SHA512=' + $archiveHash)
-          $upstream='https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4314.35/microsoft.web.webview2.1.0.4314.35.nupkg.sha512'
-          $upstreamHash=(Invoke-WebRequest -Uri $upstream -TimeoutSec 45).Content.Trim()
+          $upstream='https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4314.35/microsoft.web.webview2.1.0.4314.35.nupkg'
+          $upstreamArchive=Join-Path $env:RUNNER_TEMP 'Microsoft.Web.WebView2.upstream.nupkg'
+          Invoke-WebRequest -Uri $upstream -OutFile $upstreamArchive -TimeoutSec 90
+          $officialStream=[System.IO.File]::OpenRead($upstreamArchive)
+          try { $upstreamHash=[Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData($officialStream)) }
+          finally { $officialStream.Dispose() }
           Write-Host ('SDK_OFFICIAL_NUGET_SHA512=' + $upstreamHash)
+          Write-Host ('SDK_OFFICIAL_NUGET_BYTES=' + (Get-Item -LiteralPath $upstreamArchive).Length)
           if ($archiveHash -ne $upstreamHash) { throw 'Cached WebView2 package bytes do not match official NuGet' }
           python scripts/collect_dotnet_notices.py --deps $deps --nuget-root $nuget --output $output
           if ($LASTEXITCODE -ne 0) { throw 'Native WebView2 notice provenance failed closed' }
