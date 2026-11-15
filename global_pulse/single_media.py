@@ -41,6 +41,16 @@ class Television(_MediaTile):
         self.tv_status.setTextFormat(Qt.TextFormat.PlainText)
         # Keep status above the large video surface, visible without scrolling.
         self.layout_.insertWidget(2,self.tv_status)
+        # The one-line channel note cannot display 320-character decode receipts.
+        self.tv_diagnostics=QLabel("Decoder diagnostics appear after Watch")
+        self.tv_diagnostics.setObjectName("TVPlaybackDiagnostics")
+        self.tv_diagnostics.setAccessibleName("TV codec and renderer diagnostics")
+        self.tv_diagnostics.setWordWrap(True)
+        self.tv_diagnostics.setTextFormat(Qt.TextFormat.PlainText)
+        self.tv_diagnostics.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.tv_diagnostics.setMinimumHeight(48)
+        self.tv_diagnostics.setMaximumHeight(104)
+        self.layout_.insertWidget(3,self.tv_diagnostics)
         row=QHBoxLayout()
         self.volume=QSlider(Qt.Orientation.Horizontal);self.volume.setRange(0,100);self.volume.setValue(60)
         self.volume.setAccessibleName("Television volume")
@@ -203,6 +213,12 @@ class Television(_MediaTile):
         self.tv_status.setText("ERROR · owner test video missing")
         return False
 
+    def _ensure_player(self):
+        super()._ensure_player()
+        # The actual browser replaces a hidden 180px-minimum placeholder.
+        if self.view is not None:
+            self.view.setMinimumHeight(180)
+
     def _tv_load_finished(self, ok):
         """Top-level browser navigation is not evidence of video playback."""
         if not self._requested:
@@ -212,6 +228,7 @@ class Television(_MediaTile):
             self.stop()
             self.tv_status.setText("ERROR · YouTube page could not load")
             self.note.setText("In-app YouTube page load failed · try Open on YouTube")
+            self.tv_diagnostics.setText("YouTube page failed to load · no video verified")
         else:
             self.tv_status.setText("PAGE LOADED · video NOT verified")
             self.note.setText("YouTube web page loaded; that does not prove the video is available. Click Play inside the video.")
@@ -340,6 +357,7 @@ class Television(_MediaTile):
         self._had_playback=False
         self._last_decode_info=""
         self.tv_status.setText("CONNECTING · YouTube player")
+        self.tv_diagnostics.setText("Connecting · no video picture or audio verified")
         self._poll_timer.start()
         self.view.page().setAudioMuted(self.mute.isChecked())
 
@@ -355,6 +373,7 @@ class Television(_MediaTile):
             "failure, not a valid playing news stream. Try the normal "
             "YouTube browser link or inspect Windows graphics/Qt codecs."
         )
+        self.tv_diagnostics.setText("Chromium renderer terminated · no video verified")
 
     @staticmethod
     def _media_diagnostics(value):
@@ -393,6 +412,7 @@ class Television(_MediaTile):
         if time.monotonic()-self._progress_at>45:
             self.stop();self.tv_status.setText("ERROR")
             self.note.setText("No video progress in Pulse. Check embed permissions or use Open on YouTube. Connection stopped.")
+            self.tv_diagnostics.setText("No media progress in 45 seconds · connection stopped")
             return
         # A lost JavaScript reply must not disable the independent deadline.
         if self._poll_pending:return
@@ -409,7 +429,8 @@ class Television(_MediaTile):
         summary=self._media_diagnostics(value)
         if summary and summary!=self._last_decode_info:
             self._last_decode_info=summary
-            self.note.setText(summary+" · Picture/audio not yet proven")
+            self.tv_diagnostics.setText(summary+" · Picture/audio not yet proven")
+            self.note.setText("Decoder details shown below the player")
         if isinstance(value,dict) and value.get("provider_error"):
             # A displayed provider error is stronger evidence than loadFinished.
             # Never treat a dead live-video recording as a playing channel.
@@ -439,6 +460,10 @@ class Television(_MediaTile):
                 str(error_code) +
                 ". Provider restrictions, missing Qt codecs or graphics "
                 "rendering may be involved. Try the official browser page."
+            )
+            self.tv_diagnostics.setText(
+                "HTMLMediaElement error "+str(error_code)+" · "+
+                (summary or "No codec information available")
             )
             return
         current=value.get("time")
@@ -481,6 +506,8 @@ class Television(_MediaTile):
         self._had_playback=False
         super().stop()
         if hasattr(self,"tv_status"):self.tv_status.setText("OFF")
+        if hasattr(self,"tv_diagnostics"):
+            self.tv_diagnostics.setText("TV OFF · no active media diagnostics")
 
 
 class MediaPanel(QWidget):
