@@ -28,6 +28,19 @@ def test_reviewed_tv_subtree_is_admitted_without_generic_directory_escape(tmp_pa
         manifest.scan(tmp_path, require_complete=False)
 
 
+def test_tv_subtree_forbids_unexpected_nested_payload_and_executable(tmp_path: Path):
+    native = tmp_path / "tv"
+    (native / "unexpected").mkdir(parents=True)
+    (native / "unexpected" / "loader.dll").write_bytes(b"not a declared runtime subtree")
+    with pytest.raises(ValueError, match="outside reviewed native TV subtree"):
+        manifest.scan(tmp_path, require_complete=False)
+    (native / "unexpected" / "loader.dll").unlink()
+    (native / "unexpected").rmdir()
+    (native / "evil.exe").write_bytes(b"unexpected process")
+    with pytest.raises(ValueError, match="unreviewed native TV root file"):
+        manifest.scan(tmp_path, require_complete=False)
+
+
 def test_tv_pdb_stays_forbidden_even_when_tv_subtree_is_admitted(tmp_path: Path):
     native = tmp_path / "tv"
     native.mkdir()
@@ -56,6 +69,46 @@ def test_complete_runtime_requires_tv_exe_loader_notices_and_self_contained_core
         assert path in message
 
 
+def test_ref_only_tv_dependency_and_dual_pinned_sdk_notice_are_accepted(tmp_path: Path):
+    native = tmp_path / "tv"
+    ledger = native / "licenses"
+    ledger.mkdir(parents=True)
+    (native / "GlobalPulse.TV.deps.json").write_text(json.dumps({
+        "libraries": {
+            "Microsoft.Web.WebView2.Core/1.0.4314.35": {"type": "reference"},
+            "Microsoft.Web.WebView2.WinForms/1.0.4314.35": {"type": "reference"},
+            "Microsoft.Web.WebView2.Wpf/1.0.4314.35": {"type": "reference"},
+            "GlobalPulse.TV/1.0.0": {"type": "project"},
+        }
+    }), encoding="utf-8")
+    receipt = {
+        "packages": [{
+            "type": "reference",
+            "notice_source_package": manifest.TV_PARENT,
+            "notice_source_lock_sha512": manifest.TV_NUGET_CONTENT_SHA512,
+            "notice_source_archive_sha512": manifest.TV_ARCHIVE_SHA512,
+            "notice_files": [{"sha256": "synthetic"}],
+        }]
+    }
+    ledger_file = ledger / "NATIVE_PACKAGE_NOTICES.json"
+    ledger_file.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError) as incomplete:
+        manifest.scan(tmp_path, require_complete=True)
+    assert "Native television lacks exact reviewed WebView2 assembly identities" not in str(incomplete.value)
+    assert "Native television lacks dual-pinned WebView2 SDK notice proof" not in str(incomplete.value)
+    manifest.sbom(tmp_path)
+    sbom=json.loads((tmp_path / "SBOM.cdx.json").read_text(encoding="utf-8"))
+    sdk=[item for item in sbom["components"]
+         if item.get("bom-ref")=="pkg:nuget/Microsoft.Web.WebView2@1.0.4314.35"]
+    assert len(sdk)==1, "Exact parent SDK must appear from dual-hash notice provenance"
+    assert not any(item.get("bom-ref")=="pkg:nuget/Microsoft.Web.WebView2.Core@1.0.4314.35"
+                   for item in sbom["components"])
+    receipt["packages"][0]["notice_source_archive_sha512"] = "TAMPERED"
+    ledger_file.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match="Native television lacks dual-pinned WebView2 SDK notice proof"):
+        manifest.scan(tmp_path, require_complete=True)
+
+
 def test_tv_dependency_is_recorded_once_in_cyclonedx_sbom(tmp_path: Path):
     for directory in ("tv", "notifications"):
         folder = tmp_path / directory
@@ -65,6 +118,8 @@ def test_tv_dependency_is_recorded_once_in_cyclonedx_sbom(tmp_path: Path):
                 "libraries": {
                     "Microsoft.Web.WebView2/1.0.4314.35": {"type": "package"},
                     "System.Runtime/10.0.14": {"type": "package"},
+                    "Microsoft.Web.WebView2.Core/1.0.4314.35": {"type": "reference"},
+                    "GlobalPulse.TV/1.0.0": {"type": "project"},
                 }
             }),
             encoding="utf-8",
@@ -82,3 +137,11 @@ def test_tv_dependency_is_recorded_once_in_cyclonedx_sbom(tmp_path: Path):
         item["type"] == "file" and item["name"] == "tv/helper.deps.json"
         for item in sbom["components"]
     )
+
+    assert not any(
+        item.get("bom-ref") in {
+            "pkg:nuget/Microsoft.Web.WebView2.Core@1.0.4314.35",
+            "pkg:nuget/GlobalPulse.TV@1.0.0",
+        }
+        for item in sbom["components"]
+    ), "Reference aliases and the local project are not independent NuGet packages"
