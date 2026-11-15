@@ -7,6 +7,11 @@ from .sources import SUPPORTED_ADAPTERS, public_url
 def capability(source: dict) -> tuple[bool, str, str]:
     """Separate configured capability from evidence of a successful fetch."""
     status = str(source.get("status") or "").casefold()
+    # Legacy registry ID for the *same* exact endpoint is not a second feed.
+    # Keep the canonical poller only; this is explicitly unavailable for
+    # independent collection even though its adapter and URL are valid.
+    if str(source.get("disabled_reason") or "").casefold().startswith("duplicate exact feed url"):
+        return False, "Duplicate feed", "The exact feed is already collected by its canonical source entry."
     if status in {"requires_approval", "credentials_required"}:
         return False, "Setup required", "Provider approval or credentials are required; collection is not configured."
     if status in {"unavailable", "disabled", "restricted"}:
@@ -25,10 +30,20 @@ def capability(source: dict) -> tuple[bool, str, str]:
     return True, "Automatic feed", "Collection is supported. Availability and publication freshness depend on the provider."
 
 
+def available_ids(catalog: list[dict]) -> set[str]:
+    """All configured collectors with approved public/user-supplied access."""
+    return {s["id"] for s in catalog if capability(s)[0]}
+
+
 def enabled_ids(catalog: list[dict], preference: object) -> set[str]:
-    requested = ({s["id"] for s in catalog if s.get("enabled")} if preference is None
-                 else {v for v in preference if isinstance(v, str)} if isinstance(preference, list) else set())
-    return {s["id"] for s in catalog if s["id"] in requested and capability(s)[0]}
+    available = available_ids(catalog)
+    if preference is None:
+        # New profiles default to EVERY actually collectable source; the
+        # historical catalog 'enabled' bit is not a user opt-out.
+        return available
+    requested = ({v for v in preference if isinstance(v, str)}
+                 if isinstance(preference, list) else set())
+    return available & requested
 
 
 def source_link(source: dict) -> tuple[str, str]:
