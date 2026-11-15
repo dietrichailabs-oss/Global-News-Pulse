@@ -110,6 +110,31 @@ jobs:
             throw 'Native browser policy self-test did not pass all network-free cases'
           }
           Get-Content -LiteralPath $receipt
+      - name: Reject inherited WebView2 debug and data-folder overrides
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path $env:RUNNER_TEMP 'globalpulse-tv-native-probe/GlobalPulse.TV.exe'
+          $receipt=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_OVERRIDE_REFUSAL.jsonl'
+          $stderr=Join-Path $env:RUNNER_TEMP 'ISSUE82_NATIVE_TV_OVERRIDE_STDERR.txt'
+          $forbidden=Join-Path $env:RUNNER_TEMP 'ISSUE82_FORBIDDEN_WEBVIEW2_PROFILE'
+          $env:WEBVIEW2_USER_DATA_FOLDER=$forbidden
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--disable-web-security'
+          try {
+            $process=Start-Process -FilePath $exe -ArgumentList '--probe' -PassThru -RedirectStandardOutput $receipt -RedirectStandardError $stderr
+            if (-not $process.WaitForExit(15000)) { $process.Kill(); throw 'Unsafe-override refusal timed out' }
+          }
+          finally {
+            Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
+            Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
+          }
+          $lines=@(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() })
+          $messages=@($lines | ConvertFrom-Json)
+          if (@($messages | Where-Object { $_.type -eq 'codec_probe' }).Count -ne 0 -or
+              @($messages | Where-Object { $_.type -eq 'error' -and $_.reason -eq 'startup_InvalidOperationException' }).Count -ne 1 -or
+              (Test-Path -LiteralPath $forbidden)) {
+            throw 'WebView2 override was not refused before profile creation'
+          }
+          Get-Content -LiteralPath $receipt
       - name: Preserve prototype QA receipts and dependency lock (not a release)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -121,5 +146,7 @@ jobs:
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_CODEC_STDERR.txt
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_SELF_TEST.jsonl
             ${{ runner.temp }}/ISSUE82_NATIVE_TV_POLICY_STDERR.txt
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_OVERRIDE_REFUSAL.jsonl
+            ${{ runner.temp }}/ISSUE82_NATIVE_TV_OVERRIDE_STDERR.txt
           retention-days: 7
           if-no-files-found: warn
