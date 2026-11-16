@@ -52,7 +52,10 @@ def test_period_sampler_and_daily_weekly_export_survive_501_newer_weather(tmp_pa
             page = out.read_text(encoding="utf-8")
             assert "## Health & disease" in page
             assert "SYNTHETIC Health source report 900" in page
-            assert page.count("SYNTHETIC Disaster source report") <= 6
+            # A titled source is repeated in its evidence trail; cap rendered
+            # briefing story headings rather than raw full-text occurrences.
+            assert sum("SYNTHETIC Disaster source report" in line
+                       for line in page.splitlines() if line.startswith("### ")) <= 6
     finally:
         ctrl.close()
 
