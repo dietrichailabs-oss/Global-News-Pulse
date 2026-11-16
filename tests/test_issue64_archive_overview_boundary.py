@@ -85,11 +85,11 @@ def test_real_store_feed_map_to_sidebar_and_safe_deep_link(tmp_path):
     try:
         older=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
         newer=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
-        saved=controller.store.ingest([_report(900,"Health",older)])
+        saved=controller.store.ingest([_report(900,"Health",older)],now=older)
         health_id=saved[0]["id"]
         # 501 distinct newer source-attributed events occupy the 500-row feed.
         controller.store.ingest([_report(i,"Disaster",newer)
-                                 for i in range(501)])
+                                 for i in range(501)],now=newer)
         window=MainWindow(controller)
         window.show()
         app.processEvents()

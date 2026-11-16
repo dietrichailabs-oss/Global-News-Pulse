@@ -51,8 +51,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "7e13ea245cb21a8e9ef2da7d28e792c602c83ac9"
-          git diff --name-only HEAD^ HEAD | python -c "import sys; expected={'.github/workflows/issue64-overview-evidence-window-ci.yml','global_pulse/brief_selection.py','global_pulse/ui.py','tests/test_issue64_archive_overview_boundary.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git merge-base --is-ancestor 7e13ea245cb21a8e9ef2da7d28e792c602c83ac9 HEAD
+          git diff --name-only 7e13ea245cb21a8e9ef2da7d28e792c602c83ac9 HEAD | python -c "import sys; expected={'.github/workflows/issue64-overview-evidence-window-ci.yml','global_pulse/brief_selection.py','global_pulse/ui.py','tests/test_issue64_archive_overview_boundary.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native Windows Qt for desktop regressions
         if: runner.os == 'Windows'
         shell: bash
