@@ -30,6 +30,7 @@ class NativeNotifications(QObject):
         self._inflight = {}
         self._attempted = deque(maxlen=256)
         self._stopped = False
+        self._restart_after_async_stop = False
         self._queue_timer = QTimer(self)
         self._queue_timer.setInterval(1000)
         self._queue_timer.timeout.connect(self._flush)
@@ -39,6 +40,10 @@ class NativeNotifications(QObject):
             self._status("Synthetic mode · Windows notifications disabled")
             return
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            # An opt-in immediately after an asynchronous opt-out must not
+            # reactivate an exit-pending helper or drop the new preference.
+            if self._stopped:
+                self._restart_after_async_stop = True
             return
         if sys.platform != "win32":
             self._status("Windows notifications require Windows; internal alert history is active")
@@ -74,6 +79,16 @@ class NativeNotifications(QObject):
             self.delivery_changed.emit(alert_id, "Native helper exited before acknowledgement; submission outcome unknown; retained in history")
         self._inflight.clear()
         self._status("Windows notification helper stopped; alerts remain in history")
+        old_process = self.process
+        if old_process and old_process.state() == QProcess.ProcessState.NotRunning:
+            self.process = None
+            old_process.deleteLater()
+        # This only runs after the old helper actually exits; queued opt-in
+        # cannot reuse the now-invalid bridge or reenable delivery prematurely.
+        if self._restart_after_async_stop:
+            self._restart_after_async_stop = False
+            self._stopped = False
+            self.start()
 
     def _read(self):
         if not self.process:
@@ -190,7 +205,45 @@ class NativeNotifications(QObject):
             else:
                 self._pending.append((event, reason, queued_at))
 
+    def disable_nonblocking(self):
+        """Opt out on the Qt GUI thread without blocking menu/tab interaction.
+
+        The helper receives an exit request and a bounded asynchronous
+        termination escalation. Internal alert history is never discarded.
+        A later opt-in is deferred until this process has actually exited.
+        """
+        self._restart_after_async_stop = False
+        self._stopped = True
+        self.ready = False
+        self._queue_timer.stop()
+        while self._pending:
+            event, _, _ = self._pending.popleft()
+            self.delivery_changed.emit(
+                event["_alert_id"], "Native notifications disabled before submission; retained in history"
+            )
+        for alert_id in self._inflight:
+            self.delivery_changed.emit(
+                alert_id, "Native notifications disabled; submission outcome unknown; retained in history"
+            )
+        self._inflight.clear()
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            process.write(b'{"command":"exit"}\n')
+            process.closeWriteChannel()
+            QTimer.singleShot(1500, lambda p=process: self._terminate_disabled(p))
+        self._status("Windows pop-up notifications off · alerts remain in Pulse history")
+
+    def _terminate_disabled(self, process):
+        if self.process is process and self._stopped and process.state() != QProcess.ProcessState.NotRunning:
+            process.terminate()
+            QTimer.singleShot(1000, lambda p=process: self._kill_disabled(p))
+
+    def _kill_disabled(self, process):
+        if self.process is process and self._stopped and process.state() != QProcess.ProcessState.NotRunning:
+            process.kill()
+
     def stop(self):
+        self._restart_after_async_stop = False
         self._stopped = True
         self.ready = False
         self._queue_timer.stop()

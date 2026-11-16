@@ -1,0 +1,71 @@
+name: Issue82 R11 Native Notify Async Integration - Windows Linux CI
+
+on:
+  push:
+    branches: [eng/issue82-r11-notify-async-integrated-20261115]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue82-r11-native-notify-async-integration
+  cancel-in-progress: true
+
+jobs:
+  focused-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install reviewed locked requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Guard exact R11 PR108 parent and four-path async opt-out integration scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 38350021a3b6e22b9226712a213428d162145d1a HEAD
+          git diff --name-only 38350021a3b6e22b9226712a213428d162145d1a..HEAD | python -c "import sys; expected={'global_pulse/native_notifications.py','global_pulse/__main__.py','tests/test_issue82_native_notify_async_optout.py','.github/workflows/issue82-r11-notify-async-integration.yml'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Real Windows Qt backend
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Syntax check
+        shell: bash
+        run: python -m compileall -q global_pulse tests/test_issue82_native_notify_async_optout.py
+      - name: Native opt-out, R11 owner tabs/source upgrade, TV/Qt shutdown regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_issue82_native_notify_async_optout.py tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_ui_desktop.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_source_expansion_ecb.py tests/test_issue22_settings_boundary.py tests/test_owner_feedback_qa_repairs.py tests/test_issue82_startup_video_diagnostics.py tests/test_issue82_tv_error_readout.py tests/test_source_enable_all_upgrade.py tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_native_tv_policy.py
+      - name: Ensure tracked source not mutated by tests
+        if: always()
+        shell: bash
+        run: git diff --exit-code
