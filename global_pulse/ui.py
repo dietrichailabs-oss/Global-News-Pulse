@@ -1526,7 +1526,7 @@ class MainWindow(SituationActions, QMainWindow):
     def _generate_brief(self):
         from .core import build_brief
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
-        events=self.controller.events(since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),limit=500)
+        events=self.controller.brief_events(since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period)
         from .brief_rendering import brief_html
         self.brief_browser.setHtml(brief_html(events,period))
 
