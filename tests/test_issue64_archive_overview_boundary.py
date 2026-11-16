@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtCore import QCoreApplication, QEvent, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QUrl, Qt
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.brief_selection import (
@@ -107,6 +107,54 @@ def test_real_store_feed_map_to_sidebar_and_safe_deep_link(tmp_path):
         assert window.intelligence_mode.currentIndex()==1
         assert window._selected_id==health_id
         assert "SYNTHETIC Health evidence 900" in window.intel_browser.toPlainText()
+    finally:
+        if window is not None:
+            window._force_close=True
+            window.close()
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            app.processEvents()
+        controller.close()
+
+
+def test_explicit_archive_evidence_keeps_selected_event_across_refresh(tmp_path):
+    """Keep an older source visible without overriding explicit user controls."""
+    app=QApplication.instance() or QApplication([])
+    controller=Controller(tmp_path,demo=True)
+    window=None
+    try:
+        old=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
+        recent=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
+        identity=controller.store.ingest([_report(995,"Health",old)],now=old)[0]["id"]
+        controller.store.ingest([_report(i,"Disaster",recent) for i in range(501)],now=recent)
+        window=MainWindow(controller)
+        window.show()
+        app.processEvents()
+        window.time_range.setCurrentIndex(3)
+        window.refresh_data()
+        assert identity not in {str(e["id"]) for e in window._events}
+        window._open_overview_event(QUrl("pulse-event://open/"+quote(identity,safe="")))
+        assert window._archive_selection_id==identity
+        window.refresh_data()
+        assert window._selected_id==identity
+        assert identity in {str(e["id"]) for e in window._events}
+        assert "SYNTHETIC Health evidence 995" in window.intel_browser.toPlainText()
+        assert any(str(window.feed_list.item(i).data(Qt.ItemDataRole.UserRole).get("id"))==identity
+                   for i in range(window.feed_list.count()))
+        # Choosing a normal feed row relinquishes the archived selection.
+        window.feed_list.setCurrentRow(1)
+        assert window._selected_id!=identity
+        assert not window._archive_selection_id
+        window.refresh_data()
+        assert identity not in {str(e["id"]) for e in window._events}
+        # New explicit archive navigation may pin again, but text filters win.
+        window.navigate_event(identity)
+        assert window._archive_selection_id==identity
+        window.search.setText("zzz-archive-scope-unmatched")
+        window.refresh_data()
+        assert not window._archive_selection_id
+        assert window._selected_id!=identity
+        assert identity not in {str(e["id"]) for e in window._events}
     finally:
         if window is not None:
             window._force_close=True

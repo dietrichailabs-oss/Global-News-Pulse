@@ -382,6 +382,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._feed_explicitly_cleared=False
         self._events=[]
         self._overview_events=[]  # Category candidates from existing feed/map reads.
+        self._archive_selection_id=""
+        self._archive_selection_scope=None  # Explicit user navigation only.
         self._historical=False
         self._history_at=None
         self._refreshing=False
@@ -999,6 +1001,12 @@ class MainWindow(SituationActions, QMainWindow):
             self._populate_situations()
             self._dirty_pages.discard(1)
 
+    def _archive_scope_key(self):
+        """User-selected filter controls, excluding drifting time-based since."""
+        return (self.search.text().strip(), self.category.currentData() or "",
+                self.region.currentData() or "", self.time_range.currentIndex(),
+                self.history_slider.value())
+
     def events_filters(self):
         self._history_at=None
         filters={"query":self.search.text().strip(),"category":self.category.currentData() or "","region":self.region.currentData() or "","limit":500}
@@ -1106,6 +1114,21 @@ class MainWindow(SituationActions, QMainWindow):
             self._dirty_pages.update(range(1,6))
             filters=self.events_filters()
             self._events=self.controller.events(**filters)
+            if self._archive_selection_id:
+                pin=self._archive_selection_id
+                if (self._archive_selection_scope!=self._archive_scope_key()
+                        or self._feed_explicitly_cleared or self._selected_id!=pin):
+                    self._archive_selection_id=""
+                    self._archive_selection_scope=None
+                elif all(str(e.get("id"))!=pin for e in self._events):
+                    # Preserve one explicitly navigated older event on an
+                    # evidence refresh, with current (not cached) source bytes.
+                    pinned=self.controller.event(pin)
+                    if pinned:
+                        self._events=[pinned]+list(self._events[:499])
+                    else:
+                        self._archive_selection_id=""
+                        self._archive_selection_scope=None
             # A filter or historical-time change can remove the previously
             # selected event from the visible feed without deleting it from
             # the Store. Never leave a hidden event bound to the Brief/Star.
@@ -1332,11 +1355,17 @@ class MainWindow(SituationActions, QMainWindow):
         if item:
             self._feed_explicitly_cleared=False
             self.intelligence_mode.setCurrentIndex(1)
-            e=item.data(Qt.ItemDataRole.UserRole);self._selected_id=str(e.get("id",""));self.world_map.select_event(self._selected_id);full=self._selected_event() or e;self._render_event(full)
+            e=item.data(Qt.ItemDataRole.UserRole)
+            if str(e.get("id") or "")!=self._archive_selection_id:
+                self._archive_selection_id=""
+                self._archive_selection_scope=None
+            self._selected_id=str(e.get("id",""));self.world_map.select_event(self._selected_id);full=self._selected_event() or e;self._render_event(full)
         else:
             # Explicit deselection survives queued headline and source refresh.
             # It must never silently bind the Star button to another event.
             self._feed_explicitly_cleared=True
+            self._archive_selection_id=""
+            self._archive_selection_scope=None
             self._selected_id=""
             self._render_empty_brief()
 
@@ -1403,10 +1432,17 @@ class MainWindow(SituationActions, QMainWindow):
                 self._populate_feed()
                 self._render_event(event)
                 self.feed_count.setText(str(len(self._events)))
+                self._archive_selection_id=identity
+                self._archive_selection_scope=self._archive_scope_key()
+            else:
+                self._archive_selection_id=""
+                self._archive_selection_scope=None
         else:
             # The selected row already exists; only synchronize its selection
             # and the brief. Never reconstruct 500 QListWidgetItems for a
             # single map click.
+            self._archive_selection_id=""
+            self._archive_selection_scope=None
             previous = self.feed_list.blockSignals(True)
             try:
                 for row_index in range(self.feed_list.count()):
