@@ -6,6 +6,7 @@ network request, inference of event coordinates, or article scraping occurs.
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import islice
 from html import escape
 from urllib.parse import quote
 
@@ -118,6 +119,34 @@ def balanced_brief_sections(events, *, per_domain=3, max_total=30,
     return selected
 
 
+def overview_evidence_candidates(feed_events, map_evidence, *, per_domain=2):
+    """Bounded source-attributed cross-domain selection from EXISTING reads.
+
+    A 500-row recent feed may contain only weather although older Health or
+    Conflict reporting remains in the same refresh's 5,000-row map inventory.
+    Keep original source/date/status and all explicit user filters; the map
+    inventory is already fetched, so this introduces zero Store/network calls.
+    Retained significant evidence is dated, never presented as fresh news.
+    """
+    if not 1 <= per_domain <= 3:
+        raise ValueError("Overview domain cap must be between one and three")
+    pools = defaultdict(list)
+    seen = set()
+    for inventory in (feed_events, map_evidence):
+        for item in islice(inventory or (), 5000):
+            if not isinstance(item, dict):
+                continue
+            identity = str(item.get("id") or "")
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            bucket = pools[brief_domain(item)]
+            bucket.append(item)
+            bucket.sort(key=_rank, reverse=True)
+            del bucket[per_domain:]
+    return [item for domain in BRIEF_DOMAINS for item in pools.get(domain, ())]
+
+
 def _source_time_label(report, event):
     """Never mislabel a retrieved/updated timestamp as publication time."""
     if report.get("publication_time_known") is not False and report.get("published_at"):
@@ -165,6 +194,8 @@ def overview_html(events, *, label="visible local feed"):
             status = escape(str(item.get("verification") or "unverified")[:30])
             level = escape(str(item.get("severity") or "unassessed")[:30])
             lifecycle = escape(str(item.get("status") or "unknown")[:30])
+            if item.get("retained_on_map"):
+                lifecycle += " (retained; no newer status)"
             time_label = _source_time_label(first, item)
             blocks.append(
                 "<p style='margin:0 0 9px'>"
