@@ -634,10 +634,17 @@ class Controller(QObject):
         self.data_changed.emit()
         return True
 
+    def brief_events(self, *, since: str, period: str = "daily"):
+        if period not in {"daily", "weekly"}:
+            raise ValueError("Brief period must be daily or weekly")
+        return self.store.list_brief_events(
+            since=since, per_domain=9 if period == "weekly" else 4
+        )
+
     def export_brief(self, path, period="daily"):
         days = 7 if period == "weekly" else 1
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        events = self.store.list_events(since=since, limit=500)
+        events = self.brief_events(since=since, period=period)
         if Path(path).suffix.lower() in {".html", ".htm"}:
             from .brief_rendering import brief_html
             text = brief_html(events, period)

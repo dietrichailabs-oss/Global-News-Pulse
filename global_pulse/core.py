@@ -1345,6 +1345,44 @@ class Store:
                                                   + item["updated_at"]) if item["retained_on_map"] else ""
             return result
 
+
+    def list_brief_events(self, *, since: str, per_domain: int = 9) -> list[dict]:
+        """One bounded SQLite read for source-category-balanced Daily/Weekly briefs.
+
+        Unlike a newest-500 chronological page, this cannot let a burst of
+        weather records hide stored Health/Conflict records in the same period.
+        SQL selects at most nine per explicit presentation domain, then the
+        existing brief renderer performs final ranking/labels. No network,
+        inferred event category, or unbounded Python report materialization.
+        """
+        from .brief_selection import _DOMAIN_ALIASES
+        count = max(1, min(int(per_domain), 9))
+        aliases = sorted(_DOMAIN_ALIASES.items())
+        categories = "CASE lower(trim(category)) " + " ".join(
+            "WHEN ? THEN ?" for _ in aliases
+        ) + " ELSE ? END"
+        params = [text for alias, domain in aliases for text in (alias, domain)]
+        params.append("General news")
+        sql = (
+            "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY "
+            + categories +
+            " ORDER BY CASE WHEN lower(COALESCE(json_extract(body,'$.status'),'active')) "
+            "IN ('retracted','cancelled','canceled','expired','resolved','closed','ended') "
+            "THEN 0 ELSE 1 END DESC, "
+            "CASE lower(COALESCE(json_extract(body,'$.severity'),'unassessed')) "
+            "WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'moderate' THEN 2 "
+            "WHEN 'informational' THEN 1 ELSE 0 END DESC, "
+            "updated_at DESC, id) AS brief_rank FROM events "
+            "WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+            "AND updated_at>=?) WHERE brief_rank<=?"
+        )
+        with self._lock:
+            ids = self._conn.execute(
+                sql, (*params, _iso(since), count)
+            ).fetchall()
+            return [event for row in ids
+                    if (event := self._get_event_unlocked(row[0])) is not None]
+
     def event_filter_options(self) -> dict[str, list[str]]:
         """Archive-wide selector metadata, independent of any rendered page.
 
