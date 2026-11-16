@@ -381,6 +381,7 @@ class MainWindow(SituationActions, QMainWindow):
         # Delayed headline/collector repaint must not silently re-star a row.
         self._feed_explicitly_cleared=False
         self._events=[]
+        self._overview_events=[]  # Category candidates from existing feed/map reads.
         self._historical=False
         self._history_at=None
         self._refreshing=False
@@ -1115,6 +1116,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
             country_evidence=self.controller.events(**dict(map_filters,map_evidence=True))
+            from .brief_selection import overview_evidence_candidates
+            self._overview_events=overview_evidence_candidates(self._events,country_evidence)
             # Economic observations have their own dated country-level layer.
             # Hide it during search/region/history replay because observations
             # do not share those event-filter semantics.
@@ -1240,13 +1243,13 @@ class MainWindow(SituationActions, QMainWindow):
                 self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
     def _update_world_overview(self):
-        """Format current bounded feed rows without new DB/map/network queries."""
+        """Format bounded already-loaded feed/map records without new queries."""
         from .brief_selection import overview_html
         scope=(self.time_range.currentText().lower() +
                (", filtered" if self.category.currentData() or
                 self.region.currentData() or self.search.text().strip()
                 else ", all categories"))
-        updated=overview_html(self._events, label=scope)
+        updated=overview_html(self._overview_events, label=scope+" local feed and retained map evidence")
         if updated != self._overview_html_cached:
             position=self.overview_browser.verticalScrollBar().value()
             self.overview_browser.setHtml(updated)
@@ -1259,7 +1262,7 @@ class MainWindow(SituationActions, QMainWindow):
             return
         from urllib.parse import unquote
         identity=unquote(url.path().lstrip("/"))
-        if identity and any(str(e.get("id"))==identity for e in self._events):
+        if identity and any(str(e.get("id"))==identity for e in self._overview_events):
             self.navigate_event(identity)
             self.intelligence_mode.setCurrentIndex(1)
 
