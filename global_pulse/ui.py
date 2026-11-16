@@ -1441,8 +1441,11 @@ class MainWindow(SituationActions, QMainWindow):
             # The selected row already exists; only synchronize its selection
             # and the brief. Never reconstruct 500 QListWidgetItems for a
             # single map click.
-            self._archive_selection_id=""
-            self._archive_selection_scope=None
+            # Re-opening the same explicitly pinned archive record is not
+            # deselection. Keep the pin until a different story or filter wins.
+            if identity != self._archive_selection_id:
+                self._archive_selection_id=""
+                self._archive_selection_scope=None
             previous = self.feed_list.blockSignals(True)
             try:
                 for row_index in range(self.feed_list.count()):

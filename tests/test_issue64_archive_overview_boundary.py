@@ -135,6 +135,11 @@ def test_explicit_archive_evidence_keeps_selected_event_across_refresh(tmp_path)
         assert identity not in {str(e["id"]) for e in window._events}
         window._open_overview_event(QUrl("pulse-event://open/"+quote(identity,safe="")))
         assert window._archive_selection_id==identity
+        # Re-clicking the same archive story must not drop its pin:
+        # the next normal collector refresh must still show its evidence.
+        window.navigate_event(identity)
+        assert window._archive_selection_id==identity
+        assert window._selected_id==identity
         window.refresh_data()
         assert window._selected_id==identity
         assert identity in {str(e["id"]) for e in window._events}
