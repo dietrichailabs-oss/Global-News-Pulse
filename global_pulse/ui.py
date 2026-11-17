@@ -1185,6 +1185,12 @@ class MainWindow(SituationActions, QMainWindow):
                                  and not filters.get("region")
                                  and filters.get("category") in {"", "Economy"})
             observations=self.controller.store.list_observations() if show_observations else []
+            # The same source revision will be needed by the deferred Economy
+            # workspace. A second 10k-row SQLite/revision read in its idle
+            # prewarm is unnecessary and causes an avoidable GUI-thread stall.
+            # This is a ONE-USE volatile snapshot; subsequent independent
+            # Economy activations still query fresh Store observations.
+            self._deferred_economy_observations=observations if show_observations else None
             self.world_map.set_events(
                 self.controller.events(**map_filters),
                 country_events=country_evidence,
@@ -1615,10 +1621,14 @@ class MainWindow(SituationActions, QMainWindow):
         self.situation_browser.setHtml("".join(parts))
 
     def _populate_economy(self,observations=None):
-        # The map and the visible Economy view consume the same complete
-        # observation snapshot during a single refresh. Querying it twice
-        # stalled the GUI for ~1.2s with 3,200 observations on Windows.
-        # Independent tab activation still reads a fresh snapshot normally.
+        # During a collector refresh, the map already read all dated economy
+        # observations. Reuse that exact source snapshot ONCE in scheduled
+        # idle workspace prewarm, rather than a second synchronous SQLite read.
+        # Explicit later activation (or a fresh Store revision) still reads
+        # current evidence. Never cache across a separate refresh revision.
+        if observations is None:
+            observations=getattr(self,"_deferred_economy_observations",None)
+        self._deferred_economy_observations=None
         self._observations=(self.controller.store.list_observations()
                             if observations is None else observations)
         by_indicator={}
