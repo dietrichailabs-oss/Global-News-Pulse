@@ -1184,7 +1184,20 @@ class MainWindow(SituationActions, QMainWindow):
             show_observations = (not self._history_at and not filters.get("query")
                                  and not filters.get("region")
                                  and filters.get("category") in {"", "Economy"})
+            economy_revision_before=(self.controller.store.content_revision()
+                                     if show_observations else None)
             observations=self.controller.store.list_observations() if show_observations else []
+            economy_revision_after=(self.controller.store.content_revision()
+                                    if show_observations else None)
+            # Reuse only a source-consistent revision in the deferred Economy
+            # workspace. Worker writes, including those made after the initial
+            # paint, MUST invalidate the old in-RAM rows before prewarm.
+            valid_economy_revision=(show_observations
+                                    and economy_revision_before==economy_revision_after)
+            self._deferred_economy_observations=(observations
+                                                 if valid_economy_revision else None)
+            self._deferred_economy_revision=(economy_revision_after
+                                             if valid_economy_revision else None)
             self.world_map.set_events(
                 self.controller.events(**map_filters),
                 country_events=country_evidence,
@@ -1615,10 +1628,18 @@ class MainWindow(SituationActions, QMainWindow):
         self.situation_browser.setHtml("".join(parts))
 
     def _populate_economy(self,observations=None):
-        # The map and the visible Economy view consume the same complete
-        # observation snapshot during a single refresh. Querying it twice
-        # stalled the GUI for ~1.2s with 3,200 observations on Windows.
-        # Independent tab activation still reads a fresh snapshot normally.
+        # During a collector refresh, the map already read all dated economy
+        # observations. Reuse that exact source snapshot ONCE in scheduled
+        # idle workspace prewarm, rather than a second synchronous SQLite read.
+        # Explicit later activation (or a fresh Store revision) still reads
+        # current evidence. Never cache across a separate refresh revision.
+        if observations is None:
+            revision=getattr(self,"_deferred_economy_revision",None)
+            if (revision is not None
+                    and revision==self.controller.store.content_revision()):
+                observations=getattr(self,"_deferred_economy_observations",None)
+        self._deferred_economy_observations=None
+        self._deferred_economy_revision=None
         self._observations=(self.controller.store.list_observations()
                             if observations is None else observations)
         by_indicator={}

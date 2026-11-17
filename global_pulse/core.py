@@ -1663,6 +1663,18 @@ class Store:
                     continue
         return changed
 
+    def content_revision(self) -> tuple[int, int]:
+        """Conservative SQLite mutation identity for volatile GUI read reuse.
+
+        total_changes catches THIS Store connection's writes; data_version
+        catches separate SQLite connections. Read both under the Store lock.
+        A change invalidates a cached *view*; it is never treated as evidence
+        of a changed event, a refreshed source, or a newer publication.
+        """
+        with self._lock:
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+
     def list_observations(self, indicator: str = "", country: str = "") -> list[dict]:
         where, params = [], []
         if indicator:
