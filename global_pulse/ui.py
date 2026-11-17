@@ -1184,13 +1184,20 @@ class MainWindow(SituationActions, QMainWindow):
             show_observations = (not self._history_at and not filters.get("query")
                                  and not filters.get("region")
                                  and filters.get("category") in {"", "Economy"})
+            economy_revision_before=(self.controller.store.content_revision()
+                                     if show_observations else None)
             observations=self.controller.store.list_observations() if show_observations else []
-            # The same source revision will be needed by the deferred Economy
-            # workspace. A second 10k-row SQLite/revision read in its idle
-            # prewarm is unnecessary and causes an avoidable GUI-thread stall.
-            # This is a ONE-USE volatile snapshot; subsequent independent
-            # Economy activations still query fresh Store observations.
-            self._deferred_economy_observations=observations if show_observations else None
+            economy_revision_after=(self.controller.store.content_revision()
+                                    if show_observations else None)
+            # Reuse only a source-consistent revision in the deferred Economy
+            # workspace. Worker writes, including those made after the initial
+            # paint, MUST invalidate the old in-RAM rows before prewarm.
+            valid_economy_revision=(show_observations
+                                    and economy_revision_before==economy_revision_after)
+            self._deferred_economy_observations=(observations
+                                                 if valid_economy_revision else None)
+            self._deferred_economy_revision=(economy_revision_after
+                                             if valid_economy_revision else None)
             self.world_map.set_events(
                 self.controller.events(**map_filters),
                 country_events=country_evidence,
@@ -1627,8 +1634,12 @@ class MainWindow(SituationActions, QMainWindow):
         # Explicit later activation (or a fresh Store revision) still reads
         # current evidence. Never cache across a separate refresh revision.
         if observations is None:
-            observations=getattr(self,"_deferred_economy_observations",None)
+            revision=getattr(self,"_deferred_economy_revision",None)
+            if (revision is not None
+                    and revision==self.controller.store.content_revision()):
+                observations=getattr(self,"_deferred_economy_observations",None)
         self._deferred_economy_observations=None
+        self._deferred_economy_revision=None
         self._observations=(self.controller.store.list_observations()
                             if observations is None else observations)
         by_indicator={}
