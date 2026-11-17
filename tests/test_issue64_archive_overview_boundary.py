@@ -223,3 +223,50 @@ def test_explicit_feed_selection_survives_newer_collector_page_eviction(tmp_path
             QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
             app.processEvents()
         controller.close()
+
+
+def test_missing_pinned_archive_report_never_rebinds_star_to_unrelated_story(tmp_path):
+    """When local retention removes a selected archived row, do not auto-star news."""
+    app=QApplication.instance() or QApplication([])
+    controller=Controller(tmp_path,demo=True)
+    window=None
+    try:
+        old=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
+        newer=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
+        identity=controller.store.ingest([_report(998,"Health",old)],now=old)[0]["id"]
+        controller.store.ingest([_report(i,"Disaster",newer) for i in range(501)],now=newer)
+        window=MainWindow(controller)
+        window.show()
+        app.processEvents()
+        window.time_range.setCurrentIndex(3)
+        window.refresh_data()
+        window.navigate_event(identity)
+        assert window._archive_selection_id==identity
+        assert window._selected_id==identity
+        # Model an archive record removed by retention between poll cycles.
+        # All other newly collected records remain available in the feed.
+        original_event=controller.event
+        controller.event=lambda event_id: (
+            None if str(event_id)==identity else original_event(event_id)
+        )
+        window.refresh_data()
+        assert window._selected_id==""
+        assert window._archive_selection_id==""
+        assert window._explicit_feed_selection_id==""
+        assert window._feed_explicitly_cleared
+        assert window.feed_list.currentItem() is None
+        assert not window.save_button.isEnabled()
+        assert "Select an event" in window.intel_browser.toPlainText()
+        # Continued collection cannot silently re-select another story.
+        window.refresh_data()
+        assert window._selected_id==""
+        assert not window.save_button.isEnabled()
+        assert window.feed_list.currentItem() is None
+    finally:
+        if window is not None:
+            window._force_close=True
+            window.close()
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            app.processEvents()
+        controller.close()
