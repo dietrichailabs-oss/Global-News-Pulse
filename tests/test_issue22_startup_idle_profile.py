@@ -176,7 +176,7 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
         stack.enter_context(patch.object(cls, name, timed))
 
     try:
-        assert controller.store.ingest(_reports())["accepted"] >= 800
+        assert len(controller.store.ingest(_reports())) >= 800
         assert controller.store.put_observations(_observations()) == 3200
         splash = show_initializing(app)
         with ExitStack() as stack:
