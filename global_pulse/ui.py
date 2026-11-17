@@ -384,6 +384,10 @@ class MainWindow(SituationActions, QMainWindow):
         self._overview_events=[]  # Category candidates from existing feed/map reads.
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
+        # A selected ordinary feed story may later fall beyond the newest 500.
+        # Retain only explicit user choice; initial auto-selection is not pinned.
+        self._explicit_feed_selection_id=""
+        self._explicit_feed_selection_scope=None
         self._historical=False
         self._history_at=None
         self._refreshing=False
@@ -1129,6 +1133,26 @@ class MainWindow(SituationActions, QMainWindow):
                     else:
                         self._archive_selection_id=""
                         self._archive_selection_scope=None
+            # A user-selected ordinary feed row can also age beyond the 500-row
+            # page after new collection. Keep just that explicit choice and its
+            # current Store evidence; do not silently rebind Star to a new row.
+            scope=self._archive_scope_key()
+            if (self._explicit_feed_selection_id
+                    and self._explicit_feed_selection_scope!=scope):
+                self._explicit_feed_selection_id=""
+                self._explicit_feed_selection_scope=None
+            if (self._selected_id and self._selected_id==self._explicit_feed_selection_id
+                    and not self._archive_selection_id and not self._feed_explicitly_cleared
+                    and all(str(e.get("id"))!=self._selected_id for e in self._events)):
+                pinned=self.controller.event(self._selected_id)
+                if pinned:
+                    self._events=[pinned]+list(self._events[:499])
+                    self._archive_selection_id=self._selected_id
+                    self._archive_selection_scope=scope
+                else:
+                    self._explicit_feed_selection_id=""
+                    self._explicit_feed_selection_scope=None
+                    self._feed_explicitly_cleared=True
             # A filter or historical-time change can remove the previously
             # selected event from the visible feed without deleting it from
             # the Store. Never leave a hidden event bound to the Brief/Star.
@@ -1356,6 +1380,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._feed_explicitly_cleared=False
             self.intelligence_mode.setCurrentIndex(1)
             e=item.data(Qt.ItemDataRole.UserRole)
+            self._explicit_feed_selection_id=str(e.get("id") or "")
+            self._explicit_feed_selection_scope=self._archive_scope_key()
             if str(e.get("id") or "")!=self._archive_selection_id:
                 self._archive_selection_id=""
                 self._archive_selection_scope=None
@@ -1366,6 +1392,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._feed_explicitly_cleared=True
             self._archive_selection_id=""
             self._archive_selection_scope=None
+            self._explicit_feed_selection_id=""
+            self._explicit_feed_selection_scope=None
             self._selected_id=""
             self._render_empty_brief()
 
@@ -1458,6 +1486,8 @@ class MainWindow(SituationActions, QMainWindow):
                 self.feed_list.blockSignals(previous)
             self._render_event(event)
 
+        self._explicit_feed_selection_id=identity
+        self._explicit_feed_selection_scope=self._archive_scope_key()
         self.world_map.select_event(identity,center=True)
         if self.isMinimized():
             self.showNormal()

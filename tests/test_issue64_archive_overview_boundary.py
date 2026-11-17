@@ -168,3 +168,58 @@ def test_explicit_archive_evidence_keeps_selected_event_across_refresh(tmp_path)
             QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
             app.processEvents()
         controller.close()
+
+
+def test_explicit_feed_selection_survives_newer_collector_page_eviction(tmp_path):
+    """A clicked ordinary feed story must not silently switch Star to newer news.
+
+    Start with the actual source row inside the latest 500, then collect two
+    newer records that push it outside the page without changing user scope.
+    Only the explicit choice is retained; selecting another row releases it.
+    """
+    app=QApplication.instance() or QApplication([])
+    controller=Controller(tmp_path,demo=True)
+    window=None
+    try:
+        old=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
+        recent=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
+        later=(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()
+        identity=controller.store.ingest([_report(997,"Health",old)],now=old)[0]["id"]
+        controller.store.ingest([_report(i,"Disaster",recent) for i in range(499)],now=recent)
+        window=MainWindow(controller)
+        window.show()
+        app.processEvents()
+        window.time_range.setCurrentIndex(3)
+        window.refresh_data()
+        assert len(window._events)==500
+        assert identity in {str(e["id"]) for e in window._events}
+        row=next(i for i in range(window.feed_list.count())
+                 if str(window.feed_list.item(i).data(Qt.ItemDataRole.UserRole).get("id"))==identity)
+        window.feed_list.setCurrentRow(row)
+        assert window._selected_id==identity
+        assert window._explicit_feed_selection_id==identity
+        assert not window._archive_selection_id  # Initially an ordinary feed row.
+        controller.store.ingest([_report(i,"Disaster",later) for i in (700,701)],now=later)
+        window.refresh_data()
+        assert window._selected_id==identity
+        assert window._archive_selection_id==identity
+        assert identity in {str(e["id"]) for e in window._events}
+        assert len(window._events)==500
+        assert "SYNTHETIC Health evidence 997" in window.intel_browser.toPlainText()
+        assert window.save_button.isEnabled()
+        window.refresh_data()
+        assert window._selected_id==identity
+        # A deliberate different-row selection must release the one-row pin.
+        window.feed_list.setCurrentRow(1)
+        assert window._selected_id!=identity
+        assert not window._archive_selection_id
+        window.refresh_data()
+        assert identity not in {str(e["id"]) for e in window._events}
+    finally:
+        if window is not None:
+            window._force_close=True
+            window.close()
+            window.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            app.processEvents()
+        controller.close()
