@@ -1279,7 +1279,7 @@ class MainWindow(SituationActions, QMainWindow):
                 row=dict(event,_situation_starred=starred,
                          _display_title=view["title"],_translation_label=view["label"])
                 tip=("<div style='white-space:pre-wrap'>"+
-                     esc(view["label"]+"\\nOriginal: "+view["original"]+"\\n"+
+                     esc(view["label"]+"\nOriginal: "+view["original"]+"\n"+
                          str(event.get("recap","")))+"</div>")
                 item=self.feed_list.item(index) if same_order else QListWidgetItem(view["title"])
                 if not same_order:
