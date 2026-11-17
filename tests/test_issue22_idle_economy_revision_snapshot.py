@@ -21,7 +21,7 @@ def _observation(number):
     return {
         "indicator": "synthetic_growth",
         "indicator_name": "Synthetic growth test only",
-        "country": "Test Country %03d" % (number % 8),
+        "country": "Test Country %03d" % number,
         "date": str(2010 + number % 12),
         "value": float(number),
         "source_id": "synthetic-offline",
