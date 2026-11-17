@@ -208,7 +208,13 @@ class WorldMap(QWidget):
             # and neutral archive classification. Local Store refresh time must
             # not make an old report look like a current crisis.
             now = datetime.now(timezone.utc)
-            self.country_activity = build_country_activity(selected, now=now)
+            # The aggregate classifier already decides which individual source
+            # records qualify on their own. Reuse that exact answer in the
+            # neutral-archive pass; never repeat a full 5k-record source/date
+            # classifier once per country-only row on the GUI thread.
+            single_record_credits = set()
+            self.country_activity = build_country_activity(
+                selected, now=now, single_record_credits=single_record_credits)
             # Keep precisely attributed, country-only archives discoverable even
             # when they have no point/area or do not qualify for a current crisis
             # stripe. These are *records*, not new crisis assertions.
@@ -256,7 +262,7 @@ class WorldMap(QWidget):
                 # not the country aggregate (which may contain other records).
                 # A qualifying current report must not also be counted or
                 # drawn as neutral historical country-only evidence.
-                if build_country_activity((record,), now=now).get(country):
+                if (id(record), country) in single_record_credits:
                     continue
                 entry = self.country_only_evidence.setdefault(
                     country, {"count": 0, "events": [], "categories": {}}
