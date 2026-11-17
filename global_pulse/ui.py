@@ -394,6 +394,9 @@ class MainWindow(SituationActions, QMainWindow):
         # Hidden workspaces are populated once per real data revision, not
         # synchronously on every back-and-forth tab switch.
         self._dirty_pages=set(range(1,6))
+        # A country click during deferred Economy rebuilding must target the
+        # newly collected observations, never stale prewarm dropdown rows.
+        self._pending_economic_country=None
         # Splash warms all workspaces before showing a window. Live updates
         # use an idle timer; navigation itself never runs expensive queries.
         self._background_warm_enabled=False
@@ -1557,6 +1560,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.economy_country.blockSignals(True);self.economy_country.clear();self.economy_country.addItem("All countries","")
         for c in sorted({str(o.get("country_name") or o.get("country", "")) for o in self._observations}):self.economy_country.addItem(c,c)
         self.economy_country.setCurrentIndex(max(0,self.economy_country.findData(country)));self.economy_country.blockSignals(False);self._populate_economic_selection()
+        self._apply_pending_economic_country()
 
     def _populate_economic_selection(self,*args):
         selected=self.indicator_combo.currentData();country=self.economy_country.currentData()
@@ -1751,13 +1755,16 @@ class MainWindow(SituationActions, QMainWindow):
         self.country_search.setText(name)
         self.status_label.setText(f"Map selection: {name}. Event locations may be approximate.")
 
-    def _open_economic_country(self, name):
-        """Open sourced dated measurements; never turn them into event pins."""
+    def _apply_pending_economic_country(self):
+        """Resolve the last explicit map-country request against current rows."""
+        name=self._pending_economic_country
+        if name is None:
+            return
+        self._pending_economic_country=None
         from .crisis_overlay import normalize_country
-        target = normalize_country(name)
-        self.open_page(2)  # Populates the real stored Economy observations.
-        for index in range(1, self.economy_country.count()):
-            if normalize_country(self.economy_country.itemText(index)) == target:
+        target=normalize_country(name)
+        for index in range(1,self.economy_country.count()):
+            if normalize_country(self.economy_country.itemText(index))==target:
                 self.economy_country.setCurrentIndex(index)
                 self.status_label.setText(
                     f"Economy: dated sourced observations for {name}; not a verified crisis."
@@ -1766,6 +1773,25 @@ class MainWindow(SituationActions, QMainWindow):
         self.status_label.setText(
             f"Economy data for {name} is no longer in the local archive."
         )
+
+    def _open_economic_country(self,name):
+        """Country map clicks must not read SQLite or use stale prewarm rows.
+
+        After a collector revision the Economy workspace is dirty while
+        visible map observations are already refreshed. A map click chooses
+        the last requested country and defers the heavyweight table/chart
+        reconstruction to the existing navigation-idle warm cycle. The
+        pending choice is resolved only against freshly populated controls.
+        """
+        self._pending_economic_country=str(name)
+        self.open_page(2)
+        if 2 in self._dirty_pages:
+            self.status_label.setText(
+                f"Preparing dated sourced Economy observations for {name}..."
+            )
+            self._schedule_workspace_warm()
+        else:
+            self._apply_pending_economic_country()
 
     def _search_full_archive(self, phrase):
         """Search all local headlines with one refresh and no invented geography."""
