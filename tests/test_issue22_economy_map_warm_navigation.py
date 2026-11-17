@@ -121,3 +121,43 @@ def test_visible_economy_refresh_consumes_pending_map_country(tmp_path):
         assert "no longer in the local archive" not in window.status_label.text()
     finally:
         _close(app,window,controller)
+
+
+def test_country_click_selects_available_sourced_indicator_not_empty_old_series(tmp_path):
+    """Map-country evidence must not look empty solely due to the old indicator."""
+    app=QApplication.instance() or QApplication([])
+    controller=Controller(tmp_path,demo=True)
+    window=None
+    try:
+        # Each country has genuine stored (synthetic) rows, but in disjoint
+        # indicators. An existing Economy indicator need not cover the map
+        # country being clicked.
+        east,west=_observations()
+        west=dict(west,indicator="wb_unemployment",
+                  indicator_name="Synthetic unemployment test")
+        assert controller.store.put_observations([east,west])==2
+        window=MainWindow(controller)
+        window.show()
+        app.processEvents()
+        assert window.prepare_initial_workspaces()
+        window.open_page(0)
+        window.refresh_data()
+        window._workspace_warm_timer.stop()
+        assert 2 in window._dirty_pages
+        window._open_economic_country("Test Country West")
+        window._workspace_warm_timer.stop()
+        window._last_navigation_at=time.monotonic()-3
+        window._warm_next_workspace()
+        window._workspace_warm_timer.stop()
+        assert window.economy_country.currentText()=="Test Country West"
+        assert window.indicator_combo.currentData()=="wb_unemployment"
+        assert window.economy_model.rowCount()==1
+        assert window.economy_model.url_at(0).endswith("/1")
+        # Already-warmed navigation to another country must switch back to
+        # that country's available indicator without querying Store.
+        window._open_economic_country("Test Country East")
+        assert window.indicator_combo.currentData()=="wb_inflation"
+        assert window.economy_model.rowCount()==1
+        assert window.economy_model.url_at(0).endswith("/0")
+    finally:
+        _close(app,window,controller)

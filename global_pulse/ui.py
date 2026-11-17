@@ -1765,7 +1765,26 @@ class MainWindow(SituationActions, QMainWindow):
         target=normalize_country(name)
         for index in range(1,self.economy_country.count()):
             if normalize_country(self.economy_country.itemText(index))==target:
+                # A country can have observations for a different indicator
+                # than the one last selected. Use already-warmed rows to
+                # choose a real available series, without a SQLite read.
+                country_name=self.economy_country.itemText(index)
+                by_indicator=getattr(self,"_observations_by_indicator",{})
+                def has_country(rows):
+                    return any(str(o.get("country_name") or o.get("country") or "")==country_name
+                               for o in rows)
+                current=self.indicator_combo.currentData()
+                if not has_country(by_indicator.get(current,())):
+                    for choice in range(self.indicator_combo.count()):
+                        if has_country(by_indicator.get(self.indicator_combo.itemData(choice),())):
+                            blocked=self.indicator_combo.blockSignals(True)
+                            self.indicator_combo.setCurrentIndex(choice)
+                            self.indicator_combo.blockSignals(blocked)
+                            break
+                blocked=self.economy_country.blockSignals(True)
                 self.economy_country.setCurrentIndex(index)
+                self.economy_country.blockSignals(blocked)
+                self._populate_economic_selection()
                 self.status_label.setText(
                     f"Economy: dated sourced observations for {name}; not a verified crisis."
                 )
