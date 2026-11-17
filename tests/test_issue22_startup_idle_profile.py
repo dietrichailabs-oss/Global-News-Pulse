@@ -23,6 +23,8 @@ from PySide6.QtWidgets import QApplication
 
 from global_pulse.__main__ import prepare_initial_dashboard, show_initializing
 from global_pulse.controller import Controller
+from global_pulse.core import Store
+from global_pulse.map_widget import WorldMap
 from global_pulse.ui import EconomicChart, EconomicTableModel, MainWindow
 
 
@@ -170,7 +172,9 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             try:
                 return original(self, *args, **kwargs)
             finally:
-                methods[phase["value"] + ":" + name].append(
+                label = (name if cls in (MainWindow, EconomicChart, EconomicTableModel)
+                         else cls.__name__ + "." + name)
+                methods[phase["value"] + ":" + label].append(
                     (time.perf_counter() - started) * 1000
                 )
         stack.enter_context(patch.object(cls, name, timed))
@@ -186,6 +190,14 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 "_refresh_source_status_ui", "_populate_economy",
             ):
                 trace_method(MainWindow, name, stack)
+            for name in ("_populate_feed", "_populate_filter_options",
+                         "_update_world_overview", "_sync_map_controls"):
+                trace_method(MainWindow, name, stack)
+            for name in ("set_events", "coverage_summary", "_refresh_country_activity"):
+                trace_method(WorldMap, name, stack)
+            for name in ("list_events", "list_observations"):
+                trace_method(Store, name, stack)
+            trace_method(Controller, "events", stack)
             trace_method(EconomicChart, "set_observations", stack)
             trace_method(EconomicTableModel, "set_observations", stack)
             started = time.perf_counter()
