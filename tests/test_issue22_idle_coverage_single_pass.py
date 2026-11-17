@@ -56,8 +56,10 @@ def _fixture():
 
 def _check(world):
     points, unlocated = _old_summary_counts(world)
-    assert (world._coverage_points, world._coverage_unlocated) == (points, unlocated)
+    # A category assignment invalidates the lazy index; coverage_summary()
+    # must first reconcile the new filter before its cached counters are read.
     summary = world.coverage_summary()
+    assert (world._coverage_points, world._coverage_unlocated) == (points, unlocated)
     assert summary.startswith(f"{points} points")
     assert f" · {unlocated} unlocated" in summary
 
