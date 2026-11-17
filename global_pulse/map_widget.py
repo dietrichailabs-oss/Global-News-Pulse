@@ -64,6 +64,11 @@ class WorldMap(QWidget):
         self.observations = []
         self.economic_observations = {}
         self._activity_categories = object()
+        # Reuse the exact event classification in the activity-index pass for
+        # the summary. Re-scanning up to 5,000 events on every idle UI refresh
+        # was measured as part of the blocked main-thread coverage hot path.
+        self._coverage_points = 0
+        self._coverage_unlocated = 0
         self.area_layer = WarningAreaLayer(self)
         self.selected_event = ""
         self.selected_country = ""
@@ -210,10 +215,21 @@ class WorldMap(QWidget):
             countries = {normalize_country(c["name"]) for c in self._countries}
             self.country_only_evidence = {}
             self.country_category_evidence = {}
+            # Count the same coverage points/unlocated records while scanning
+            # this selected evidence *once*. Counts include synthetic records,
+            # as they did in coverage_summary; those records remain excluded
+            # from source-backed crisis/country evidence indexes.
+            self._coverage_points = 0
+            self._coverage_unlocated = 0
             for record in selected:
+                country = normalize_country(incident_country(record))
+                located = self.has_location(record)
+                if located:
+                    self._coverage_points += 1
+                elif not record.get("map_areas") and country not in countries:
+                    self._coverage_unlocated += 1
                 if record.get("synthetic"):
                     continue
-                country = normalize_country(incident_country(record))
                 if not country or country not in countries:
                     continue
                 # A country-category circle summarizes attributable SOURCE
@@ -232,7 +248,7 @@ class WorldMap(QWidget):
                 # Preserve the old neutral/historical country-only index and
                 # its no-double-counting contract. Current supported crises
                 # stay in the separate stripe, not this neutral archive.
-                if self.has_location(record) or record.get("map_areas"):
+                if located or record.get("map_areas"):
                     continue
                 # The country activity's event_ids are capped at 20 for display:
                 # do not use that truncated list to decide what is neutral.
@@ -286,11 +302,12 @@ class WorldMap(QWidget):
     def coverage_summary(self):
         self._refresh_country_activity()
         key = None if self.categories is None else {_map_category(c) for c in self.categories}
-        selected = [e for e in self.evidence_events if key is None or _map_category(e.get("category")) in key]
+        # _refresh_country_activity has already counted the *same* filtered
+        # evidence records. Do not make two further full-record passes on the
+        # GUI thread just to repaint a text label after collector signals.
         countries = {normalize_country(c["name"]) for c in self._countries}
-        unlocated = sum(not self.has_location(e) and not e.get("map_areas") and
-                        normalize_country(incident_country(e)) not in countries for e in selected)
-        points = sum(self.has_location(e) for e in selected)
+        unlocated = self._coverage_unlocated
+        points = self._coverage_points
         areas = len(self.area_layer.visible())
         activity = sum(country in countries for country in self.country_activity)
         country_only = sum(entry["count"] for entry in self.country_only_evidence.values())
