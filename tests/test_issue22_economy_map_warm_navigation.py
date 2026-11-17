@@ -19,8 +19,10 @@ def _observations():
     return [{
         "indicator":"wb_inflation",
         "indicator_name":"Synthetic inflation test",
-        "country":f"T{i:03d}",
-        "country_name":name,
+        # Mirror the World Bank parser: country is the published full name;
+        # country_code is the separate ISO-style location identifier.
+        "country":name,
+        "country_code":f"T{i:03d}",
         "date":"2025",
         "value":float(i+1),
         "source_id":"offline-economy-fixture",
