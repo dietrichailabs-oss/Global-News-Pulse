@@ -1131,8 +1131,14 @@ class MainWindow(SituationActions, QMainWindow):
                     if pinned:
                         self._events=[pinned]+list(self._events[:499])
                     else:
+                        # Retention or source withdrawal may remove a previously
+                        # pinned report between refreshes. Do not silently switch
+                        # the Selected Event/Star to a different first feed row.
                         self._archive_selection_id=""
                         self._archive_selection_scope=None
+                        self._explicit_feed_selection_id=""
+                        self._explicit_feed_selection_scope=None
+                        self._feed_explicitly_cleared=True
             # A user-selected ordinary feed row can also age beyond the 500-row
             # page after new collection. Keep just that explicit choice and its
             # current Store evidence; do not silently rebind Star to a new row.
