@@ -430,11 +430,18 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
         if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
             continue
 
+        # Topic eligibility depends only on active source records, not geography.
+        # Most ordinary news/health/economy reports have no conflict, unrest or
+        # displacement claim. Avoid a full country-source text search (including
+        # all bundled country aliases) for those non-topical records. The exact
+        # prior structured/text country decision still runs for every candidate.
+        kinds = _topical_kinds(event)
+        if not kinds:
+            continue
         structured_country = normalize_country(structured_incident_country(event))
         text_country = _explicit_text_country(event) if not structured_country else ""
         country = structured_country or text_country
-        kinds = _topical_kinds(event)
-        if not country or not kinds:
+        if not country:
             continue
         candidates.append((event, stamp, country, kinds))
 
