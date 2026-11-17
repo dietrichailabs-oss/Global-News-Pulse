@@ -401,7 +401,8 @@ def _recent_report_scope(event: dict, now: datetime, max_age_days: int) -> dict 
     return scoped
 
 
-def build_country_activity(events: Iterable[dict], *, now: datetime | None = None, max_age_days: int = 14) -> dict[str, dict]:
+def build_country_activity(events: Iterable[dict], *, now: datetime | None = None, max_age_days: int = 14,
+                           single_record_credits: set[tuple[int, str]] | None = None) -> dict[str, dict]:
     """Aggregate recent supported activity by country without losing split-source corroboration.
 
     Existing event-level official/two-origin rules remain authoritative. A second
@@ -445,10 +446,22 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
             continue
         candidates.append((event, stamp, country, kinds))
 
+        # The GUI's neutral archive formerly ran this complete classifier once
+        # more PER country-only record to ask if that one record by itself
+        # qualifies for a stripe. Return the same answer while the event and
+        # source-time scope are already in hand. Python object identity avoids
+        # collisions between duplicate historical event IDs in a view. A pair
+        # is credited ONLY if the single record would independently qualify,
+        # never merely from cross-event corroboration later in this function.
+        credible = _credible(event)
+        if single_record_credits is not None and (
+                credible or len(_independent_report_origins(event)) >= 2):
+            single_record_credits.add((id(raw), country))
+
         # Preserve the already-accepted strict event-level path. When the
         # location itself came only from one explicit country in source text,
         # keep that basis visible rather than calling it structured evidence.
-        if not _credible(event):
+        if not credible:
             continue
         entry = result.setdefault(country, {
             "conflict": 0, "unrest": 0, "migration": 0,
