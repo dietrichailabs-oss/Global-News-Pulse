@@ -757,7 +757,11 @@ class MainWindow(SituationActions, QMainWindow):
         self.economy_table.doubleClicked.connect(
             lambda index:self._open_economic_source(index.row(),index.column())
         )
-        self.indicator_combo.currentIndexChanged.connect(self._populate_economic_selection);self.economy_country.currentIndexChanged.connect(self._populate_economic_selection)
+        # A later direct dropdown choice takes precedence over a deferred map click.
+        # Rebuilding the controls blocks their signals; only a real selection
+        # signal cancels the pending country. Existing local evidence is kept.
+        self.indicator_combo.currentIndexChanged.connect(self._manual_economy_selection)
+        self.economy_country.currentIndexChanged.connect(self._manual_economy_selection)
         self.pages.addWidget(panel)
 
     def _build_sources(self):
@@ -1559,8 +1563,19 @@ class MainWindow(SituationActions, QMainWindow):
         self.indicator_combo.setCurrentIndex(max(0,self.indicator_combo.findData(current)));self.indicator_combo.blockSignals(False)
         self.economy_country.blockSignals(True);self.economy_country.clear();self.economy_country.addItem("All countries","")
         for c in sorted({str(o.get("country_name") or o.get("country", "")) for o in self._observations}):self.economy_country.addItem(c,c)
-        self.economy_country.setCurrentIndex(max(0,self.economy_country.findData(country)));self.economy_country.blockSignals(False);self._populate_economic_selection()
-        self._apply_pending_economic_country()
+        self.economy_country.setCurrentIndex(max(0,self.economy_country.findData(country)));self.economy_country.blockSignals(False)
+        # Resolve the pending map selection BEFORE building a chart/model.
+        # Previously this populated the entire chart/table twice on one
+        # collector-driven warm cycle, including the idle period before clicks.
+        if self._pending_economic_country is None:
+            self._populate_economic_selection()
+        else:
+            self._apply_pending_economic_country()
+
+    def _manual_economy_selection(self,*args):
+        """A deliberate dropdown choice supersedes an older queued map click."""
+        self._pending_economic_country=None
+        self._populate_economic_selection()
 
     def _populate_economic_selection(self,*args):
         selected=self.indicator_combo.currentData();country=self.economy_country.currentData()
@@ -1789,6 +1804,9 @@ class MainWindow(SituationActions, QMainWindow):
                     f"Economy: dated sourced observations for {name}; not a verified crisis."
                 )
                 return
+        # A missing source country still needs the rebuilt model to match the
+        # latest real controls, not the chart left from a prior revision.
+        self._populate_economic_selection()
         self.status_label.setText(
             f"Economy data for {name} is no longer in the local archive."
         )
