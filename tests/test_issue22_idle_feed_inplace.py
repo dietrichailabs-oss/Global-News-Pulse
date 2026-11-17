@@ -74,6 +74,11 @@ def test_idle_feed_refresh_reuses_items_and_preserves_star_source_and_scroll(tmp
         assert window._selected_id==str(rows[10]["id"])
         assert window.feed_list.verticalScrollBar().value()==offset
         assert window.feed_list.item(10).data(Qt.ItemDataRole.UserRole)["id"]==rows[10]["id"]
+        # Full source identity is unchanged: even resolving 40 headline
+        # projections again would be unnecessary GUI work at idle.
+        with patch.object(controller,"headline_view",
+                          side_effect=AssertionError("redundant headline conversion")):
+            window._populate_feed()
 
         # Correction/translation and Star overlays must update the *same*
         # record object rather than being silently dropped by this fast path.
@@ -85,6 +90,14 @@ def test_idle_feed_refresh_reuses_items_and_preserves_star_source_and_scroll(tmp
         assert window.feed_list.item(10) is target
         assert window.feed_list.item(10).data(Qt.ItemDataRole.UserRole)["title"]=="SYNTHETIC corrected headline"
         assert "corrected" in window.feed_list.item(10).text()
+        # A source correction with the same ID/update-time must still update
+        # the existing item rather than being skipped by the snapshot.
+        source_changed=list(window._events)
+        source_changed[10]=dict(source_changed[10],recap="SYNTHETIC updated source evidence")
+        window._events=source_changed
+        window._populate_feed()
+        assert "updated source evidence" in window.feed_list.item(10).toolTip()
+        assert window.feed_list.item(10) is target
         # An explicitly cleared selection must not rebind a stale Star.
         window._selected_id=""
         window._feed_explicitly_cleared=True
