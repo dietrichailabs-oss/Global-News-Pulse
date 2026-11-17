@@ -1236,7 +1236,8 @@ class MainWindow(SituationActions, QMainWindow):
                     combo.blockSignals(blocked)
 
     def _populate_feed(self,*args):
-        if not hasattr(self,"feed_list"):return
+        if not hasattr(self,"feed_list"):
+            return
         if hasattr(self,"english_headlines"):
             was_blocked=self.english_headlines.blockSignals(True)
             self.english_headlines.setChecked(self.controller.get_setting("english_headlines",True) is True)
@@ -1244,21 +1245,62 @@ class MainWindow(SituationActions, QMainWindow):
         events=list(self._events)
         saved_ids=self.controller.store.saved_situation_ids()
         if self.sort_combo.currentIndex()==1:
-            order={"critical":4,"high":3,"moderate":2,"informational":1,"unassessed":0};events.sort(key=lambda e:(order.get(e.get("severity"),0),str(e.get("updated_at",""))),reverse=True)
-        elif self.sort_combo.currentIndex()==2:events.sort(key=lambda e:int(e.get("report_count",0)),reverse=True)
-        self.feed_list.blockSignals(True);self.feed_list.clear()
+            order={"critical":4,"high":3,"moderate":2,"informational":1,"unassessed":0}
+            events.sort(key=lambda e:(order.get(e.get("severity"),0),str(e.get("updated_at",""))),reverse=True)
+        elif self.sort_combo.currentIndex()==2:
+            events.sort(key=lambda e:int(e.get("report_count",0)),reverse=True)
         if not self._selected_id and events and not self._feed_explicitly_cleared:
             self._selected_id=str(events[0].get("id",""))
-        selected_item=None
-        for e in events:
-            e=dict(e,_situation_starred=str(e.get("id","")) in saved_ids)
-            view=self.controller.headline_view(e, defer_language=True) if hasattr(self.controller,"headline_view") else {"title":str(e.get("title","Untitled event")),"original":str(e.get("title","")),"label":"Original headline"}
-            e=dict(e,_display_title=view["title"],_translation_label=view["label"])
-            item=QListWidgetItem(view["title"]);item.setData(Qt.ItemDataRole.UserRole,e);item.setToolTip("<div style='white-space:pre-wrap'>"+esc(view["label"]+"\nOriginal: "+view["original"]+"\n"+str(e.get("recap","")))+"</div>");self.feed_list.addItem(item)
-            if str(e.get("id"))==self._selected_id:selected_item=item
-        if selected_item:self.feed_list.setCurrentItem(selected_item)
-        self.feed_list.blockSignals(False)
-        self.feed_empty.setVisible(not events);self.feed_list.setVisible(bool(events))
+
+        # Collector refreshes often change map/source evidence without changing
+        # the visible 500 feed identities. Never destroy/recreate hundreds of
+        # QListWidgetItems on those idle GUI revisions. Keep the existing row
+        # objects, current selection, scroll position and translated labels;
+        # reconcile changed source/Star/language data on the existing rows.
+        role=Qt.ItemDataRole.UserRole
+        same_order=(self.feed_list.count()==len(events) and all(
+            isinstance((row:=self.feed_list.item(i).data(role)),dict)
+            and str(row.get("id",""))==str(event.get("id",""))
+            for i,event in enumerate(events)
+        ))
+        old_block=self.feed_list.blockSignals(True)
+        self.feed_list.setUpdatesEnabled(False)
+        try:
+            if not same_order:
+                self.feed_list.clear()
+            selected_item=None
+            for index,event in enumerate(events):
+                starred=str(event.get("id","")) in saved_ids
+                view=(self.controller.headline_view(event,defer_language=True)
+                      if hasattr(self.controller,"headline_view")
+                      else {"title":str(event.get("title","Untitled event")),
+                            "original":str(event.get("title","")),
+                            "label":"Original headline"})
+                row=dict(event,_situation_starred=starred,
+                         _display_title=view["title"],_translation_label=view["label"])
+                tip=("<div style='white-space:pre-wrap'>"+
+                     esc(view["label"]+"\\nOriginal: "+view["original"]+"\\n"+
+                         str(event.get("recap","")))+"</div>")
+                item=self.feed_list.item(index) if same_order else QListWidgetItem(view["title"])
+                if not same_order:
+                    self.feed_list.addItem(item)
+                if item.text()!=view["title"]:
+                    item.setText(view["title"])
+                if item.data(role)!=row:
+                    item.setData(role,row)
+                if item.toolTip()!=tip:
+                    item.setToolTip(tip)
+                if str(event.get("id",""))==self._selected_id:
+                    selected_item=item
+            if self.feed_list.currentItem() is not selected_item:
+                # A vanished/filtered explicit selection must never remain
+                # bound to an unrelated Star or evidence view.
+                self.feed_list.setCurrentItem(selected_item)
+        finally:
+            self.feed_list.setUpdatesEnabled(True)
+            self.feed_list.blockSignals(old_block)
+        self.feed_empty.setVisible(not events)
+        self.feed_list.setVisible(bool(events))
 
     @Slot()
     def _refresh_translated_headlines(self):
