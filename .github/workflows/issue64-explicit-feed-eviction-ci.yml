@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor a4571e255c55b2e147a45ff4442fab1e18a20c44 HEAD
-          git diff --name-only 4ab5c41a9fcd2f246e1b5e6506635b440b2ebd13 HEAD | python -c "import sys; expected={'.github/workflows/issue64-explicit-feed-eviction-ci.yml','global_pulse/ui.py','tests/test_issue64_archive_overview_boundary.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only a4571e255c55b2e147a45ff4442fab1e18a20c44 HEAD | python -c "import sys; expected={'.github/workflows/issue64-explicit-feed-eviction-ci.yml','global_pulse/ui.py','tests/test_issue64_archive_overview_boundary.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native Windows Qt
         if: runner.os == 'Windows'
         shell: bash
