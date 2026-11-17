@@ -1238,9 +1238,10 @@ class MainWindow(SituationActions, QMainWindow):
     def _populate_feed(self,*args):
         if not hasattr(self,"feed_list"):
             return
+        english_enabled=self.controller.get_setting("english_headlines",True) is True
         if hasattr(self,"english_headlines"):
             was_blocked=self.english_headlines.blockSignals(True)
-            self.english_headlines.setChecked(self.controller.get_setting("english_headlines",True) is True)
+            self.english_headlines.setChecked(english_enabled)
             self.english_headlines.blockSignals(was_blocked)
         events=list(self._events)
         saved_ids=self.controller.store.saved_situation_ids()
@@ -1251,6 +1252,30 @@ class MainWindow(SituationActions, QMainWindow):
             events.sort(key=lambda e:int(e.get("report_count",0)),reverse=True)
         if not self._selected_id and events and not self._feed_explicitly_cleared:
             self._selected_id=str(events[0].get("id",""))
+
+        # Complete canonical source bytes, not just ID/update time: a corrected
+        # story, retraction, report URL or nested warning area can change without
+        # a new feed identity. The snapshot is volatile, never persisted/uploaded.
+        # Star state, user sort and language preference are separate inputs.
+        # On an unchanged collector revision there is no reason to touch 500
+        # Qt rows or repeat 500 local headline-resolution calls on the GUI thread.
+        feed_key=(json.dumps(events,sort_keys=True,ensure_ascii=False,
+                             separators=(",",":"),default=str),
+                  tuple(sorted(saved_ids)),self.sort_combo.currentIndex(),
+                  english_enabled)
+        if (feed_key==getattr(self,"_feed_snapshot_key",None)
+                and self.feed_list.count()==len(events)):
+            selected_item=next((self.feed_list.item(i) for i,event in enumerate(events)
+                                if str(event.get("id",""))==self._selected_id),None)
+            if self.feed_list.currentItem() is not selected_item:
+                old_block=self.feed_list.blockSignals(True)
+                try:
+                    self.feed_list.setCurrentItem(selected_item)
+                finally:
+                    self.feed_list.blockSignals(old_block)
+            self.feed_empty.setVisible(not events)
+            self.feed_list.setVisible(bool(events))
+            return
 
         # Collector refreshes often change map/source evidence without changing
         # the visible 500 feed identities. Never destroy/recreate hundreds of
@@ -1301,6 +1326,7 @@ class MainWindow(SituationActions, QMainWindow):
             self.feed_list.blockSignals(old_block)
         self.feed_empty.setVisible(not events)
         self.feed_list.setVisible(bool(events))
+        self._feed_snapshot_key=feed_key
 
     @Slot()
     def _refresh_translated_headlines(self):
