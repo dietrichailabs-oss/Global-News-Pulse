@@ -1696,6 +1696,22 @@ class Store:
             return (self._conn.total_changes,
                     int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
 
+    def content_revision_if_available(self) -> tuple[int, int] | None:
+        """Nonblocking revision probe for a Qt event-loop callback.
+
+        A worker can hold the Store RLock while importing or reading a large
+        source batch. Never wait for that worker merely to decide whether a
+        previously captured UI snapshot remains current. None means BUSY, not
+        unchanged; callers must defer or discard, never accept a stale view.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+        finally:
+            self._lock.release()
+
     def list_observations(self, indicator: str = "", country: str = "") -> list[dict]:
         where, params = [], []
         if indicator:

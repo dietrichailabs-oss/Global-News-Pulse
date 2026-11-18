@@ -971,6 +971,13 @@ class MainWindow(SituationActions, QMainWindow):
                 self._workspace_warm_timer.start()
                 return
             page=min(other)
+        # An archive/collector worker may already own the Store RLock for
+        # hundreds of milliseconds. Hidden prewarm is not user-requested:
+        # defer rather than blocking the GUI event loop behind its SQLite
+        # transaction. Keep the exact dirty page and provider-status evidence.
+        if self.controller.store.content_revision_if_available() is None:
+            self._workspace_warm_timer.start(250)
+            return
         self._populate_workspace(page)
         self._dirty_pages.discard(page)
         self._schedule_workspace_warm()
@@ -1249,8 +1256,16 @@ class MainWindow(SituationActions, QMainWindow):
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
             return
+        # Even checking a revision acquired the same Store lock as the
+        # background 5k-event/3.2k-observation read. Do not stall Qt to verify
+        # an idle snapshot while another worker owns that lock. Retry the same
+        # bounded snapshot and revalidate its generation/scope/revision.
+        current_revision=self.controller.store.content_revision_if_available()
+        if current_revision is None:
+            QTimer.singleShot(120,lambda s=snapshot:self._apply_idle_snapshot(s))
+            return
         if (snapshot["revision_before"]!=snapshot["revision_after"]
-                or self.controller.store.content_revision()!=snapshot["revision_after"]):
+                or current_revision!=snapshot["revision_after"]):
             # New collection arrived during the multi-read snapshot: never
             # present a mixed evidence revision or fabricate a status update.
             if snapshot.get("brief_pending"):
