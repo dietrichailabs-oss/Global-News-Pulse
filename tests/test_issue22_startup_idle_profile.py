@@ -158,6 +158,71 @@ def test_economy_idle_warm_renders_one_model_and_manual_dropdown_wins(tmp_path, 
         _close(app, window, controller)
 
 
+class _TimedStoreLock:
+    """Measure real Store RLock wait/ownership without shortening any test gate.
+
+    The backing lock is unchanged, including reentrance and nonblocking probes.
+    Account for lock hold time only at the outermost release, so worker/GUI
+    contention and expensive in-lock SQL can be distinguished.
+    """
+    def __init__(self, backing, gui_thread, phase):
+        self._backing = backing
+        self._gui_thread = gui_thread
+        self._phase = phase
+        self._ownership = {}
+        self.waits = defaultdict(list)
+        self.holds = defaultdict(list)
+        self.slowest = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        started = time.perf_counter()
+        acquired = self._backing.acquire(blocking, timeout)
+        elapsed = (time.perf_counter() - started) * 1000
+        tid = threading.get_ident()
+        side = "GUI" if tid == self._gui_thread else "worker"
+        key = self._phase["value"] + ":" + side
+        self.waits[key].append(elapsed)
+        if acquired:
+            if tid in self._ownership:
+                began, depth, caller = self._ownership[tid]
+                self._ownership[tid] = (began, depth + 1, caller)
+            else:
+                # Frame inspection is constant-time and avoids logging URLs,
+                # source records, or any private archive content.
+                import sys
+                frame = sys._getframe(1)
+                caller = (frame.f_back.f_code.co_name if frame.f_code.co_name == "__enter__"
+                          else frame.f_code.co_name)
+                self._ownership[tid] = (time.perf_counter(), 1, caller)
+        if elapsed > 20:
+            self.slowest.append({"kind": "wait", "thread": key,
+                                 "ms": round(elapsed, 3)})
+        return acquired
+
+    def release(self):
+        tid = threading.get_ident()
+        began, depth, caller = self._ownership[tid]
+        if depth == 1:
+            elapsed = (time.perf_counter() - began) * 1000
+            key = self._phase["value"] + ":" + (
+                "GUI" if tid == self._gui_thread else "worker")
+            self.holds[key].append(elapsed)
+            if elapsed > 20:
+                self.slowest.append({"kind": "hold", "thread": key,
+                                     "method": caller, "ms": round(elapsed, 3)})
+            del self._ownership[tid]
+        else:
+            self._ownership[tid] = (began, depth - 1, caller)
+        self._backing.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.release()
+
+
 def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     """Do not click a tab or open YouTube during the measured idle window."""
     app = QApplication.instance() or QApplication([])
@@ -199,6 +264,10 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     try:
         assert len(controller.store.ingest(_reports())) >= 800
         assert controller.store.put_observations(_observations()) == 3200
+        # Instrument the *real* Store lock after fixture ingest. No mocked
+        # archive results, no delay changes and no weakened 7.2s requirement.
+        traced_lock = _TimedStoreLock(controller.store._lock, gui_thread_id, phase)
+        controller.store._lock = traced_lock
         splash = show_initializing(app)
         with ExitStack() as stack:
             for name in (
@@ -278,6 +347,15 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 "background_worker_operations": {
                     key: _stats(samples) for key, samples in sorted(worker_methods.items())
                 },
+                "store_rlock_wait": {
+                    key: _stats(samples) for key, samples in sorted(traced_lock.waits.items())
+                },
+                "store_rlock_outer_hold": {
+                    key: _stats(samples) for key, samples in sorted(traced_lock.holds.items())
+                },
+                "store_rlock_slowest_waits_and_holds": sorted(
+                    traced_lock.slowest, key=lambda x: x["ms"], reverse=True
+                )[:12],
             }
             print("PULSE_STARTUP_IDLE_PROFILE=" + json.dumps(result, sort_keys=True), flush=True)
             assert len(heartbeat) >= 40, "Main-thread heartbeat did not run"
