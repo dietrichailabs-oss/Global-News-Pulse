@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 86b6281dd4c0958742702518df70aee79b4817ac HEAD
-          git diff --name-only 86b6281dd4c0958742702518df70aee79b4817ac HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-store-lock-deferral-ci.yml','global_pulse/core.py','global_pulse/ui.py','tests/test_issue22_sources_resize_precision.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 86b6281dd4c0958742702518df70aee79b4817ac HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-store-lock-deferral-ci.yml','global_pulse/core.py','global_pulse/ui.py','tests/test_issue22_sources_resize_precision.py','tests/test_issue22_startup_idle_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native hosted Windows Qt platform
         if: runner.os == 'Windows'
         shell: bash
