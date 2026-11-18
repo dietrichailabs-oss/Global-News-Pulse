@@ -1081,12 +1081,13 @@ class MainWindow(SituationActions, QMainWindow):
         if self._background_warm_enabled and idle_for < 1.8:
             self._evidence_refresh_timer.start(max(100,int((1.8-idle_for)*1000)))
             return
-        # A full map/feed revision performs bounded but substantial local
-        # SQLite and country-classification work. Several providers finishing
-        # together must produce one visible revision, not a UI stall for each.
+        # The source snapshot now runs off the GUI thread. Starting its
+        # single-flight read by 3 seconds of post-splash idle avoids carrying
+        # a stale visible feed for the old 5-second synchronous-refresh wait,
+        # while the 1.8-second navigation pause remains mandatory.
         since_last=time.monotonic()-self._last_full_refresh_at
-        if self._background_warm_enabled and since_last < 5.0:
-            self._evidence_refresh_timer.start(max(100,int((5.0-since_last)*1000)))
+        if self._background_warm_enabled and since_last < 3.0:
+            self._evidence_refresh_timer.start(max(100,int((3.0-since_last)*1000)))
             return
         if self._background_warm_enabled:
             self._start_idle_snapshot()
