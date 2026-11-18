@@ -224,39 +224,38 @@ class _TimedStoreLock:
 
 
 
-def test_bounded_idle_feed_batch_preserves_exact_stored_source_evidence(tmp_path):
-    """Compare the production feed batch against the original full projection."""
-    from datetime import timedelta
-
-    store = Store(tmp_path / "batch-feed.sqlite", mode="synthetic")
+def test_idle_feed_cache_rejects_source_change_scope_and_backward_cutoff(tmp_path):
+    """Only an unchanged stored revision may avoid rehydrating source records."""
+    store=Store(tmp_path / "idle-source-cache.sqlite", mode="synthetic")
     try:
-        reports = _reports(330)
-        reports[7]["published_at"] = (
-            datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
-        reports[9]["event_key"] = reports[8]["event_key"]
-        reports[9]["correction_of"] = reports[8]["id"]
-        reports[9]["title"] = "SYNTHETIC corrected event 008"
-        assert len(store.ingest(reports)) >= 320
-        baseline = store.list_events(limit=500)
-        actual = store.list_events(limit=500, bulk_feed=True)
-        assert actual == baseline, "The bulk feed changed report/timeline evidence"
-        # Check bounded SQL paging as well as region and category selection.
-        assert store.list_events(limit=129, bulk_feed=True) == store.list_events(limit=129)
-        assert store.list_events(category="Conflict", bulk_feed=True) == (
-            store.list_events(category="Conflict"))
-        assert store.list_events(region="Global", bulk_feed=True) == (
-            store.list_events(region="Global"))
-        # An older policy record must take the full historical source fallback,
-        # not silently reuse an unqualified fast-path classification.
-        old_id = baseline[0]["id"]
-        with store._lock, store._conn:
-            row = store._conn.execute(
-                "SELECT body FROM events WHERE id=?", (old_id,)).fetchone()
-            body = json.loads(row["body"])
-            body["evidence_policy_version"] = 1
-            store._conn.execute("UPDATE events SET body=? WHERE id=?",
-                                (json.dumps(body), old_id))
-        assert store.list_events(limit=500, bulk_feed=True) == store.list_events(limit=500)
+        assert len(store.ingest(_reports(130))) == 130
+        events=store.list_events(limit=130)
+        before=store.content_revision()
+        old_since=(datetime.now(timezone.utc)-__import__("datetime").timedelta(days=7)).isoformat()
+        newer_since=(datetime.now(timezone.utc)-__import__("datetime").timedelta(days=6)).isoformat()
+        scope=("","", "", 1, 1000)
+        filters={"query":"","category":"","region":"","limit":130,"since":old_since}
+        cache={"revision":before,"scope":scope,"filters":filters,
+               "feed":tuple(events),"filter_options":{"category":[],"region":[]}}
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,filters) == events
+        narrowed={**filters,"since":newer_since}
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,narrowed) == [
+                e for e in events if e["updated_at"] >= newer_since]
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,{**filters,"since":"2000-01-01T00:00:00+00:00"}) is None
+        assert MainWindow._unchanged_source_feed(
+            cache,before,("different",),filters) is None
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,{**filters,"category":"Conflict"}) is None
+        # A real Store change must never reuse previous archive evidence.
+        assert store.ingest([{
+            **_reports(1)[0], "id":"new-source-evidence",
+            "event_key":"new-source-evidence",
+        }])
+        assert MainWindow._unchanged_source_feed(
+            cache,store.content_revision(),scope,filters) is None
     finally:
         store.close()
 

@@ -400,6 +400,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._idle_snapshot_inflight=False
         self._idle_brief_inflight=False
         self._idle_snapshot_generation=0
+        # Last source-consistent display, used only if an evidence signal is a
+        # no-op for the underlying SQLite revision. Never a TTL or blind cache.
+        self._idle_feed_cache=None
         self._idle_snapshot_ready.connect(
             self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
         self._idle_brief_ready.connect(
@@ -1114,6 +1117,31 @@ class MainWindow(SituationActions, QMainWindow):
         else:
             self.refresh_data()
 
+    @staticmethod
+    def _unchanged_source_feed(cache, revision, scope, filters):
+        """Return an exact stored feed after a source-no-op, or None if unsafe.
+
+        The rolling time cutoff can only advance: removing rows aged beyond
+        the new cutoff is exact because no older omitted row can re-enter a
+        top-500 page. Never reuse a different query, history scope, archive
+        revision, or backwards-moving clock. All source corrections and real
+        ingestion change Store revision, so they always take the worker path.
+        """
+        if not cache or cache["revision"] != revision or cache["scope"] != scope:
+            return None
+        old_filters=cache["filters"]
+        if any(filters.get(key)!=old_filters.get(key)
+               for key in ("query","category","region","limit","before")):
+            return None
+        older=old_filters.get("since")
+        newer=filters.get("since")
+        if (older is None) != (newer is None):
+            return None
+        if older is not None and newer < older:
+            return None
+        return [event for event in cache["feed"]
+                if newer is None or event["updated_at"] >= newer]
+
     def _start_idle_snapshot(self):
         """Read a bounded collector revision off the main thread, never paint there.
 
@@ -1124,6 +1152,10 @@ class MainWindow(SituationActions, QMainWindow):
         if self._idle_snapshot_inflight:
             return
         filters=self.events_filters()
+        # This source snapshot contains dictionaries, not Qt widgets. It is
+        # valid only when the worker confirms the exact stored revision; a
+        # real collector write always performs the full fresh source read.
+        unchanged_cache=self._idle_feed_cache
         historical_at=self._history_at
         scope=self._archive_scope_key()
         generation=self._idle_snapshot_generation
@@ -1160,8 +1192,16 @@ class MainWindow(SituationActions, QMainWindow):
                 # Archive selector metadata is two DISTINCT SQLite scans. The
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
-                result["filter_options"]=controller.event_filter_options()
-                result["feed"]=controller.events(**dict(filters, bulk_feed=True))
+                existing=(
+                    None if historical_at else self._unchanged_source_feed(
+                        unchanged_cache, before, scope, filters))
+                if existing is None:
+                    result["filter_options"]=controller.event_filter_options()
+                    result["feed"]=controller.events(**filters)
+                else:
+                    result["filter_options"]=unchanged_cache["filter_options"]
+                    result["feed"]=existing
+                    result["unchanged_revision_feed"]=True
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
                 result["map_events"]=controller.events(**map_filters)
@@ -1349,6 +1389,11 @@ class MainWindow(SituationActions, QMainWindow):
         if _idle_snapshot is None and self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.stop()
         self._refreshing=True
+        # Include Store changes from outside this full UI pass. Only equal
+        # before/after revisions can authorize reuse on the next idle signal.
+        read_revision=(
+            _idle_snapshot["revision_before"] if _idle_snapshot is not None
+            else self.controller.store.content_revision())
         try:
             # Apply a source-revision-consistent brief snapshot in a later
             # hidden workspace warm. A manual refresh never reuses old briefs.
@@ -1481,8 +1526,25 @@ class MainWindow(SituationActions, QMainWindow):
             if page!=3 or _idle_snapshot is None:
                 self._dirty_pages.discard(page)
             self._schedule_workspace_warm()
+            confirmed=self.controller.store.content_revision_if_available()
+            if (confirmed is not None and confirmed==read_revision
+                    and not self._history_at and not self._archive_selection_id
+                    and not self._explicit_feed_selection_id):
+                # Evidence is immutable at this Store revision; capture only
+                # source dictionaries and the already rebuilt selector values.
+                self._idle_feed_cache={
+                    "revision":confirmed, "scope":self._archive_scope_key(),
+                    "filters":dict(filters), "feed":tuple(self._events),
+                    "filter_options":{
+                        "category":[self.category.itemData(i) for i in range(1,self.category.count())],
+                        "region":[self.region.itemData(i) for i in range(1,self.region.count())],
+                    },
+                }
+            else:
+                self._idle_feed_cache=None
             self._last_full_refresh_at=time.monotonic()
         except Exception as exc:
+            self._idle_feed_cache=None
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
 
