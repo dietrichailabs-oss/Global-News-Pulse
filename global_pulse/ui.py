@@ -377,6 +377,7 @@ class MainWindow(SituationActions, QMainWindow):
     # A Store-only worker must deliver completed immutable snapshots to the GUI
     # thread. No Qt widget, model, WebEngine or painter runs inside that worker.
     _idle_snapshot_ready = Signal(object)
+    _idle_brief_ready = Signal(object)
     def __init__(self, controller):
         super().__init__()
         self.controller=controller
@@ -397,9 +398,12 @@ class MainWindow(SituationActions, QMainWindow):
         self._history_at=None
         self._refreshing=False
         self._idle_snapshot_inflight=False
+        self._idle_brief_inflight=False
         self._idle_snapshot_generation=0
         self._idle_snapshot_ready.connect(
             self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
+        self._idle_brief_ready.connect(
+            self._apply_idle_brief, Qt.ConnectionType.QueuedConnection)
         # Hidden workspaces are populated once per real data revision, not
         # synchronously on every back-and-forth tab switch.
         self._dirty_pages=set(range(1,6))
@@ -958,6 +962,15 @@ class MainWindow(SituationActions, QMainWindow):
         # does no SQLite work; each idle turn handles at most one workspace.
         current=self.pages.currentIndex()
         page=current if current in self._dirty_pages else min(self._dirty_pages)
+        # The Daily/Weekly SQL runs independently after the critical feed/map
+        # result, so a slow brief cannot starve the no-click GUI refresh.
+        # Do not perform a hidden synchronous SQLite brief query meanwhile.
+        if page==5 and self._idle_brief_inflight:
+            other=self._dirty_pages-{5}
+            if not other:
+                self._workspace_warm_timer.start()
+                return
+            page=min(other)
         self._populate_workspace(page)
         self._dirty_pages.discard(page)
         self._schedule_workspace_warm()
@@ -1124,6 +1137,10 @@ class MainWindow(SituationActions, QMainWindow):
             days=1 if brief_period=="daily" else 7)).isoformat()
         controller=self.controller
         signal=self._idle_snapshot_ready
+        brief_signal=self._idle_brief_ready
+        brief_pending=not self._idle_brief_inflight
+        if brief_pending:
+            self._idle_brief_inflight=True
         self._idle_snapshot_inflight=True
 
         def collect():
@@ -1136,9 +1153,6 @@ class MainWindow(SituationActions, QMainWindow):
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
                 result["filter_options"]=controller.event_filter_options()
-                result["brief_events"]=controller.brief_events(
-                    since=brief_since, period=brief_period)
-                result["brief_period"]=brief_period
                 result["feed"]=controller.events(**filters)
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
@@ -1176,6 +1190,24 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 # The native window may have been destroyed during shutdown.
                 pass
+            if brief_pending:
+                # Second, lower-priority source query. Never make the critical
+                # source/map snapshot wait behind the per-domain brief SQL.
+                # A separate guarded Qt signal delivers only an immutable list.
+                brief={"generation":generation,"period":brief_period}
+                try:
+                    before=controller.store.content_revision()
+                    brief["events"]=controller.brief_events(
+                        since=brief_since,period=brief_period)
+                    after=controller.store.content_revision()
+                    brief["revision_before"]=before
+                    brief["revision_after"]=after
+                except Exception as error:
+                    brief["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+                try:
+                    brief_signal.emit(brief)
+                except RuntimeError:
+                    pass
 
         threading.Thread(target=collect, name="pulse-idle-evidence",
                          daemon=True).start()
@@ -1201,6 +1233,24 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_evidence_refresh()
             return
         self.refresh_data(_idle_snapshot=snapshot)
+
+    @Slot(object)
+    def _apply_idle_brief(self, brief):
+        self._idle_brief_inflight=False
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        if "error" in brief:
+            self.status_label.setText("Idle brief update failed: "+brief["error"])
+        elif (brief["generation"]==self._idle_snapshot_generation
+              and brief["period"]==self.brief_period.currentText().lower()
+              and brief["revision_before"]==brief["revision_after"]
+              and brief["revision_after"]==self.controller.store.content_revision()):
+            self._deferred_brief_events=brief["events"]
+            self._deferred_brief_period=brief["period"]
+            self._deferred_brief_revision=brief["revision_after"]
+        # A stale result is never displayed. Its current-Store fallback is
+        # still available through an explicit user action/next warm.
+        self._schedule_workspace_warm()
 
     @Slot()
     def _schedule_collected_refresh(self):
@@ -1253,12 +1303,9 @@ class MainWindow(SituationActions, QMainWindow):
         try:
             # Apply a source-revision-consistent brief snapshot in a later
             # hidden workspace warm. A manual refresh never reuses old briefs.
-            self._deferred_brief_events=(
-                _idle_snapshot["brief_events"] if _idle_snapshot is not None else None)
-            self._deferred_brief_period=(
-                _idle_snapshot["brief_period"] if _idle_snapshot is not None else None)
-            self._deferred_brief_revision=(
-                _idle_snapshot["revision_after"] if _idle_snapshot is not None else None)
+            self._deferred_brief_events=None
+            self._deferred_brief_period=None
+            self._deferred_brief_revision=None
             self._dirty_pages.update(range(1,6))
             if _idle_snapshot is None:
                 filters=self.events_filters()
