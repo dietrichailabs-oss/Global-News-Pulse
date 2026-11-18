@@ -1731,6 +1731,11 @@ class MainWindow(SituationActions, QMainWindow):
         """
         if not hasattr(self,"feed_list"):
             return
+        # This signal is a GUI repaint of the already displayed feed. The
+        # checkbox is synchronized with explicit settings and the last
+        # validated collector snapshot. Looking up the preference once PER
+        # row would reacquire collector-owned SQLite hundreds of times.
+        english_enabled=self.english_headlines.isChecked()
         for index in range(self.feed_list.count()):
             item=self.feed_list.item(index)
             if item is None:
@@ -1738,7 +1743,8 @@ class MainWindow(SituationActions, QMainWindow):
             event=item.data(Qt.ItemDataRole.UserRole)
             if not isinstance(event,dict):
                 continue
-            view=(self.controller.headline_view(event,defer_language=True)
+            view=(self.controller.headline_view(event,defer_language=True,
+                                                 enabled_override=english_enabled)
                   if hasattr(self.controller,"headline_view")
                   else {"title":str(event.get("title","Untitled event")),
                         "original":str(event.get("title","")),
@@ -1756,10 +1762,28 @@ class MainWindow(SituationActions, QMainWindow):
                         "\n"+str(event.get("recap",""))) + "</div>"
                 )
         if self._selected_id:
-            event=self._selected_event()
+            # The selected visible feed row already holds the source evidence
+            # and Star state displayed by the last revision-checked update.
+            # No-click language callbacks must not re-open the Store for
+            # selected event lookup OR its star button. Explicit navigation
+            # and historical playback retain their canonical Store paths.
+            role=Qt.ItemDataRole.UserRole
+            selected_row=next((
+                self.feed_list.item(i).data(role)
+                for i in range(self.feed_list.count())
+                if str((self.feed_list.item(i).data(role) or {}).get("id",""))
+                   ==self._selected_id
+            ),None)
+            use_row=(not self._history_at and isinstance(selected_row,dict)
+                     and "_situation_starred" in selected_row)
+            event=selected_row if use_row else self._selected_event()
             if event:
                 brief_scroll=self.intel_browser.verticalScrollBar().value()
-                self._render_event(event,update_media=False)
+                self._render_event(
+                    event,update_media=False,
+                    english_enabled=english_enabled if use_row else None,
+                    starred_override=(bool(selected_row["_situation_starred"])
+                                      if use_row else None))
                 self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
     def _update_world_overview(self):
@@ -1794,7 +1818,7 @@ class MainWindow(SituationActions, QMainWindow):
         for b in (self.save_button,self.original_button,self.translate_button):b.setEnabled(False)
         self._sync_situation_star(None)
 
-    def _render_event(self,event, *, update_media=True, english_enabled=None):
+    def _render_event(self,event, *, update_media=True, english_enabled=None, starred_override=None):
         view=(self.controller.headline_view(event,enabled_override=english_enabled)
               if english_enabled is not None else self.controller.headline_view(event)) if hasattr(self.controller,"headline_view") else {"title":str(event.get("title","")),"original":str(event.get("title","")),"label":"Original headline"}
         severity=event.get("severity","unassessed");color=SEVERITY.get(severity,SEVERITY["unassessed"])
@@ -1846,7 +1870,7 @@ class MainWindow(SituationActions, QMainWindow):
             f"{event.get('status','active').title()} · revision {event.get('revision',1)}\n"
             f"{timestamp(event.get('updated_at'))}\n"
             f"{len(event.get('changes',[]))} recorded change(s)")
-        self._sync_situation_star(event);self.original_button.setEnabled(bool(reports and reports[0].get("url")));self.translate_button.setEnabled(bool(reports))
+        self._sync_situation_star(event,saved_override=starred_override);self.original_button.setEnabled(bool(reports and reports[0].get("url")));self.translate_button.setEnabled(bool(reports))
         if update_media and hasattr(self.media,"set_event"):self.media.set_event(dict(event,historical_view=bool(self._history_at)))
 
     def _feed_selected(self,item,previous):
