@@ -127,6 +127,9 @@ def populate_sources(window):
     if (getattr(window, "_source_status_render_key", None) == render_key
             and table.rowCount() == len(catalog)):
         return
+    # Unchanged status skips this entirely via the render-key guard above.
+    # New checkpoints use one bounded SQLite read, not N Store lock entries.
+    states = window.controller.store.list_source_states(s["id"] for s in catalog)
     old_rows = _existing_source_rows(table)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
@@ -144,7 +147,7 @@ def populate_sources(window):
             row = old_rows[sid] if reuse else catalog_row
             available, kind, reason = capability(source)
             collectable += int(available)
-            state = window.controller.store.get_source_state(sid) or {}
+            state = states.get(sid) or {}
             on = sid in enabled
             collection = ("Enabled" if window.controller.monitoring else "Enabled; monitoring paused") if on else "Off" if available else "Not connected"
             values = [source.get("name", sid), kind, collection,
