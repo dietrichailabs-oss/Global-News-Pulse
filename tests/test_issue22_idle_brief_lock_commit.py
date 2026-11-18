@@ -80,6 +80,9 @@ def test_hidden_brief_result_never_blocks_qt_on_store_lock(tmp_path):
                     "CREATE TEMP TABLE IF NOT EXISTS issue22_brief_probe(v INTEGER)")
                 controller.store._conn.execute(
                     "INSERT INTO issue22_brief_probe(v) VALUES (1)")
+                # Explicitly close the test-only SQLite transaction before
+                # Store.close() checkpoints the WAL on native Windows.
+                controller.store._conn.commit()
             assert controller.store.content_revision() != source_revision
             window._idle_brief_inflight = True
             window._apply_idle_brief(result)
