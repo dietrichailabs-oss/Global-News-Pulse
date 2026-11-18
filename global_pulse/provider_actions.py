@@ -72,6 +72,13 @@ def build_sources(window):
     window.source_table = QTableWidget(0, 10)
     window.source_table.setHorizontalHeaderLabels(["Source", "Type", "Collection", "Last result", "Last successful check", "Newest publication", "Next due", "Minimum interval", "Collection action", "Provider page"])
     window._configure_table(window.source_table)
+    # This 10-column provider table can hold 512 admitted catalog entries.
+    # ResizeToContents normally examines up to 1000 rows *per column* when
+    # computing size hints, including the two real per-row action controls.
+    # Keep the full model, selection, sorting and accessible source text, but
+    # bound hidden-tab layout measurement to a representative 64 rows. Long
+    # entries are still available through their actual cell text and details.
+    window.source_table.horizontalHeader().setResizeContentsPrecision(64)
     window.source_table.setAccessibleName("Providers, collection controls and observed source health")
     window.source_table.itemSelectionChanged.connect(window._source_selected)
     panel.layout.addWidget(window.source_table, 3)
