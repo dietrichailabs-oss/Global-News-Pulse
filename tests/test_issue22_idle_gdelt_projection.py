@@ -87,7 +87,8 @@ def test_real_sqlite_read_is_not_on_qt_and_heartbeat_runs_while_blocked(tmp_path
         spin(app,lambda:not panel._idle_inflight)
         assert panel.snapshot["state"]=="ready"
         assert panel.mapped_count==1
-        assert "Ukraine" in panel.country_text("Ukraine")
+        assert "GDELT: 1 retained coded observation" in panel.country_text("Ukraine")
+        assert "ukraine" in panel.snapshot["countries"]
         before=len(calls)
         world.view_changed.emit()
         app.processEvents()
