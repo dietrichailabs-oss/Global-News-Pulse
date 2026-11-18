@@ -9,6 +9,7 @@ import html
 import json
 import math
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -372,6 +373,10 @@ class EconomicChart(QWidget):
 
 class MainWindow(SituationActions, QMainWindow):
     """Controller-bound desktop. Native close/tray policy belongs to bootstrap."""
+
+    # A Store-only worker must deliver completed immutable snapshots to the GUI
+    # thread. No Qt widget, model, WebEngine or painter runs inside that worker.
+    _idle_snapshot_ready = Signal(object)
     def __init__(self, controller):
         super().__init__()
         self.controller=controller
@@ -391,6 +396,10 @@ class MainWindow(SituationActions, QMainWindow):
         self._historical=False
         self._history_at=None
         self._refreshing=False
+        self._idle_snapshot_inflight=False
+        self._idle_snapshot_generation=0
+        self._idle_snapshot_ready.connect(
+            self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
         # Hidden workspaces are populated once per real data revision, not
         # synchronously on every back-and-forth tab switch.
         self._dirty_pages=set(range(1,6))
@@ -1079,7 +1088,80 @@ class MainWindow(SituationActions, QMainWindow):
         if self._background_warm_enabled and since_last < 5.0:
             self._evidence_refresh_timer.start(max(100,int((5.0-since_last)*1000)))
             return
-        self.refresh_data()
+        if self._background_warm_enabled:
+            self._start_idle_snapshot()
+        else:
+            self.refresh_data()
+
+    def _start_idle_snapshot(self):
+        """Read a bounded collector revision off the main thread, never paint there.
+
+        Initial splash loading and explicit user/filter refreshes keep their
+        existing synchronous semantics. Only coalesced post-splash evidence
+        notifications use this path. Store itself serializes SQLite access.
+        """
+        if self._idle_snapshot_inflight:
+            return
+        filters=self.events_filters()
+        historical_at=self._history_at
+        scope=self._archive_scope_key()
+        generation=self._idle_snapshot_generation
+        map_filters={**filters,"limit":5000,"map_view":True,
+                     "keep_significant":not bool(historical_at)}
+        show_observations=(not historical_at and not filters.get("query")
+                           and not filters.get("region")
+                           and filters.get("category") in {"","Economy"})
+        controller=self.controller
+        signal=self._idle_snapshot_ready
+        self._idle_snapshot_inflight=True
+
+        def collect():
+            result={"scope":scope,"generation":generation,"filters":filters,
+                    "history_at":historical_at,"show_observations":show_observations}
+            try:
+                store=controller.store
+                before=store.content_revision()
+                result["feed"]=controller.events(**filters)
+                result["country_evidence"]=controller.events(
+                    **dict(map_filters,map_evidence=True))
+                result["map_events"]=controller.events(**map_filters)
+                result["observations"]=(store.list_observations()
+                                        if show_observations else [])
+                after=store.content_revision()
+                result["revision_before"]=before
+                result["revision_after"]=after
+            except Exception as error:
+                result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+            try:
+                signal.emit(result)
+            except RuntimeError:
+                # The native window may have been destroyed during shutdown.
+                pass
+
+        threading.Thread(target=collect, name="pulse-idle-evidence",
+                         daemon=True).start()
+
+    @Slot(object)
+    def _apply_idle_snapshot(self, snapshot):
+        """Apply only a current, source-consistent worker result on Qt thread."""
+        self._idle_snapshot_inflight=False
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        if "error" in snapshot:
+            self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
+            return
+        if (snapshot["generation"]!=self._idle_snapshot_generation
+                or snapshot["scope"]!=self._archive_scope_key()):
+            # User actions have their own immediate refresh; stale worker
+            # completion must never roll back a newer filter or selection.
+            return
+        if (snapshot["revision_before"]!=snapshot["revision_after"]
+                or self.controller.store.content_revision()!=snapshot["revision_after"]):
+            # New collection arrived during the multi-read snapshot: never
+            # present a mixed evidence revision or fabricate a status update.
+            self._schedule_evidence_refresh()
+            return
+        self.refresh_data(_idle_snapshot=snapshot)
 
     @Slot()
     def _schedule_collected_refresh(self):
@@ -1105,14 +1187,22 @@ class MainWindow(SituationActions, QMainWindow):
             self._populate_sources()
             self._dirty_pages.discard(3)
 
-    def refresh_data(self,*args):
+    def refresh_data(self,*args,_idle_snapshot=None):
         if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        if (_idle_snapshot is not None
+                and self.controller.store.content_revision()!=_idle_snapshot["revision_after"]):
+            self._schedule_evidence_refresh()
             return
         if self._refreshing:
             # A newer revision arrived during a reentrant Qt paint. Never
             # drop it; run one more coalesced refresh after this pass.
             self._schedule_evidence_refresh()
             return
+        if _idle_snapshot is None:
+            # Invalidate any in-flight collector snapshot before applying a
+            # newer explicit user selection or filter state.
+            self._idle_snapshot_generation+=1
         # Explicit user/filter refresh subsumes a pending collector refresh.
         if self._evidence_refresh_timer.isActive():
             self._evidence_refresh_timer.stop()
@@ -1123,8 +1213,13 @@ class MainWindow(SituationActions, QMainWindow):
         self._refreshing=True
         try:
             self._dirty_pages.update(range(1,6))
-            filters=self.events_filters()
-            self._events=self.controller.events(**filters)
+            if _idle_snapshot is None:
+                filters=self.events_filters()
+                self._events=self.controller.events(**filters)
+            else:
+                filters=_idle_snapshot["filters"]
+                self._history_at=_idle_snapshot["history_at"]
+                self._events=_idle_snapshot["feed"]
             if self._archive_selection_id:
                 pin=self._archive_selection_id
                 if (self._archive_selection_scope!=self._archive_scope_key()
@@ -1175,7 +1270,9 @@ class MainWindow(SituationActions, QMainWindow):
             self._populate_filter_options()
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
-            country_evidence=self.controller.events(**dict(map_filters,map_evidence=True))
+            country_evidence=(self.controller.events(**dict(map_filters,map_evidence=True))
+                              if _idle_snapshot is None
+                              else _idle_snapshot["country_evidence"])
             from .brief_selection import overview_evidence_candidates
             self._overview_events=overview_evidence_candidates(self._events,country_evidence)
             # Economic observations have their own dated country-level layer.
@@ -1184,11 +1281,15 @@ class MainWindow(SituationActions, QMainWindow):
             show_observations = (not self._history_at and not filters.get("query")
                                  and not filters.get("region")
                                  and filters.get("category") in {"", "Economy"})
-            economy_revision_before=(self.controller.store.content_revision()
-                                     if show_observations else None)
-            observations=self.controller.store.list_observations() if show_observations else []
-            economy_revision_after=(self.controller.store.content_revision()
-                                    if show_observations else None)
+            economy_revision_before=(
+                _idle_snapshot["revision_before"] if _idle_snapshot is not None and show_observations
+                else self.controller.store.content_revision() if show_observations else None)
+            observations=(
+                _idle_snapshot["observations"] if _idle_snapshot is not None
+                else self.controller.store.list_observations() if show_observations else [])
+            economy_revision_after=(
+                _idle_snapshot["revision_after"] if _idle_snapshot is not None and show_observations
+                else self.controller.store.content_revision() if show_observations else None)
             # Reuse only a source-consistent revision in the deferred Economy
             # workspace. Worker writes, including those made after the initial
             # paint, MUST invalidate the old in-RAM rows before prewarm.
@@ -1199,7 +1300,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._deferred_economy_revision=(economy_revision_after
                                              if valid_economy_revision else None)
             self.world_map.set_events(
-                self.controller.events(**map_filters),
+                (self.controller.events(**map_filters) if _idle_snapshot is None
+                 else _idle_snapshot["map_events"]),
                 country_events=country_evidence,
                 observations=observations,
             )
