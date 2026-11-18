@@ -1377,10 +1377,19 @@ class MainWindow(SituationActions, QMainWindow):
     def refresh_data(self,*args,_idle_snapshot=None):
         if self._force_close or getattr(self.controller,"_closed",False):
             return
-        if (_idle_snapshot is not None
-                and self.controller.store.content_revision()!=_idle_snapshot["revision_after"]):
-            self._schedule_evidence_refresh()
-            return
+        if _idle_snapshot is not None:
+            # _apply_idle_snapshot has already probed the revision, but a
+            # collector can acquire Store._lock between that probe and this
+            # call. Never make a SECOND blocking Store read on the Qt thread.
+            # Keep the same single-flight result for validation/retry.
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                self._idle_snapshot_inflight=True
+                QTimer.singleShot(120,lambda s=_idle_snapshot:self._apply_idle_snapshot(s))
+                return
+            if revision!=_idle_snapshot["revision_after"]:
+                self._schedule_evidence_refresh()
+                return
         if self._refreshing:
             # A newer revision arrived during a reentrant Qt paint. Never
             # drop it; run one more coalesced refresh after this pass.
