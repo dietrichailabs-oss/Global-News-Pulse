@@ -40,12 +40,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Verify exact tested parent and three-path isolation
+      - name: Verify exact tested parent and four-path isolation
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 653be2191553644e4026c25caae5aab80d4bf353 HEAD
-          git diff --name-only 653be2191553644e4026c25caae5aab80d4bf353 HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-economy-unchanged-ci.yml','global_pulse/ui.py','tests/test_issue22_idle_economy_same_evidence.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 653be2191553644e4026c25caae5aab80d4bf353 HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-economy-unchanged-ci.yml','global_pulse/ui.py','tests/test_issue22_idle_economy_same_evidence.py','tests/test_issue22_startup_idle_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native hosted Windows Qt platform
         if: runner.os == 'Windows'
         shell: bash
