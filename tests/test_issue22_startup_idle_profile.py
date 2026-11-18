@@ -196,6 +196,8 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 "refresh_data", "_warm_next_workspace",
                 "_refresh_evidence_when_idle", "_populate_workspace",
                 "_refresh_source_status_ui", "_populate_economy",
+                "_populate_sources", "_populate_alerts",
+                "_populate_situations", "_generate_brief",
             ):
                 trace_method(MainWindow, name, stack)
             for name in ("_populate_feed", "_populate_filter_options",

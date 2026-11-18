@@ -122,14 +122,26 @@ def populate_sources(window):
     # Catalog, enabled-source settings and monitoring state are independent
     # parts of the visible contract and must also invalidate this fast path.
     store_revision = window.controller.store.content_revision()
-    render_key = (store_revision, fingerprint, frozenset(enabled),
+    # General archive revisions include unrelated events and observations.
+    # They cannot, by themselves, prove that any provider health row changed.
+    visual_key = (fingerprint, frozenset(enabled),
                   bool(window.controller.monitoring))
+    render_key = (store_revision, *visual_key)
     if (getattr(window, "_source_status_render_key", None) == render_key
             and table.rowCount() == len(catalog)):
         return
     # Unchanged status skips this entirely via the render-key guard above.
     # New checkpoints use one bounded SQLite read, not N Store lock entries.
     states = window.controller.store.list_source_states(s["id"] for s in catalog)
+    prior_states = getattr(window, "_source_status_last_states", None)
+    prior_visual = getattr(window, "_source_status_visual_key", None)
+    # Only a stable complete read can suppress UI work. A concurrent writer
+    # invalidates this fast path, so the next status pulse can reconcile it.
+    stable_snapshot = window.controller.store.content_revision() == store_revision
+    if (stable_snapshot and prior_visual == visual_key
+            and prior_states == states and table.rowCount() == len(catalog)):
+        window._source_status_render_key = render_key
+        return
     old_rows = _existing_source_rows(table)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
@@ -149,6 +161,14 @@ def populate_sources(window):
             collectable += int(available)
             state = states.get(sid) or {}
             on = sid in enabled
+            if (reuse and prior_visual == visual_key and prior_states is not None
+                    and state == prior_states.get(sid, {})):
+                # Only genuinely changed checkpoints require Qt cell work.
+                # The source's metadata, enabled set, monitoring status and
+                # physical table rows have already been checked above.
+                if sid == selected_id:
+                    selected_row = row
+                continue
             collection = ("Enabled" if window.controller.monitoring else "Enabled; monitoring paused") if on else "Off" if available else "Not connected"
             values = [source.get("name", sid), kind, collection,
                       health_text(state) if available else reason,
@@ -219,10 +239,14 @@ def populate_sources(window):
     # A Store write may occur while the table is being rendered. In that
     # case do not bless a mixed status snapshot as current: the next
     # coalesced source-status signal must be allowed to reconcile it.
-    window._source_status_render_key = (
-        render_key if window.controller.store.content_revision() == store_revision
-        else None
-    )
+    if window.controller.store.content_revision() == store_revision:
+        window._source_status_render_key = render_key
+        window._source_status_last_states = states
+        window._source_status_visual_key = visual_key
+    else:
+        window._source_status_render_key = None
+        window._source_status_last_states = None
+        window._source_status_visual_key = None
     if selected_row is not None and not reuse:
         source_selected(window)
 
