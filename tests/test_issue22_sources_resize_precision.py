@@ -213,6 +213,9 @@ def test_no_click_sources_and_snapshot_defer_busy_store_without_losing_status(tm
         assert window._workspace_warm_timer.isActive()
 
         applied = []
+        # Model a real in-flight worker response rather than a free-standing
+        # callback. Busy revision deferral must retain single-flight ownership.
+        window._idle_snapshot_inflight = True
         with monkeypatch.context() as m:
             m.setattr(window, "refresh_data",
                       lambda *args, **kwargs: applied.append(kwargs))
@@ -221,6 +224,8 @@ def test_no_click_sources_and_snapshot_defer_busy_store_without_losing_status(tm
             assert (time.perf_counter() - start) * 1000 < 100, (
                 "Idle revision validation blocked on background SQLite")
             assert not applied, "Busy revision was incorrectly accepted as current"
+            assert window._idle_snapshot_inflight, (
+                "Busy Store allowed a second idle snapshot to start")
             release.set()
             worker.join(5)
             assert not worker.is_alive()
@@ -229,6 +234,7 @@ def test_no_click_sources_and_snapshot_defer_busy_store_without_losing_status(tm
             QTest.qWait(320)
             assert len(applied) == 1
             assert applied[0]["_idle_snapshot"] is snapshot
+            assert not window._idle_snapshot_inflight
 
         window._workspace_warm_timer.stop()
         window._last_navigation_at = time.monotonic() - 3

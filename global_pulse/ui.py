@@ -1262,6 +1262,10 @@ class MainWindow(SituationActions, QMainWindow):
         # bounded snapshot and revalidate its generation/scope/revision.
         current_revision=self.controller.store.content_revision_if_available()
         if current_revision is None:
+            # Keep single-flight ownership while waiting for a Store reader:
+            # otherwise another collector signal can launch a second identical
+            # snapshot and cause duplicate map/model population when both land.
+            self._idle_snapshot_inflight=True
             QTimer.singleShot(120,lambda s=snapshot:self._apply_idle_snapshot(s))
             return
         if (snapshot["revision_before"]!=snapshot["revision_after"]
