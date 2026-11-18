@@ -1137,7 +1137,6 @@ class MainWindow(SituationActions, QMainWindow):
             days=1 if brief_period=="daily" else 7)).isoformat()
         controller=self.controller
         signal=self._idle_snapshot_ready
-        brief_signal=self._idle_brief_ready
         brief_pending=not self._idle_brief_inflight
         if brief_pending:
             self._idle_brief_inflight=True
@@ -1145,7 +1144,9 @@ class MainWindow(SituationActions, QMainWindow):
 
         def collect():
             result={"scope":scope,"generation":generation,"filters":filters,
-                    "history_at":historical_at,"show_observations":show_observations}
+                    "history_at":historical_at,"show_observations":show_observations,
+                    "brief_pending":brief_pending,"brief_period":brief_period,
+                    "brief_since":brief_since}
             try:
                 store=controller.store
                 before=store.content_revision()
@@ -1190,26 +1191,42 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 # The native window may have been destroyed during shutdown.
                 pass
-            if brief_pending:
-                # Second, lower-priority source query. Never make the critical
-                # source/map snapshot wait behind the per-domain brief SQL.
-                # A separate guarded Qt signal delivers only an immutable list.
-                brief={"generation":generation,"period":brief_period}
-                try:
-                    before=controller.store.content_revision()
-                    brief["events"]=controller.brief_events(
-                        since=brief_since,period=brief_period)
-                    after=controller.store.content_revision()
-                    brief["revision_before"]=before
-                    brief["revision_after"]=after
-                except Exception as error:
-                    brief["error"]=f"{type(error).__name__}: {str(error)[:160]}"
-                try:
-                    brief_signal.emit(brief)
-                except RuntimeError:
-                    pass
-
         threading.Thread(target=collect, name="pulse-idle-evidence",
+                         daemon=True).start()
+
+    def _begin_idle_brief_read(self, snapshot):
+        """Read source-balanced brief only AFTER the critical Qt refresh completes.
+
+        Starting immediately after a worker signal previously took the Store
+        lock before the queued Qt snapshot handler, leaving the visible map
+        refresh blocked for >7 seconds. Never acquire that lock before the
+        full evidence snapshot is committed to the GUI event loop.
+        """
+        if self._force_close or getattr(self.controller,"_closed",False):
+            self._idle_brief_inflight=False
+            return
+        controller=self.controller
+        signal=self._idle_brief_ready
+        generation=snapshot["generation"]
+        period=snapshot["brief_period"]
+        since=snapshot["brief_since"]
+
+        def collect_brief():
+            brief={"generation":generation,"period":period}
+            try:
+                before=controller.store.content_revision()
+                brief["events"]=controller.brief_events(since=since,period=period)
+                after=controller.store.content_revision()
+                brief["revision_before"]=before
+                brief["revision_after"]=after
+            except Exception as error:
+                brief["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+            try:
+                signal.emit(brief)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=collect_brief,name="pulse-idle-brief",
                          daemon=True).start()
 
     @Slot(object)
@@ -1217,22 +1234,34 @@ class MainWindow(SituationActions, QMainWindow):
         """Apply only a current, source-consistent worker result on Qt thread."""
         self._idle_snapshot_inflight=False
         if self._force_close or getattr(self.controller,"_closed",False):
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
             return
         if "error" in snapshot:
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
             self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
             return
         if (snapshot["generation"]!=self._idle_snapshot_generation
                 or snapshot["scope"]!=self._archive_scope_key()):
             # User actions have their own immediate refresh; stale worker
             # completion must never roll back a newer filter or selection.
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
             return
         if (snapshot["revision_before"]!=snapshot["revision_after"]
                 or self.controller.store.content_revision()!=snapshot["revision_after"]):
             # New collection arrived during the multi-read snapshot: never
             # present a mixed evidence revision or fabricate a status update.
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
             self._schedule_evidence_refresh()
             return
         self.refresh_data(_idle_snapshot=snapshot)
+        if snapshot.get("brief_pending"):
+            # Give Qt a chance to repaint the newly committed feed/map before
+            # the expensive Brief SQL competes for SQLite and the Python GIL.
+            QTimer.singleShot(150,lambda s=snapshot:self._begin_idle_brief_read(s))
 
     @Slot(object)
     def _apply_idle_brief(self, brief):
