@@ -1334,18 +1334,37 @@ class MainWindow(SituationActions, QMainWindow):
 
     @Slot(object)
     def _apply_idle_brief(self, brief):
-        self._idle_brief_inflight=False
+        """Validate an idle Brief result without waiting for worker-owned SQLite.
+
+        A completed Brief read may arrive while the next collector holds the
+        Store RLock. Brief is hidden prewarm, not an excuse to pause Qt input.
+        Busy means defer this SAME result, never accept stale data or launch a
+        duplicate Brief worker. Only fresh, exact-revision results are cached.
+        """
         if self._force_close or getattr(self.controller,"_closed",False):
+            self._idle_brief_inflight=False
             return
         if "error" in brief:
+            self._idle_brief_inflight=False
             self.status_label.setText("Idle brief update failed: "+brief["error"])
         elif (brief["generation"]==self._idle_snapshot_generation
               and brief["period"]==self.brief_period.currentText().lower()
-              and brief["revision_before"]==brief["revision_after"]
-              and brief["revision_after"]==self.controller.store.content_revision()):
-            self._deferred_brief_events=brief["events"]
-            self._deferred_brief_period=brief["period"]
-            self._deferred_brief_revision=brief["revision_after"]
+              and brief["revision_before"]==brief["revision_after"]):
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                # Preserve ownership across retries. The next callback will
+                # recheck generation, period AND Store revision after the lock
+                # becomes available; there is no stale brief presentation.
+                self._idle_brief_inflight=True
+                QTimer.singleShot(120,lambda b=brief:self._apply_idle_brief(b))
+                return
+            self._idle_brief_inflight=False
+            if revision==brief["revision_after"]:
+                self._deferred_brief_events=brief["events"]
+                self._deferred_brief_period=brief["period"]
+                self._deferred_brief_revision=brief["revision_after"]
+        else:
+            self._idle_brief_inflight=False
         # A stale result is never displayed. Its current-Store fallback is
         # still available through an explicit user action/next warm.
         self._schedule_workspace_warm()
