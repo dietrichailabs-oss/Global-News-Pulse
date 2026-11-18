@@ -1222,6 +1222,13 @@ class MainWindow(SituationActions, QMainWindow):
         brief_period=self.brief_period.currentText().lower()
         brief_since=(datetime.now(timezone.utc)-timedelta(
             days=1 if brief_period=="daily" else 7)).isoformat()
+        # Capture the exact UI filter label before the worker starts. This is
+        # plain text; the worker must never access Qt widgets.
+        overview_label=(self.time_range.currentText().lower() +
+                        (", filtered" if (self.category.currentData() or
+                         self.region.currentData() or self.search.text().strip())
+                         else ", all categories") +
+                        " local feed and retained map evidence")
         controller=self.controller
         signal=self._idle_snapshot_ready
         brief_pending=not self._idle_brief_inflight
@@ -1261,6 +1268,15 @@ class MainWindow(SituationActions, QMainWindow):
                     if selected_id else None)
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
+                # Overview selection ranked up to 5,000 map records and
+                # formatted rich HTML on Qt for EVERY collector revision,
+                # including before the first owner click. Use immutable
+                # source evidence on this same revision-checked worker.
+                from .brief_selection import overview_evidence_candidates, overview_html
+                result["overview_events"]=overview_evidence_candidates(
+                    result["feed"],result["country_evidence"])
+                result["overview_html"]=overview_html(
+                    result["overview_events"],label=overview_label)
                 result["map_events"]=controller.events(**map_filters)
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
@@ -1663,8 +1679,22 @@ class MainWindow(SituationActions, QMainWindow):
             country_evidence=(self.controller.events(**dict(map_filters,map_evidence=True))
                               if _idle_snapshot is None
                               else _idle_snapshot["country_evidence"])
-            from .brief_selection import overview_evidence_candidates
-            self._overview_events=overview_evidence_candidates(self._events,country_evidence)
+            overview_precomputed=None
+            # The selected archive pin may have been prepended to the feed on
+            # Qt since the worker snapshot; in that case recompute from the
+            # modified visible feed so the older selected source stays linked.
+            # Otherwise even the 5,000-source shortlist and HTML rendering
+            # belong to the worker, not the no-click GUI critical path.
+            if (_idle_snapshot is not None
+                    and len(self._events)==len(_idle_snapshot["feed"])
+                    and all(a is b for a,b in zip(
+                        self._events,_idle_snapshot["feed"]))):
+                self._overview_events=_idle_snapshot["overview_events"]
+                overview_precomputed=_idle_snapshot["overview_html"]
+            else:
+                from .brief_selection import overview_evidence_candidates
+                self._overview_events=overview_evidence_candidates(
+                    self._events,country_evidence)
             # Economic observations have their own dated country-level layer.
             # Hide it during search/region/history replay because observations
             # do not share those event-filter semantics.
@@ -1714,7 +1744,7 @@ class MainWindow(SituationActions, QMainWindow):
                 english_enabled=(_idle_snapshot["english_headlines_enabled"]
                                  if _idle_snapshot is not None else None),
             )
-            self._update_world_overview()
+            self._update_world_overview(precomputed_html=overview_precomputed)
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
             count=len(self._events);self.feed_count.setText(str(count))
@@ -1973,14 +2003,18 @@ class MainWindow(SituationActions, QMainWindow):
                                       if use_row else None))
                 self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
-    def _update_world_overview(self):
-        """Format bounded already-loaded feed/map records without new queries."""
-        from .brief_selection import overview_html
-        scope=(self.time_range.currentText().lower() +
-               (", filtered" if self.category.currentData() or
-                self.region.currentData() or self.search.text().strip()
-                else ", all categories"))
-        updated=overview_html(self._overview_events, label=scope+" local feed and retained map evidence")
+    def _update_world_overview(self, *, precomputed_html=None):
+        """Only the explicit/modified-feed path formats overview HTML on Qt."""
+        if precomputed_html is None:
+            from .brief_selection import overview_html
+            scope=(self.time_range.currentText().lower() +
+                   (", filtered" if self.category.currentData() or
+                    self.region.currentData() or self.search.text().strip()
+                    else ", all categories"))
+            updated=overview_html(
+                self._overview_events,label=scope+" local feed and retained map evidence")
+        else:
+            updated=precomputed_html
         if updated != self._overview_html_cached:
             position=self.overview_browser.verticalScrollBar().value()
             self.overview_browser.setHtml(updated)
