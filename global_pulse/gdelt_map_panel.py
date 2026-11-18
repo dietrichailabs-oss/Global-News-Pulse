@@ -2,7 +2,9 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 import sqlite3
-from PySide6.QtCore import Qt, QTimer
+import threading
+import time
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QPen, QBrush
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QVBoxLayout,QCheckBox,QLabel,QPushButton,QDialog,QComboBox,QListWidget,QListWidgetItem
 from .gdelt_map_data import read_archive,empty
@@ -10,6 +12,8 @@ from .crisis_overlay import normalize_country
 
 
 class GdeltMapPanel(QWidget):
+    _idle_ready=Signal(object)
+
     def __init__(self,controller,world_map,parent=None):
         super().__init__(parent)
         self.controller=controller
@@ -19,6 +23,15 @@ class GdeltMapPanel(QWidget):
         self.dialog=None
         self._dialog_records=[]
         self._error=''
+        # Splash-owned initial read stays synchronous. Post-READY timer,
+        # status and evidence refreshes must never query SQLite on Qt.
+        self._idle_inflight=False
+        self._idle_pending=False
+        self._idle_epoch=0
+        self._idle_scope=None
+        self._idle_last_key=None
+        self._idle_last_at=0.0
+        self._idle_ready.connect(self._apply_idle_result)
         layout=QHBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         self.enabled=QCheckBox('GDELT coded layer')
         self.enabled.setChecked(controller.get_setting('gdelt_map_visible',True) is True)
@@ -30,9 +43,10 @@ class GdeltMapPanel(QWidget):
         self.details=QPushButton('GDELT records');self.details.clicked.connect(self.show_records)
         layout.addWidget(self.details)
         world_map.gdelt_layer=self
-        self.timer=QTimer(self);self.timer.setInterval(60000);self.timer.timeout.connect(self.refresh);self.timer.start()
-        controller.gdelt_status_changed.connect(self.refresh)
-        world_map.view_changed.connect(self.refresh)
+        self.timer=QTimer(self);self.timer.setInterval(60000);self.timer.timeout.connect(self._timed_refresh);self.timer.start()
+        controller.gdelt_status_changed.connect(self._timed_refresh)
+        # Pan/zoom is a map transform, not a 20,000-row SQLite query.
+        # The old view_changed -> refresh could consume 250 ms on Qt.
 
     @property
     def mapped_count(self):
@@ -49,21 +63,123 @@ class GdeltMapPanel(QWidget):
             finally:self.enabled.blockSignals(blocked)
         self.refresh()
 
-    def refresh(self,filters=None):
-        if getattr(self.controller,'_closed',False):
-            self.timer.stop();return
-        if isinstance(filters,dict):self.filters=dict(filters)
+    def _inactive_snapshot(self):
+        """Filtering must hide coded observations immediately, even mid-read."""
         if not self.enabled.isChecked():
-            self.snapshot=empty('off','GDELT layer off; cached data is unchanged.')
-        elif self.controller.demo:
-            self.snapshot=empty('demo','GDELT live-data layer is disabled in synthetic mode.')
-        elif self.filters.get('before') or any(self.filters.get(k) for k in ('query','category','region')) or self.world_map.categories is not None:
-            self.snapshot=empty('filtered','GDELT layer hidden during news-only filters or historical replay; clear filters to inspect coded data.')
-        else:
-            self.snapshot=read_archive(self.controller.store.path,self.world_map.country_names,since=self.filters.get('since'))
+            return empty('off','GDELT layer off; cached data is unchanged.')
+        if self.controller.demo:
+            return empty('demo','GDELT live-data layer is disabled in synthetic mode.')
+        if (self.filters.get('before')
+                or any(self.filters.get(k) for k in ('query','category','region'))
+                or self.world_map.categories is not None):
+            return empty('filtered','GDELT layer hidden during news-only filters or historical replay; clear filters to inspect coded data.')
+        return None
+
+    def _scope_key(self):
+        # Freeze pure Python inputs on Qt; no connection or store lock.
+        return (self.filters.get('since'),tuple(self.world_map.country_names))
+
+    def _present(self):
         self.status.setText(self.snapshot['message']+(' '+self._error if self._error else ''))
         self.details.setEnabled(bool(self.snapshot['records']))
         self.world_map.update()
+
+    @Slot()
+    def _timed_refresh(self):
+        self.refresh_idle(force=True)
+
+    def refresh_idle(self,filters=None,*,force=False):
+        """Schedule a bounded read-only projection without blocking idle Qt.
+
+        Coalesce repeated status/timer pulses to one worker and one pending
+        refresh. Never show a result from an obsolete filter or user action.
+        """
+        if getattr(self.controller,'_closed',False):
+            self.timer.stop()
+            return
+        if isinstance(filters,dict):
+            self.filters=dict(filters)
+        inactive=self._inactive_snapshot()
+        if inactive is not None:
+            self._idle_epoch+=1
+            self._idle_pending=False
+            self._idle_last_key=None
+            self.snapshot=inactive
+            self._present()
+            return
+        scope=self._scope_key()
+        if self._idle_inflight:
+            if scope!=self._idle_scope or force:
+                self._idle_epoch+=1
+                self._idle_pending=True
+                if scope!=self._idle_scope:
+                    self.snapshot=empty('loading','Updating the GDELT coded layer for this filter; previous scope hidden.')
+                    self._present()
+            return
+        if (not force and scope==self._idle_last_key
+                and time.monotonic()-self._idle_last_at<60):
+            return
+        self._idle_epoch+=1
+        token=self._idle_epoch
+        self._idle_scope=scope
+        self._idle_inflight=True
+        if scope!=self._idle_last_key:
+            self.snapshot=empty('loading','Updating the GDELT coded layer; no unverified observations displayed yet.')
+            self._present()
+        path=self.controller.store.path
+        signal=self._idle_ready
+
+        def collect():
+            try:
+                rows=read_archive(path,scope[1],since=scope[0])
+            except Exception:
+                rows=empty('unavailable','GDELT display worker failed; no old layer is shown.')
+            try:
+                signal.emit((token,scope,rows))
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=collect,name='pulse-idle-gdelt',daemon=True).start()
+
+    @Slot(object)
+    def _apply_idle_result(self,payload):
+        if getattr(self.controller,'_closed',False):
+            self._idle_inflight=False
+            return
+        token,scope,rows=payload
+        if not self._idle_inflight or scope!=self._idle_scope:
+            return
+        self._idle_inflight=False
+        pending=self._idle_pending
+        self._idle_pending=False
+        if (pending or token!=self._idle_epoch
+                or self._inactive_snapshot() is not None
+                or scope!=self._scope_key()):
+            if self._inactive_snapshot() is None:
+                self.refresh_idle(force=True)
+            return
+        self.snapshot=rows
+        self._idle_last_key=scope
+        self._idle_last_at=time.monotonic()
+        self._present()
+
+    def refresh(self,filters=None):
+        """Explicit action and splash first paint retain current-source reads."""
+        if getattr(self.controller,'_closed',False):
+            self.timer.stop();return
+        if isinstance(filters,dict):self.filters=dict(filters)
+        self._idle_epoch+=1
+        self._idle_pending=False
+        inactive=self._inactive_snapshot()
+        if inactive is not None:
+            self.snapshot=inactive
+            self._idle_last_key=None
+        else:
+            scope=self._scope_key()
+            self.snapshot=read_archive(self.controller.store.path,scope[1],since=scope[0])
+            self._idle_last_key=scope
+            self._idle_last_at=time.monotonic()
+        self._present()
 
     def paint(self,painter,transform,countries):
         if not self.mapped_count:return
