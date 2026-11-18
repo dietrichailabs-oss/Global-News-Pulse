@@ -9,10 +9,17 @@ from PySide6.QtWidgets import QListWidgetItem, QMenu
 class SituationActions:
     """Small MainWindow mixin; persistence remains in Store/Controller."""
 
-    def _sync_situation_star(self, event=None):
+    def _sync_situation_star(self, event=None, *, saved_override=None):
         identity = str((event or {}).get("id") or "")
         try:
-            state = self.controller.store.situation_state(identity) if identity else None
+            # A revision-validated in-memory feed row may supply its canonical
+            # event ID and bookmark bit during a no-click translation repaint.
+            # Explicit Star actions still validate the live archived identity
+            # and write through Store; this hint is display-only.
+            if identity and saved_override is not None:
+                state = {"event_id": identity, "saved": bool(saved_override)}
+            else:
+                state = self.controller.store.situation_state(identity) if identity else None
         except (sqlite3.Error, RuntimeError):
             state = None
         saved = bool(state and state["saved"])
