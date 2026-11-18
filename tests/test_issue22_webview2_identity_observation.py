@@ -35,7 +35,7 @@ def test_webview2_observes_exact_consented_request_and_still_blocks_redirects():
         'web.NavigateWithWebResourceRequest(request);')
     # The publisher domain is not silently reclassified as an OS-registered ID.
     assert 'private const string PublisherReferer = "https://www.dietrichailabs.com/";' in src
-    assert "publisher-owned" not in src.lower() or "app identity" in src.lower()
+    assert "not itself verified OS app/package identity" in src
 
 
 def test_visible_video_diagnostic_distinguishes_header_from_delivery_and_decoding():
