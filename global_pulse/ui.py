@@ -1169,6 +1169,11 @@ class MainWindow(SituationActions, QMainWindow):
         historical_at=self._history_at
         scope=self._archive_scope_key()
         generation=self._idle_snapshot_generation
+        # Selection is part of the immutable collector snapshot: a queued
+        # no-click refresh may not overwrite a newer user choice.
+        selected_id=str(self._selected_id or "")
+        archive_pin_id=str(self._archive_selection_id or "")
+        explicit_selection_id=str(self._explicit_feed_selection_id or "")
         map_filters={**filters,"limit":5000,"map_view":True,
                      "keep_significant":not bool(historical_at)}
         show_observations=(not historical_at and not filters.get("query")
@@ -1193,6 +1198,8 @@ class MainWindow(SituationActions, QMainWindow):
 
         def collect():
             result={"scope":scope,"generation":generation,"filters":filters,
+                    "selected_id":selected_id,"archive_pin_id":archive_pin_id,
+                    "explicit_selection_id":explicit_selection_id,
                     "history_at":historical_at,"show_observations":show_observations,
                     "brief_pending":brief_pending,"brief_period":brief_period,
                     "brief_since":brief_since}
@@ -1212,6 +1219,13 @@ class MainWindow(SituationActions, QMainWindow):
                     result["filter_options"]=unchanged_cache["filter_options"]
                     result["feed"]=existing
                     result["unchanged_revision_feed"]=True
+                # The selected event may be older than the top-500 feed page.
+                # Fetch its canonical current (or historical) evidence on the
+                # SAME worker as the rest of this revision-checked snapshot.
+                # Qt must not call get_event after a collector has the RLock.
+                result["selected_event"]=(
+                    controller.event(selected_id, at=historical_at)
+                    if selected_id else None)
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
                 result["map_events"]=controller.events(**map_filters)
@@ -1307,7 +1321,10 @@ class MainWindow(SituationActions, QMainWindow):
             self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
             return
         if (snapshot["generation"]!=self._idle_snapshot_generation
-                or snapshot["scope"]!=self._archive_scope_key()):
+                or snapshot["scope"]!=self._archive_scope_key()
+                or snapshot["selected_id"]!=str(self._selected_id or "")
+                or snapshot["archive_pin_id"]!=str(self._archive_selection_id or "")
+                or snapshot["explicit_selection_id"]!=str(self._explicit_feed_selection_id or "")):
             # User actions have their own immediate refresh; stale worker
             # completion must never roll back a newer filter or selection.
             if snapshot.get("brief_pending"):
@@ -1404,6 +1421,14 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller,"_closed",False):
             return
         if _idle_snapshot is not None:
+            # Navigation/Star selection may change while the worker is busy.
+            # Never paint an old selection under a newer one, or fall back to
+            # a blocking Qt Store lookup for a mismatched archived pin.
+            if (_idle_snapshot["selected_id"]!=str(self._selected_id or "")
+                    or _idle_snapshot["archive_pin_id"]!=str(self._archive_selection_id or "")
+                    or _idle_snapshot["explicit_selection_id"]!=str(self._explicit_feed_selection_id or "")):
+                self._schedule_evidence_refresh()
+                return
             # _apply_idle_snapshot has already probed the revision, but a
             # collector can acquire Store._lock between that probe and this
             # call. Never make a SECOND blocking Store read on the Qt thread.
@@ -1468,7 +1493,8 @@ class MainWindow(SituationActions, QMainWindow):
                 elif all(str(e.get("id"))!=pin for e in self._events):
                     # Preserve one explicitly navigated older event on an
                     # evidence refresh, with current (not cached) source bytes.
-                    pinned=self.controller.event(pin)
+                    pinned=(self.controller.event(pin) if _idle_snapshot is None
+                            else _idle_snapshot["selected_event"])
                     if pinned:
                         self._events=[pinned]+list(self._events[:499])
                     else:
@@ -1491,7 +1517,8 @@ class MainWindow(SituationActions, QMainWindow):
             if (self._selected_id and self._selected_id==self._explicit_feed_selection_id
                     and not self._archive_selection_id and not self._feed_explicitly_cleared
                     and all(str(e.get("id"))!=self._selected_id for e in self._events)):
-                pinned=self.controller.event(self._selected_id)
+                pinned=(self.controller.event(self._selected_id)
+                        if _idle_snapshot is None else _idle_snapshot["selected_event"])
                 if pinned:
                     self._events=[pinned]+list(self._events[:499])
                     self._archive_selection_id=self._selected_id
@@ -1563,10 +1590,14 @@ class MainWindow(SituationActions, QMainWindow):
             cap=" · map limit 5,000; narrow filters" if len(self.world_map.events)>=5000 else ""
             self.count_label.setText(f"{count} feed events · "+self.world_map.coverage_summary()+suffix+cap)
             if self._selected_id:
-                selected=self._selected_event()
+                selected=(self._selected_event() if _idle_snapshot is None
+                          else _idle_snapshot["selected_event"])
                 if selected:self._render_event(
                     selected, english_enabled=(_idle_snapshot["english_headlines_enabled"]
-                                               if _idle_snapshot is not None else None))
+                                               if _idle_snapshot is not None else None),
+                    starred_override=(
+                        self._selected_id in _idle_snapshot["saved_situation_ids"]
+                        if _idle_snapshot is not None else None))
                 else:self._render_empty_brief()
             else:self._render_empty_brief()
             page=self.pages.currentIndex()
