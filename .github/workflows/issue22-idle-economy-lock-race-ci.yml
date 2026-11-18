@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 4f1ba3e6d822904a565eb0c9d0bfd65a2014b805 HEAD
-          git diff --name-only 10dfd242f0fa2551530a50304b47e819572858b8 HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-economy-lock-race-ci.yml','global_pulse/ui.py','tests/test_issue22_idle_economy_lock_race.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 4f1ba3e6d822904a565eb0c9d0bfd65a2014b805 HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-economy-lock-race-ci.yml','global_pulse/ui.py','tests/test_issue22_idle_economy_lock_race.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native hosted Windows Qt
         if: runner.os == 'Windows'
         shell: bash
