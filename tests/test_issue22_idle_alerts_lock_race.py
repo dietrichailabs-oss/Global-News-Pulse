@@ -197,3 +197,67 @@ def test_stale_alert_worker_result_never_repaints_previous_history(tmp_path):
         assert window.alert_list.item(0).data(Qt.ItemDataRole.UserRole)["read"] is True
     finally:
         _close(app, window, controller)
+
+
+def test_passive_alert_with_own_title_does_not_lookup_every_event_on_qt(tmp_path):
+    """Ordinary persisted alerts already carry a title; passive Qt must not
+    open the full event record for each row after its nonblocking lock probe."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    window = None
+    try:
+        _synthetic_alert(controller)
+        window = MainWindow(controller)
+        _ready(window)
+        window._start_idle_alert_snapshot()
+        _await_worker(app, window)
+        window._workspace_warm_timer.stop()
+        # Before the fix, _populate_alerts performed controller.event for EVERY
+        # row even when row["title"] was populated. This is a genuine SQLite
+        # read that could wait for the collector while Qt was idle.
+        with patch.object(controller.store, "get_event",
+                          side_effect=AssertionError("passive Qt read full event")):
+            assert window._populate_alerts(idle=True)
+        assert window.alert_list.count() == 1
+        assert window.alert_list.item(0).text().startswith("FICTIONAL offline alert")
+    finally:
+        _close(app, window, controller)
+
+
+def test_legacy_alert_title_resolves_on_worker_not_qt_and_preserves_body(tmp_path):
+    """Historical title-less alerts keep their real event title, but the
+    archived-event lookup is off the main thread and never persisted as fact."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    window = None
+    try:
+        _synthetic_alert(controller)
+        legacy = dict(controller.store.list_alerts()[0])
+        legacy.pop("title")
+        original_get_event = controller.store.get_event
+        worker_threads = []
+
+        def read_from_worker(identifier):
+            worker_threads.append(threading.current_thread().name)
+            assert threading.current_thread() is not threading.main_thread()
+            return original_get_event(identifier)
+
+        window = MainWindow(controller)
+        _ready(window)
+        with patch.object(controller.store, "list_alerts", return_value=[legacy), \\
+             patch.object(controller.store, "get_event", side_effect=read_from_worker):
+            window._start_idle_alert_snapshot()
+            _await_worker(app, window)
+        assert worker_threads and all(name == "pulse-idle-alerts" for name in worker_threads)
+        window._workspace_warm_timer.stop()
+        assert window._deferred_alert_rows[0]["_idle_display_title"] == "FICTIONAL offline alert"
+        # No SQL/event lookup permitted during Qt rendering after a successful
+        # worker result; missing fields cannot silently erase the historic title.
+        with patch.object(controller.store, "get_event",
+                          side_effect=AssertionError("Qt legacy alert event lookup")):
+            assert window._populate_alerts(idle=True)
+        assert window.alert_list.item(0).text().startswith("FICTIONAL offline alert")
+        assert controller.store.list_alerts()[0].get("title") == "FICTIONAL offline alert"
+        assert "_idle_display_title" not in controller.store.list_alerts()[0]
+    finally:
+        _close(app, window, controller)

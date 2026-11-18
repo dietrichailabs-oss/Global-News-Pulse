@@ -1450,7 +1450,26 @@ class MainWindow(SituationActions, QMainWindow):
             result={}
             try:
                 result["revision_before"]=store.content_revision()
-                result["rows"]=store.list_alerts()
+                # Legacy alerts can omit a title. Resolve that archived title
+                # on the Store worker, never inside Qt's passive list repaint.
+                # Modern persisted alerts already carry their own title and
+                # need no extra event lookup at all.
+                rows=store.list_alerts()
+                result["rows"]=[]
+                for alert in rows:
+                    row=dict(alert)
+                    if not row.get("title"):
+                        embedded=row.get("event")
+                        if isinstance(embedded,dict):
+                            event=embedded
+                        elif row.get("event_id"):
+                            event=store.get_event(str(row["event_id"])) or {}
+                        else:
+                            event={}
+                        # UI-only display hint; original alert body/ID and
+                        # event provenance stay unchanged in persisted storage.
+                        row["_idle_display_title"]=event.get("title") or "Event alert"
+                    result["rows"].append(row)
                 result["revision_after"]=store.content_revision()
             except Exception as error:
                 result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
@@ -2308,8 +2327,16 @@ class MainWindow(SituationActions, QMainWindow):
         self.notification_label.setText(str(getattr(self.controller,"notification_status","Native notification status unavailable.")))
         self.alert_list.clear()
         for a in alerts:
-            event=a.get("event") if isinstance(a.get("event"),dict) else self.controller.event(a.get("event_id","")) or {}
-            title=a.get("title") or event.get("title") or "Event alert"
+            title=a.get("title")
+            if not title:
+                if idle:
+                    # Worker-resolved legacy title; never query Store on Qt
+                    # even if the collector took its RLock after validation.
+                    title=a.get("_idle_display_title") or "Event alert"
+                else:
+                    event=(a.get("event") if isinstance(a.get("event"),dict)
+                           else self.controller.event(a.get("event_id","")) or {})
+                    title=event.get("title") or "Event alert"
             item=QListWidgetItem(f"{title}\n{a.get('reason','Material development')}\n{timestamp(a.get('created_at') or a.get('timestamp'))}");item.setData(Qt.ItemDataRole.UserRole,a);self.alert_list.addItem(item)
         return True
 
