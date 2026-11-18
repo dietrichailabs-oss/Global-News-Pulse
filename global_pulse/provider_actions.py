@@ -113,8 +113,21 @@ def populate_sources(window):
     selected_id = (current.data(Qt.ItemDataRole.UserRole) or {}).get("id") if current else None
     enabled = _effective(window)
     catalog = list(window.controller.catalog)
-    old_rows = _existing_source_rows(table)
     fingerprint = _catalog_fingerprint(catalog)
+    # Status-only signals often repeat with no persisted source or registry
+    # change. A full 10-column Qt table reconciliation in an idle timer can
+    # stall the GUI even when every displayed value is identical. Use the
+    # Store's same-connection + external-connection mutation revision to skip
+    # unchanged work, never a time-based cache that could hide a real failure.
+    # Catalog, enabled-source settings and monitoring state are independent
+    # parts of the visible contract and must also invalidate this fast path.
+    store_revision = window.controller.store.content_revision()
+    render_key = (store_revision, fingerprint, frozenset(enabled),
+                  bool(window.controller.monitoring))
+    if (getattr(window, "_source_status_render_key", None) == render_key
+            and table.rowCount() == len(catalog)):
+        return
+    old_rows = _existing_source_rows(table)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
     blocked = table.blockSignals(True)
@@ -200,6 +213,13 @@ def populate_sources(window):
     finally:
         table.setSortingEnabled(sorting)
         table.blockSignals(blocked)
+    # A Store write may occur while the table is being rendered. In that
+    # case do not bless a mixed status snapshot as current: the next
+    # coalesced source-status signal must be allowed to reconcile it.
+    window._source_status_render_key = (
+        render_key if window.controller.store.content_revision() == store_revision
+        else None
+    )
     if selected_row is not None and not reuse:
         source_selected(window)
 
