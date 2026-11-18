@@ -1322,9 +1322,9 @@ class MainWindow(SituationActions, QMainWindow):
             return
         if (snapshot["generation"]!=self._idle_snapshot_generation
                 or snapshot["scope"]!=self._archive_scope_key()
-                or snapshot["selected_id"]!=str(self._selected_id or "")
-                or snapshot["archive_pin_id"]!=str(self._archive_selection_id or "")
-                or snapshot["explicit_selection_id"]!=str(self._explicit_feed_selection_id or "")):
+                or snapshot.get("selected_id",str(self._selected_id or ""))!=str(self._selected_id or "")
+                or snapshot.get("archive_pin_id",str(self._archive_selection_id or ""))!=str(self._archive_selection_id or "")
+                or snapshot.get("explicit_selection_id",str(self._explicit_feed_selection_id or ""))!=str(self._explicit_feed_selection_id or "")):
             # User actions have their own immediate refresh; stale worker
             # completion must never roll back a newer filter or selection.
             if snapshot.get("brief_pending"):
@@ -1424,9 +1424,9 @@ class MainWindow(SituationActions, QMainWindow):
             # Navigation/Star selection may change while the worker is busy.
             # Never paint an old selection under a newer one, or fall back to
             # a blocking Qt Store lookup for a mismatched archived pin.
-            if (_idle_snapshot["selected_id"]!=str(self._selected_id or "")
-                    or _idle_snapshot["archive_pin_id"]!=str(self._archive_selection_id or "")
-                    or _idle_snapshot["explicit_selection_id"]!=str(self._explicit_feed_selection_id or "")):
+            if (_idle_snapshot.get("selected_id",str(self._selected_id or ""))!=str(self._selected_id or "")
+                    or _idle_snapshot.get("archive_pin_id",str(self._archive_selection_id or ""))!=str(self._archive_selection_id or "")
+                    or _idle_snapshot.get("explicit_selection_id",str(self._explicit_feed_selection_id or ""))!=str(self._explicit_feed_selection_id or "")):
                 self._schedule_evidence_refresh()
                 return
             # _apply_idle_snapshot has already probed the revision, but a
