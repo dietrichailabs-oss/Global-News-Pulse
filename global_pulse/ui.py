@@ -1126,6 +1126,10 @@ class MainWindow(SituationActions, QMainWindow):
             try:
                 store=controller.store
                 before=store.content_revision()
+                # Archive selector metadata is two DISTINCT SQLite scans. The
+                # idle collector path must not run either one on the Qt thread
+                # after splash; include them in the same revision-checked worker.
+                result["filter_options"]=controller.event_filter_options()
                 result["feed"]=controller.events(**filters)
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
@@ -1293,7 +1297,8 @@ class MainWindow(SituationActions, QMainWindow):
             visible_ids={str(event.get("id","")) for event in self._events}
             if self._selected_id and self._selected_id not in visible_ids:
                 self._selected_id=""
-            self._populate_filter_options()
+            self._populate_filter_options(
+                None if _idle_snapshot is None else _idle_snapshot["filter_options"])
             self._sync_map_controls()
             map_filters={**filters,"limit":5000,"map_view":True,"keep_significant":not bool(self._history_at)}
             country_evidence=(self.controller.events(**dict(map_filters,map_evidence=True))
@@ -1361,8 +1366,12 @@ class MainWindow(SituationActions, QMainWindow):
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
 
-    def _populate_filter_options(self):
-        options=self.controller.event_filter_options()
+    def _populate_filter_options(self, options=None):
+        # Explicit/filter refreshes retain synchronous semantics; validated
+        # idle snapshots use the worker-read, same-revision selector metadata.
+        # Preserve a now-missing *selected* value below (never broaden to All).
+        if options is None:
+            options=self.controller.event_filter_options()
         for combo,key,all_title in ((self.category,"category","All categories"),(self.region,"region","All regions")):
             current=combo.currentData() or ""
             # Explicit filters must never broaden because a feed page changes or
