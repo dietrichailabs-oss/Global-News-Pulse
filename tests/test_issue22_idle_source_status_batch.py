@@ -85,6 +85,8 @@ def test_no_click_hidden_source_warm_uses_single_batch_and_keeps_freshness(tmp_p
                   "last_success": "2026-11-18T02:00:00+00:00"})
         _warm(window)
         row = _existing_source_rows(window.source_table)[sid]
-        assert window.source_table.item(row, 3).text() == "Last check succeeded"
+        # A successful connection cannot fabricate publication freshness.
+        assert window.source_table.item(row, 3).text() == (
+            "Last check succeeded; publication freshness unknown")
     finally:
         _close(app, window, controller)
