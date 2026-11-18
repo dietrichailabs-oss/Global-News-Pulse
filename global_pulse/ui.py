@@ -987,7 +987,12 @@ class MainWindow(SituationActions, QMainWindow):
         if self.controller.store.content_revision_if_available() is None:
             self._workspace_warm_timer.start(250)
             return
-        if page==2:
+        if page==1:
+            # Passive Situation Room rendering cannot wait on collector SQLite.
+            if not self._populate_situations(idle=True):
+                self._workspace_warm_timer.start(250)
+                return
+        elif page==2:
             # Economy prewarm is passive. The first lock probe can race the
             # collector, so consume only its already-validated worker snapshot.
             # No hidden tab may wait on a second Store read on the Qt thread.
@@ -1257,6 +1262,8 @@ class MainWindow(SituationActions, QMainWindow):
                 # refresh. Capture both on this Store worker before the final
                 # revision check; Qt must not race a subsequent collector lock.
                 result["saved_situation_ids"]=tuple(sorted(store.saved_situation_ids()))
+                # Preserve all saved historical records on the same Store worker.
+                result["situation_rows"]=store.list_situations()
                 result["english_headlines_enabled"]=(
                     controller.get_setting("english_headlines",True) is True)
                 # This expensive, pure source/date/corroboration classification
@@ -1491,6 +1498,10 @@ class MainWindow(SituationActions, QMainWindow):
             self._deferred_brief_events=None
             self._deferred_brief_period=None
             self._deferred_brief_revision=None
+            self._deferred_situation_rows=(
+                _idle_snapshot["situation_rows"] if _idle_snapshot is not None else None)
+            self._deferred_situation_revision=(
+                _idle_snapshot["revision_after"] if _idle_snapshot is not None else None)
             # An archive/economy evidence revision cannot by itself change
             # source checkpoint state or catalog metadata. The dedicated
             # source_status_changed signal marks Sources dirty when needed.
@@ -1624,7 +1635,9 @@ class MainWindow(SituationActions, QMainWindow):
                 else:self._render_empty_brief()
             else:self._render_empty_brief()
             page=self.pages.currentIndex()
-            if page==1:self._populate_situations()
+            if page==1:self._populate_situations(
+                _idle_snapshot["situation_rows"] if _idle_snapshot is not None
+                else None)
             elif page==2:self._populate_economy(
                 _idle_snapshot["economy_observations"] if _idle_snapshot is not None
                 else observations if show_observations else None)
@@ -2074,8 +2087,23 @@ class MainWindow(SituationActions, QMainWindow):
         if self._selected_id:
             self._set_situation_star(self._selected_id, True)
 
-    def _populate_situations(self):
-        self._refresh_saved_situations()
+    def _populate_situations(self, saved_rows=None, *, idle=False):
+        if idle:
+            # Prior RLock precheck is NOT a lease: collection can enter
+            # before this widget is populated. No passive Qt Store SQL.
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                return False
+            saved_rows=getattr(self,"_deferred_situation_rows",None)
+            if (saved_rows is None
+                    or revision!=getattr(self,"_deferred_situation_revision",None)):
+                # Preserve pending list/selection; never invent retained stars.
+                self._schedule_evidence_refresh()
+                return False
+        self._deferred_situation_rows=None
+        self._deferred_situation_revision=None
+        self._refresh_saved_situations(saved_rows=saved_rows)
+        return True
 
     def _visit_situation(self,item):
         event_id=item.data(Qt.ItemDataRole.UserRole);result=self.controller.store.visit_situation(event_id);event=self.controller.event(event_id) or {}
