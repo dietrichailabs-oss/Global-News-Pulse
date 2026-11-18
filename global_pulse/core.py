@@ -749,6 +749,10 @@ class Store:
         self._closed = False
         self.last_ingest_errors: list[dict] = []
         self.last_previous_events: dict[str, dict] = {}
+        # Bounded, read-through current Economy evidence. No source content
+        # leaves the process; every Store write or external SQLite commit
+        # changes the exact token. Serialized data yields independent callers.
+        self._observation_cache: tuple[tuple[int, int], str] | None = None
         self._conn = sqlite3.connect(self.path, timeout=15, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         if self._conn.execute("PRAGMA page_count").fetchone()[0] == 0:
@@ -1721,6 +1725,16 @@ class Store:
             where.append("country=?")
             params.append(country)
         with self._lock:
+            # SQLite's data_version includes other connections' committed
+            # writes, while total_changes covers this Store's own changes.
+            # A cached current observation read is valid ONLY at this exact
+            # token. Source corrections, retention and withdrawals all alter
+            # it. Filtered queries deliberately retain their existing SQL.
+            token = (self._conn.total_changes,
+                     int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+            if (not indicator and not country and self._observation_cache
+                    and self._observation_cache[0] == token):
+                return json.loads(self._observation_cache[1])
             sql = "SELECT id,body FROM observations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY observation_date DESC,country LIMIT 10000"
             rows = self._conn.execute(sql, params).fetchall()
             # Old code issued one separate revision SELECT per observation:
@@ -1748,6 +1762,23 @@ class Store:
                 body["revision_count"] = len(revisions)
                 body["previous_value"] = revisions[-2]["value"] if len(revisions) > 1 else None
                 result.append(body)
+            if not indicator and not country:
+                # Cache at most a bounded serialized snapshot. The first read
+                # occurs during the non-dismissable startup splash; subsequent
+                # post-collection no-op signals do not re-run thousands of
+                # SQLite history lookups merely to paint identical Economy.
+                # Re-check after reading to avoid caching an external commit
+                # that overlapped the read.
+                ending = (self._conn.total_changes,
+                          int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+                if ending == token and len(result) <= 5000:
+                    encoded = _json(result)
+                    self._observation_cache = (
+                        (token, encoded) if len(encoded.encode("utf-8")) <= 4_000_000
+                        else None
+                    )
+                else:
+                    self._observation_cache = None
             return result
 
     def prune(self, retention_days: int = 365, now: str | None = None) -> dict:

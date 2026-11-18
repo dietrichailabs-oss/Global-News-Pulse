@@ -260,6 +260,36 @@ def test_idle_feed_cache_rejects_source_change_scope_and_backward_cutoff(tmp_pat
         store.close()
 
 
+
+def test_observation_readthrough_cache_preserves_corrections_and_independence(tmp_path):
+    """Exact revision token permits memoization, never stale Economy source."""
+    store=Store(tmp_path / "observation-cache.sqlite", mode="synthetic")
+    try:
+        original=_observations(4)
+        assert store.put_observations(original) == 4
+        first=store.list_observations()
+        assert store._observation_cache is not None
+        token=store._observation_cache[0]
+        again=store.list_observations()
+        assert first==again
+        assert again is not first and again[0] is not first[0]
+        again[0]["value"] = -99999
+        if again[0]["revisions"]:
+            again[0]["revisions"][0]["value"] = -99999
+        assert store.list_observations()==first
+        correction={**original[0],"value":original[0]["value"]+9}
+        assert store.put_observations([correction]) == 1
+        changed=store.list_observations()
+        assert store._observation_cache is not None
+        assert store._observation_cache[0] != token
+        assert changed != first
+        assert changed==store.list_observations()
+        assert store.list_observations(country="Test Country 000") == [
+            item for item in changed if item["country"]=="Test Country 000"]
+    finally:
+        store.close()
+
+
 def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     """Do not click a tab or open YouTube during the measured idle window."""
     app = QApplication.instance() or QApplication([])
