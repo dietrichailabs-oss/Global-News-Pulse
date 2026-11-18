@@ -944,6 +944,12 @@ class MainWindow(SituationActions, QMainWindow):
             if self.pages.currentIndex() != previous_page:
                 self.open_page(previous_page)
             self.setEnabled(was_enabled)
+            # This disabled-window traversal is splash-owned geometry/first
+            # paint work, NOT a user tab click. Retaining its navigation stamp
+            # artificially delayed the first real no-click collector update
+            # by another 1.8s after READY. Any subsequent real open_page()
+            # will establish its own full user-navigation cooldown.
+            self._last_navigation_at=0.0
 
     def _schedule_workspace_warm(self):
         if (self._background_warm_enabled and self._dirty_pages
