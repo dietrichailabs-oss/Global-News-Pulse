@@ -1161,7 +1161,7 @@ class MainWindow(SituationActions, QMainWindow):
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
                 result["filter_options"]=controller.event_filter_options()
-                result["feed"]=controller.events(**filters)
+                result["feed"]=controller.events(**dict(filters, bulk_feed=True))
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
                 result["map_events"]=controller.events(**map_filters)

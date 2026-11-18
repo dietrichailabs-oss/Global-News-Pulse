@@ -223,6 +223,44 @@ class _TimedStoreLock:
         self.release()
 
 
+
+def test_bounded_idle_feed_batch_preserves_exact_stored_source_evidence(tmp_path):
+    """Compare the production feed batch against the original full projection."""
+    from datetime import timedelta
+
+    store = Store(tmp_path / "batch-feed.sqlite", mode="synthetic")
+    try:
+        reports = _reports(330)
+        reports[7]["published_at"] = (
+            datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        reports[9]["event_key"] = reports[8]["event_key"]
+        reports[9]["correction_of"] = reports[8]["id"]
+        reports[9]["title"] = "SYNTHETIC corrected event 008"
+        assert len(store.ingest(reports)) >= 320
+        baseline = store.list_events(limit=500)
+        actual = store.list_events(limit=500, bulk_feed=True)
+        assert actual == baseline, "The bulk feed changed report/timeline evidence"
+        # Check bounded SQL paging as well as region and category selection.
+        assert store.list_events(limit=129, bulk_feed=True) == store.list_events(limit=129)
+        assert store.list_events(category="Conflict", bulk_feed=True) == (
+            store.list_events(category="Conflict"))
+        assert store.list_events(region="Global", bulk_feed=True) == (
+            store.list_events(region="Global"))
+        # An older policy record must take the full historical source fallback,
+        # not silently reuse an unqualified fast-path classification.
+        old_id = baseline[0]["id"]
+        with store._lock, store._conn:
+            row = store._conn.execute(
+                "SELECT body FROM events WHERE id=?", (old_id,)).fetchone()
+            body = json.loads(row["body"])
+            body["evidence_policy_version"] = 1
+            store._conn.execute("UPDATE events SET body=? WHERE id=?",
+                                (json.dumps(body), old_id))
+        assert store.list_events(limit=500, bulk_feed=True) == store.list_events(limit=500)
+    finally:
+        store.close()
+
+
 def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     """Do not click a tab or open YouTube during the measured idle window."""
     app = QApplication.instance() or QApplication([])

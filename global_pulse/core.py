@@ -1240,10 +1240,98 @@ class Store:
         with self._lock:
             return self._get_event_unlocked(event_id, at)
 
+
+    def _current_feed_batch_unlocked(self, ids: list[str]) -> list[dict]:
+        """Hydrate one *bounded current* feed page with bulk SQLite reads.
+
+        The former 500-event idle feed issued multiple SQLite calls per event
+        while holding the Store lock. Under active Qt timer/GIL scheduling,
+        the unchanged 820-event no-click fixture measured a 2.4-2.5 second
+        lock hold, compared to 53-65ms before GUI timers started. Read current
+        reports and immutable revisions in 128-event batches instead. Preserve
+        every report, correction, timestamp, and timeline field, and delegate
+        legacy, deferred/future, and merged-source cases to the exact original
+        event projection. Explicit user/historical reads keep their old path.
+        """
+        if not ids:
+            return []
+        if len(ids) > 128:
+            raise ValueError("Current feed batch exceeds bounded 128-event page")
+        marks = ",".join("?" for _ in ids)
+        events = {r["id"]: r for r in self._conn.execute(
+            "SELECT id,body,revision FROM events WHERE id IN (" + marks + ")", ids)}
+        reports_by_event: dict[str, list[dict]] = defaultdict(list)
+        for r in self._conn.execute(
+                "SELECT event_id,body FROM reports WHERE event_id IN ("
+                + marks + ") ORDER BY event_id,published_at,record_key", ids):
+            reports_by_event[r["event_id"]].append(json.loads(r["body"]))
+        revisions_by_event: dict[str, list[dict]] = defaultdict(list)
+        for r in self._conn.execute(
+                "SELECT event_id,at,revision,body FROM event_revisions "
+                "WHERE event_id IN (" + marks
+                + ") ORDER BY event_id,revision", ids):
+            revisions_by_event[r["event_id"]].append(dict(r))
+        result = []
+        for event_id in ids:
+            row = events.get(event_id)
+            if row is None:
+                continue
+            event = json.loads(row["body"])
+            source_reports = reports_by_event.get(event_id, [])
+            revisions = [r for r in revisions_by_event.get(event_id, ())
+                         if r["revision"] <= row["revision"]]
+            # The earlier read path is the authority for unusual histories,
+            # pending notices, missing/mismatched source bodies, and aliases.
+            # Fast-path only a complete, current policy-2/3 snapshot.
+            use_exact = (
+                type(event.get("evidence_policy_version")) is not int
+                or not 2 <= event["evidence_policy_version"] <= 3
+                or event.get("merged_source_events")
+                or type(event.get("report_count")) is not int
+                or event["report_count"] != len(source_reports)
+                or not revisions
+                or any(_report_is_future(r, event["updated_at"])
+                       for r in source_reports)
+            )
+            if not use_exact:
+                parsed_revisions = [json.loads(r["body"]) for r in revisions]
+                use_exact = any(
+                    type(saved.get("event", {}).get("evidence_policy_version")) is not int
+                    or saved["event"]["evidence_policy_version"] < 2
+                    or saved["event"]["evidence_policy_version"] > 3
+                    for saved in parsed_revisions
+                )
+            if use_exact:
+                original = self._get_event_unlocked(event_id)
+                if original is not None:
+                    result.append(original)
+                continue
+            for report in source_reports:
+                report["future_dated"] = _report_is_future(report, event["updated_at"])
+                report["expired"] = is_expired(report, event["updated_at"])
+            _, event["reports"] = _evidence_reports(source_reports, event["updated_at"])
+            event["timeline"] = []
+            for revision, saved in zip(revisions, parsed_revisions):
+                snapshot = saved["event"]
+                event["timeline"].append({
+                    "at": revision["at"], "timestamp": revision["at"],
+                    "revision": revision["revision"],
+                    "recorded_verification": snapshot.get("verification"),
+                    "title": snapshot["title"], "verification": snapshot["verification"],
+                    "severity": snapshot["severity"],
+                    "changes": snapshot.get("changes", []),
+                    "description": "; ".join(
+                        f"{c['publisher']}: {c['kind']} — {c['title']}"
+                        for c in snapshot.get("changes", [])),
+                })
+            event["linked_event_histories"] = {}
+            result.append(event)
+        return result
+
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
-                    map_evidence: bool = False) -> list[dict]:
+                    map_evidence: bool = False, bulk_feed: bool = False) -> list[dict]:
         map_view = bool(map_view or map_evidence)
         # map_evidence retains country/area/unlocated records without inventing points.
         # Map membership is independent of the bounded text-feed page. Explicit
@@ -1334,6 +1422,15 @@ class Store:
                             break
                 finally:
                     cursor.close()
+            elif bulk_feed and not map_view:
+                # Use only for the idle worker's current feed: no historical
+                # reconstruction, no changed query semantics, no lazy evidence.
+                ids = [r[0] for r in self._conn.execute(
+                    sql + " LIMIT ?", [*params, limit])]
+                result = []
+                for start in range(0, len(ids), 128):
+                    result.extend(self._current_feed_batch_unlocked(
+                        ids[start:start + 128]))
             else:
                 result = [(json.loads(row[0]) if map_view else self._get_event_unlocked(row[0]))
                           for row in self._conn.execute(sql + " LIMIT ?", [*params, limit])]
