@@ -176,11 +176,18 @@ def test_stale_alert_worker_result_never_repaints_previous_history(tmp_path):
         assert controller.store.content_revision() != revision
         window._deferred_alert_rows = rows
         window._deferred_alert_revision = revision
+        # Stub only the worker *start* while checking the Qt code path;
+        # otherwise a background thread could race this temporary patch and
+        # accidentally receive the GUI-only AssertionError.
+        requested = []
         with patch.object(controller.store, "list_alerts",
-                          side_effect=AssertionError("Qt stale alert SQL")):
+                          side_effect=AssertionError("Qt stale alert SQL")), \
+             patch.object(window, "_start_idle_alert_snapshot",
+                          side_effect=lambda: requested.append(True)):
             assert window._populate_alerts(idle=True) is False
             assert window.alert_list.count() == 0
-        assert window._idle_alerts_inflight
+        assert requested == [True]
+        window._start_idle_alert_snapshot()
         _await_worker(app, window)
         window._workspace_warm_timer.stop()
         with patch.object(controller.store, "list_alerts",
