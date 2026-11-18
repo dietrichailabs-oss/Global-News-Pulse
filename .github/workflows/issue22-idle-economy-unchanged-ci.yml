@@ -1,0 +1,62 @@
+name: Issue22 Idle Economy Unchanged Evidence Engineering
+on:
+  push:
+    branches: [eng/issue22-idle-economy-unchanged-snapshot-20261118]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qt:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Verify exact tested parent and four-path isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 653be2191553644e4026c25caae5aab80d4bf353 HEAD
+          git diff --name-only 653be2191553644e4026c25caae5aab80d4bf353 HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-economy-unchanged-ci.yml','global_pulse/ui.py','tests/test_issue22_idle_economy_same_evidence.py','tests/test_issue22_startup_idle_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Native hosted Windows Qt platform
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Real Qt 3,200-row Economy no-click + inherited idle regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse tests/test_issue22_idle_economy_same_evidence.py
+          python -m pytest -s -q --tb=short tests/test_issue22_idle_economy_same_evidence.py tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_collector_snapshot.py tests/test_issue22_idle_brief_worker.py tests/test_issue22_idle_source_status_batch.py tests/test_issue22_idle_source_status_noop.py
+      - name: Verify tracked tree clean
+        if: always()
+        shell: bash
+        run: git diff --exit-code

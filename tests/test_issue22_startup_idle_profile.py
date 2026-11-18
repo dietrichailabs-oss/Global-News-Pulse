@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
+import threading
 import time
 from collections import defaultdict
 from contextlib import ExitStack
@@ -162,7 +163,12 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     controller = Controller(tmp_path, demo=True)
     window = splash = None
     phase = {"value": "startup"}
+    # The old profile counted worker-thread SQL in a dictionary labelled
+    # "synchronous_main_thread_operations". That mislabeled a slow worker read
+    # as a Qt event-loop stall; keep the measured timings but split ownership.
+    gui_thread_id = threading.get_ident()
     methods = defaultdict(list)
+    worker_methods = defaultdict(list)
 
     def trace_method(cls, name, stack):
         original = getattr(cls, name)
@@ -174,7 +180,9 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             finally:
                 label = (name if cls in (MainWindow, EconomicChart, EconomicTableModel)
                          else cls.__name__ + "." + name)
-                methods[phase["value"] + ":" + label].append(
+                bucket = (methods if threading.get_ident() == gui_thread_id
+                          else worker_methods)
+                bucket[phase["value"] + ":" + label].append(
                     (time.perf_counter() - started) * 1000
                 )
         stack.enter_context(patch.object(cls, name, timed))
@@ -246,11 +254,22 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 "synchronous_main_thread_operations": {
                     key: _stats(samples) for key, samples in sorted(methods.items())
                 },
+                "background_worker_operations": {
+                    key: _stats(samples) for key, samples in sorted(worker_methods.items())
+                },
             }
             print("PULSE_STARTUP_IDLE_PROFILE=" + json.dumps(result, sort_keys=True), flush=True)
             assert len(heartbeat) >= 40, "Main-thread heartbeat did not run"
             assert methods["idle:_refresh_evidence_when_idle"], "No collector-triggered idle evidence revision"
             assert methods["idle:refresh_data"], "No real idle full refresh after collector signals"
+            # A no-click post-splash source update may read SQLite on its own
+            # worker, never block the Qt GUI thread with these archive scans.
+            assert not methods.get("idle:Store.list_observations"), (
+                "No-click Economy observations queried synchronously on Qt")
+            assert not methods.get("idle:Store.list_events"), (
+                "No-click archive events queried synchronously on Qt")
+            assert worker_methods.get("idle:Store.list_observations"), (
+                "Did not exercise the actual background observations path")
             assert not controller.monitoring
             assert window.media.camera.camera is None
     finally:
