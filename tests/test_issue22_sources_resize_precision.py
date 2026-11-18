@@ -134,13 +134,19 @@ def test_evidence_only_idle_does_not_rebuild_sources_or_swallow_status(tmp_path)
         window._collection_refresh_timer.stop()
         window._refresh_source_status_ui()
         assert 3 in window._dirty_pages
-        window._last_navigation_at = time.monotonic() - 3
+        # Real idle scheduler prioritizes Situations/Economy before Sources.
+        # Honor that scheduling order instead of falsely assuming the first
+        # warm callback immediately reaches the provider table.
+        for _ in range(6):
+            if 3 not in window._dirty_pages:
+                break
+            window._last_navigation_at = time.monotonic() - 3
+            window._workspace_warm_timer.stop()
+            window._warm_next_workspace()
         window._workspace_warm_timer.stop()
-        window._warm_next_workspace()
-        window._workspace_warm_timer.stop()
+        assert 3 not in window._dirty_pages, "Queued provider health was not reached"
         row = _existing_source_rows(window.source_table)[sid]
         assert window.source_table.item(row, 3).text() == "Last check failed"
-        assert 3 not in window._dirty_pages
     finally:
         if window is not None:
             window._force_close = True
