@@ -244,8 +244,10 @@ def test_legacy_alert_title_resolves_on_worker_not_qt_and_preserves_body(tmp_pat
 
         window = MainWindow(controller)
         _ready(window)
-        with patch.object(controller.store, "list_alerts", return_value=[legacy), \\
-             patch.object(controller.store, "get_event", side_effect=read_from_worker):
+        with (
+            patch.object(controller.store, "list_alerts", return_value=[legacy]),
+            patch.object(controller.store, "get_event", side_effect=read_from_worker),
+        ):
             window._start_idle_alert_snapshot()
             _await_worker(app, window)
         assert worker_threads and all(name == "pulse-idle-alerts" for name in worker_threads)
