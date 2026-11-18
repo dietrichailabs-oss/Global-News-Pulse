@@ -49,12 +49,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
-      - name: Real Qt lock race, 512-source status, no-click idle and inherited regressions
+      # Cold startup must be measured before a second Qt workstation is made.\n      # The entire same-process suite still runs; no exclusions or timeouts change.\n      - name: Real Qt cold startup, lock race, 512-source status and inherited regressions
         shell: bash
         run: |
           set -euo pipefail
           python -m compileall -q global_pulse tests/test_issue22_sources_resize_precision.py
-          python -m pytest -s -q --tb=short tests/test_issue22_sources_resize_precision.py tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_sources_unrelated_revision.py tests/test_issue22_idle_source_status_batch.py tests/test_issue22_idle_source_status_noop.py tests/test_issue22_idle_brief_worker.py
+          python -m pytest -s -q --tb=short tests/test_issue22_startup_idle_profile.py tests/test_issue22_sources_resize_precision.py tests/test_issue22_idle_sources_unrelated_revision.py tests/test_issue22_idle_source_status_batch.py tests/test_issue22_idle_source_status_noop.py tests/test_issue22_idle_brief_worker.py
       - name: Verify tracked tree clean
         if: always()
         shell: bash
