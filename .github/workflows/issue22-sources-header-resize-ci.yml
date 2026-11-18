@@ -40,12 +40,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Verify PR147 exact parent and three-path isolation
+      - name: Verify PR147 exact parent and four-path isolation
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 42e4f0a03224d5d13949d891de90e77ff0c338fc HEAD
-          git diff --name-only 42e4f0a03224d5d13949d891de90e77ff0c338fc HEAD | python -c "import sys; expected={'.github/workflows/issue22-sources-header-resize-ci.yml','global_pulse/provider_actions.py','tests/test_issue22_sources_resize_precision.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 42e4f0a03224d5d13949d891de90e77ff0c338fc HEAD | python -c "import sys; expected={'.github/workflows/issue22-sources-header-resize-ci.yml','global_pulse/provider_actions.py','tests/test_issue22_sources_resize_precision.py','tests/test_issue22_startup_idle_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native hosted Windows Qt platform
         if: runner.os == 'Windows'
         shell: bash

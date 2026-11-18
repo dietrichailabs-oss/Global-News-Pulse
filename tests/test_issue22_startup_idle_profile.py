@@ -22,6 +22,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import global_pulse.provider_actions as provider_actions
 from global_pulse.__main__ import prepare_initial_dashboard, show_initializing
 from global_pulse.controller import Controller
 from global_pulse.core import Store
@@ -205,9 +206,17 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 trace_method(MainWindow, name, stack)
             for name in ("set_events", "coverage_summary", "_refresh_country_activity"):
                 trace_method(WorldMap, name, stack)
-            for name in ("list_events", "list_observations"):
+            # Determine whether hidden Sources prewarm is waiting for the
+            # Store lock, computing catalog fingerprints or spending time in
+            # Qt row/header layout. No fabricated heartbeat thresholds.
+            for name in ("list_events", "list_observations",
+                         "list_source_states", "content_revision"):
                 trace_method(Store, name, stack)
-            trace_method(Controller, "events", stack)
+            for name in ("events", "get_setting"):
+                trace_method(Controller, name, stack)
+            for name in ("populate_sources", "_catalog_fingerprint",
+                         "_effective", "_existing_source_rows", "capability"):
+                trace_method(provider_actions, name, stack)
             trace_method(EconomicChart, "set_observations", stack)
             trace_method(EconomicTableModel, "set_observations", stack)
             started = time.perf_counter()
