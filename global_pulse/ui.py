@@ -378,6 +378,7 @@ class MainWindow(SituationActions, QMainWindow):
     # thread. No Qt widget, model, WebEngine or painter runs inside that worker.
     _idle_snapshot_ready = Signal(object)
     _idle_brief_ready = Signal(object)
+    _idle_alerts_ready = Signal(object)
     def __init__(self, controller):
         super().__init__()
         self.controller=controller
@@ -399,6 +400,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._refreshing=False
         self._idle_snapshot_inflight=False
         self._idle_brief_inflight=False
+        self._idle_alerts_inflight=False
+        self._deferred_alert_rows=None
+        self._deferred_alert_revision=None
         self._idle_snapshot_generation=0
         # Last source-consistent display, used only if an evidence signal is a
         # no-op for the underlying SQLite revision. Never a TTL or blind cache.
@@ -407,6 +411,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
         self._idle_brief_ready.connect(
             self._apply_idle_brief, Qt.ConnectionType.QueuedConnection)
+        self._idle_alerts_ready.connect(
+            self._apply_idle_alert_snapshot, Qt.ConnectionType.QueuedConnection)
         # Hidden workspaces are populated once per real data revision, not
         # synchronously on every back-and-forth tab switch.
         self._dirty_pages=set(range(1,6))
@@ -999,6 +1005,12 @@ class MainWindow(SituationActions, QMainWindow):
             if not self._populate_economy(idle=True):
                 self._workspace_warm_timer.start(250)
                 return
+        elif page==4:
+            # Alerts can be changed by notification delivery without a new
+            # event/map revision. Never query their SQLite history on Qt idle.
+            if not self._populate_alerts(idle=True):
+                self._workspace_warm_timer.start(250)
+                return
         elif page==5:
             # The initial nonblocking probe above does not reserve the Store
             # lock. Another collector can acquire it before Brief presentation.
@@ -1421,6 +1433,65 @@ class MainWindow(SituationActions, QMainWindow):
         # still available through an explicit user action/next warm.
         self._schedule_workspace_warm()
 
+    def _start_idle_alert_snapshot(self):
+        """Read alert history on a small worker, not the Qt heartbeat thread.
+
+        Notification-only state changes must not force a 5000-event map read.
+        The result is usable only after an exact, nonblocking revision check.
+        """
+        if (self._idle_alerts_inflight or self._force_close
+                or getattr(self.controller,"_closed",False)):
+            return
+        self._idle_alerts_inflight=True
+        store=self.controller.store
+        signal=self._idle_alerts_ready
+
+        def collect_alerts():
+            result={}
+            try:
+                result["revision_before"]=store.content_revision()
+                result["rows"]=store.list_alerts()
+                result["revision_after"]=store.content_revision()
+            except Exception as error:
+                result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+            try:
+                signal.emit(result)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=collect_alerts, name="pulse-idle-alerts",
+                         daemon=True).start()
+
+    @Slot(object)
+    def _apply_idle_alert_snapshot(self, snapshot):
+        """Never wait for a collector RLock just to present alert history."""
+        if self._force_close or getattr(self.controller,"_closed",False):
+            self._idle_alerts_inflight=False
+            return
+        if "error" in snapshot:
+            self._idle_alerts_inflight=False
+            self.status_label.setText("Idle alert refresh failed: "+snapshot["error"])
+            return
+        revision=self.controller.store.content_revision_if_available()
+        if revision is None:
+            # This is still one worker result; retry without creating another.
+            QTimer.singleShot(120,lambda s=snapshot:self._apply_idle_alert_snapshot(s))
+            return
+        self._idle_alerts_inflight=False
+        if (snapshot["revision_before"]!=snapshot["revision_after"]
+                or revision!=snapshot["revision_after"]):
+            # Alert read raced notification/collector writes. Retain the old
+            # list, invalidate the stale result, retry on the next idle turn.
+            self._deferred_alert_rows=None
+            self._deferred_alert_revision=None
+            self._dirty_pages.add(4)
+            self._workspace_warm_timer.start(250)
+            return
+        self._deferred_alert_rows=snapshot["rows"]
+        self._deferred_alert_revision=revision
+        self._dirty_pages.add(4)
+        self._schedule_workspace_warm()
+
     @Slot()
     def _schedule_collected_refresh(self):
         """Queue worker-origin source status to this GUI QObject thread."""
@@ -1635,6 +1706,7 @@ class MainWindow(SituationActions, QMainWindow):
                 else:self._render_empty_brief()
             else:self._render_empty_brief()
             page=self.pages.currentIndex()
+            keep_alert_dirty=False
             if page==1:self._populate_situations(
                 _idle_snapshot["situation_rows"] if _idle_snapshot is not None
                 else None)
@@ -1642,14 +1714,17 @@ class MainWindow(SituationActions, QMainWindow):
                 _idle_snapshot["economy_observations"] if _idle_snapshot is not None
                 else observations if show_observations else None)
             elif page==3 and _idle_snapshot is None:self._populate_sources()
-            elif page==4:self._populate_alerts()
+            elif page==4:
+                if _idle_snapshot is None:self._populate_alerts()
+                elif not self._populate_alerts(idle=True):keep_alert_dirty=True
             elif page==5 and _idle_snapshot is None:
                 self._generate_brief()
             # A fresh collector snapshot must not synchronously query the
             # Brief Store on Qt. Its separately validated worker result will
             # trigger the next hidden/visible workspace prewarm.
             if ((page!=3 or _idle_snapshot is None)
-                    and (page!=5 or _idle_snapshot is None)):
+                    and (page!=5 or _idle_snapshot is None)
+                    and not keep_alert_dirty):
                 self._dirty_pages.discard(page)
             self._schedule_workspace_warm()
             confirmed=self.controller.store.content_revision_if_available()
@@ -2214,13 +2289,29 @@ class MainWindow(SituationActions, QMainWindow):
         from .provider_actions import source_selected
         return source_selected(self)
 
-    def _populate_alerts(self):
+    def _populate_alerts(self, *, idle=False):
+        if idle:
+            # The prior prewarm Store probe is not a lock lease. A collector
+            # can acquire the RLock before any subsequent alert-history query.
+            # A background revision-validated snapshot is the only passive
+            # source of rows. An empty list is valid only when worker-verified.
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                return False
+            alerts=self._deferred_alert_rows
+            if alerts is None or revision!=self._deferred_alert_revision:
+                self._start_idle_alert_snapshot()
+                return False
+        else:
+            # Startup splash and explicit actions retain current-source reads.
+            alerts=self.controller.store.list_alerts()
         self.notification_label.setText(str(getattr(self.controller,"notification_status","Native notification status unavailable.")))
         self.alert_list.clear()
-        for a in self.controller.store.list_alerts():
+        for a in alerts:
             event=a.get("event") if isinstance(a.get("event"),dict) else self.controller.event(a.get("event_id","")) or {}
             title=a.get("title") or event.get("title") or "Event alert"
             item=QListWidgetItem(f"{title}\n{a.get('reason','Material development')}\n{timestamp(a.get('created_at') or a.get('timestamp'))}");item.setData(Qt.ItemDataRole.UserRole,a);self.alert_list.addItem(item)
+        return True
 
     def _open_alert(self,item):
         a=item.data(Qt.ItemDataRole.UserRole)
