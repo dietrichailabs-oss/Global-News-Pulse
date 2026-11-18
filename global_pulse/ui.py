@@ -1217,6 +1217,13 @@ class MainWindow(SituationActions, QMainWindow):
                 result["map_events"]=controller.events(**map_filters)
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
+                # Bookmark markers and headline preference were still fetched
+                # synchronously by _populate_feed on every no-click collector
+                # refresh. Capture both on this Store worker before the final
+                # revision check; Qt must not race a subsequent collector lock.
+                result["saved_situation_ids"]=tuple(sorted(store.saved_situation_ids()))
+                result["english_headlines_enabled"]=(
+                    controller.get_setting("english_headlines",True) is True)
                 # This expensive, pure source/date/corroboration classification
                 # used to run on the GUI thread immediately after the Store
                 # worker returned. Compute it on the same bounded worker;
@@ -1541,7 +1548,12 @@ class MainWindow(SituationActions, QMainWindow):
                                        if _idle_snapshot is not None else None),
             )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
-            self._populate_feed()
+            self._populate_feed(
+                saved_ids=(_idle_snapshot["saved_situation_ids"]
+                           if _idle_snapshot is not None else None),
+                english_enabled=(_idle_snapshot["english_headlines_enabled"]
+                                 if _idle_snapshot is not None else None),
+            )
             self._update_world_overview()
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
@@ -1607,16 +1619,21 @@ class MainWindow(SituationActions, QMainWindow):
                 finally:
                     combo.blockSignals(blocked)
 
-    def _populate_feed(self,*args):
+    def _populate_feed(self,*args,saved_ids=None,english_enabled=None):
         if not hasattr(self,"feed_list"):
             return
-        english_enabled=self.controller.get_setting("english_headlines",True) is True
+        # Explicit user updates preserve their direct Store reads. Validated
+        # collector snapshots instead carry these exact-revision values from
+        # the worker, avoiding two SQLite/RLock waits on the Qt main thread.
+        if english_enabled is None:
+            english_enabled=self.controller.get_setting("english_headlines",True) is True
         if hasattr(self,"english_headlines"):
             was_blocked=self.english_headlines.blockSignals(True)
             self.english_headlines.setChecked(english_enabled)
             self.english_headlines.blockSignals(was_blocked)
         events=list(self._events)
-        saved_ids=self.controller.store.saved_situation_ids()
+        saved_ids=(self.controller.store.saved_situation_ids()
+                   if saved_ids is None else set(saved_ids))
         if self.sort_combo.currentIndex()==1:
             order={"critical":4,"high":3,"moderate":2,"informational":1,"unassessed":0}
             events.sort(key=lambda e:(order.get(e.get("severity"),0),str(e.get("updated_at",""))),reverse=True)
