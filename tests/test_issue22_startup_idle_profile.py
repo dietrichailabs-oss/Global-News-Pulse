@@ -158,6 +158,138 @@ def test_economy_idle_warm_renders_one_model_and_manual_dropdown_wins(tmp_path, 
         _close(app, window, controller)
 
 
+class _TimedStoreLock:
+    """Measure real Store RLock wait/ownership without shortening any test gate.
+
+    The backing lock is unchanged, including reentrance and nonblocking probes.
+    Account for lock hold time only at the outermost release, so worker/GUI
+    contention and expensive in-lock SQL can be distinguished.
+    """
+    def __init__(self, backing, gui_thread, phase):
+        self._backing = backing
+        self._gui_thread = gui_thread
+        self._phase = phase
+        self._ownership = {}
+        self.waits = defaultdict(list)
+        self.holds = defaultdict(list)
+        self.slowest = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        started = time.perf_counter()
+        acquired = self._backing.acquire(blocking, timeout)
+        elapsed = (time.perf_counter() - started) * 1000
+        tid = threading.get_ident()
+        side = "GUI" if tid == self._gui_thread else "worker"
+        key = self._phase["value"] + ":" + side
+        self.waits[key].append(elapsed)
+        if acquired:
+            if tid in self._ownership:
+                began, depth, caller = self._ownership[tid]
+                self._ownership[tid] = (began, depth + 1, caller)
+            else:
+                # Frame inspection is constant-time and avoids logging URLs,
+                # source records, or any private archive content.
+                import sys
+                frame = sys._getframe(1)
+                caller = (frame.f_back.f_code.co_name if frame.f_code.co_name == "__enter__"
+                          else frame.f_code.co_name)
+                self._ownership[tid] = (time.perf_counter(), 1, caller)
+        if elapsed > 20:
+            self.slowest.append({"kind": "wait", "thread": key,
+                                 "ms": round(elapsed, 3)})
+        return acquired
+
+    def release(self):
+        tid = threading.get_ident()
+        began, depth, caller = self._ownership[tid]
+        if depth == 1:
+            elapsed = (time.perf_counter() - began) * 1000
+            key = self._phase["value"] + ":" + (
+                "GUI" if tid == self._gui_thread else "worker")
+            self.holds[key].append(elapsed)
+            if elapsed > 20:
+                self.slowest.append({"kind": "hold", "thread": key,
+                                     "method": caller, "ms": round(elapsed, 3)})
+            del self._ownership[tid]
+        else:
+            self._ownership[tid] = (began, depth - 1, caller)
+        self._backing.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.release()
+
+
+
+def test_idle_feed_cache_rejects_source_change_scope_and_backward_cutoff(tmp_path):
+    """Only an unchanged stored revision may avoid rehydrating source records."""
+    store=Store(tmp_path / "idle-source-cache.sqlite", mode="synthetic")
+    try:
+        assert len(store.ingest(_reports(130))) == 130
+        events=store.list_events(limit=130)
+        before=store.content_revision()
+        old_since=(datetime.now(timezone.utc)-__import__("datetime").timedelta(days=7)).isoformat()
+        newer_since=(datetime.now(timezone.utc)-__import__("datetime").timedelta(days=6)).isoformat()
+        scope=("","", "", 1, 1000)
+        filters={"query":"","category":"","region":"","limit":130,"since":old_since}
+        cache={"revision":before,"scope":scope,"filters":filters,
+               "feed":tuple(events),"filter_options":{"category":[],"region":[]}}
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,filters) == events
+        narrowed={**filters,"since":newer_since}
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,narrowed) == [
+                e for e in events if e["updated_at"] >= newer_since]
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,{**filters,"since":"2000-01-01T00:00:00+00:00"}) is None
+        assert MainWindow._unchanged_source_feed(
+            cache,before,("different",),filters) is None
+        assert MainWindow._unchanged_source_feed(
+            cache,before,scope,{**filters,"category":"Conflict"}) is None
+        # A real Store change must never reuse previous archive evidence.
+        assert store.ingest([{
+            **_reports(1)[0], "id":"new-source-evidence",
+            "event_key":"new-source-evidence",
+        }])
+        assert MainWindow._unchanged_source_feed(
+            cache,store.content_revision(),scope,filters) is None
+    finally:
+        store.close()
+
+
+
+def test_observation_readthrough_cache_preserves_corrections_and_independence(tmp_path):
+    """Exact revision token permits memoization, never stale Economy source."""
+    store=Store(tmp_path / "observation-cache.sqlite", mode="synthetic")
+    try:
+        original=_observations(4)
+        assert store.put_observations(original) == 4
+        first=store.list_observations()
+        assert store._observation_cache is not None
+        token=store._observation_cache[0]
+        again=store.list_observations()
+        assert first==again
+        assert again is not first and again[0] is not first[0]
+        again[0]["value"] = -99999
+        if again[0]["revisions"]:
+            again[0]["revisions"][0]["value"] = -99999
+        assert store.list_observations()==first
+        correction={**original[0],"value":original[0]["value"]+9}
+        assert store.put_observations([correction]) == 1
+        changed=store.list_observations()
+        assert store._observation_cache is not None
+        assert store._observation_cache[0] != token
+        assert changed != first
+        assert changed==store.list_observations()
+        assert store.list_observations(country="Test Country 000") == [
+            item for item in changed if item["country"]=="Test Country 000"]
+    finally:
+        store.close()
+
+
 def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     """Do not click a tab or open YouTube during the measured idle window."""
     app = QApplication.instance() or QApplication([])
@@ -181,6 +313,14 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             finally:
                 label = (name if cls in (MainWindow, EconomicChart, EconomicTableModel)
                          else cls.__name__ + "." + name)
+                # Attribute each real worker read separately: a single slow
+                # Store.list_events aggregate hides whether feed, sourced
+                # country-area projection, or point-map SQL is the bottleneck.
+                # Keep the same timed call and unchanged no-click assertions.
+                if cls in (Store, Controller) and name in ("list_events", "events"):
+                    kind = ("country_evidence" if kwargs.get("map_evidence")
+                            else "point_map" if kwargs.get("map_view") else "feed")
+                    label += ":" + kind
                 bucket = (methods if threading.get_ident() == gui_thread_id
                           else worker_methods)
                 bucket[phase["value"] + ":" + label].append(
@@ -191,6 +331,10 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     try:
         assert len(controller.store.ingest(_reports())) >= 800
         assert controller.store.put_observations(_observations()) == 3200
+        # Instrument the *real* Store lock after fixture ingest. No mocked
+        # archive results, no delay changes and no weakened 7.2s requirement.
+        traced_lock = _TimedStoreLock(controller.store._lock, gui_thread_id, phase)
+        controller.store._lock = traced_lock
         splash = show_initializing(app)
         with ExitStack() as stack:
             for name in (
@@ -210,7 +354,9 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             # Store lock, computing catalog fingerprints or spending time in
             # Qt row/header layout. No fabricated heartbeat thresholds.
             for name in ("list_events", "list_observations",
-                         "list_source_states", "content_revision"):
+                         "list_source_states", "content_revision",
+                         "event_filter_options", "_map_evidence_page_unlocked",
+                         "_get_event_unlocked"):
                 trace_method(Store, name, stack)
             for name in ("events", "get_setting"):
                 trace_method(Controller, name, stack)
@@ -268,6 +414,15 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
                 "background_worker_operations": {
                     key: _stats(samples) for key, samples in sorted(worker_methods.items())
                 },
+                "store_rlock_wait": {
+                    key: _stats(samples) for key, samples in sorted(traced_lock.waits.items())
+                },
+                "store_rlock_outer_hold": {
+                    key: _stats(samples) for key, samples in sorted(traced_lock.holds.items())
+                },
+                "store_rlock_slowest_waits_and_holds": sorted(
+                    traced_lock.slowest, key=lambda x: x["ms"], reverse=True
+                )[:12],
             }
             print("PULSE_STARTUP_IDLE_PROFILE=" + json.dumps(result, sort_keys=True), flush=True)
             assert len(heartbeat) >= 40, "Main-thread heartbeat did not run"

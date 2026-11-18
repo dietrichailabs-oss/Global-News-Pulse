@@ -3,6 +3,7 @@
 This checks exact provider row access and a real Store status transition, not
 physical Windows 11 smoothness or working publisher counts.
 """
+import threading
 import time
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
@@ -148,6 +149,104 @@ def test_evidence_only_idle_does_not_rebuild_sources_or_swallow_status(tmp_path)
         row = _existing_source_rows(window.source_table)[sid]
         assert window.source_table.item(row, 3).text() == "Last check failed"
     finally:
+        if window is not None:
+            window._force_close = True
+            for name in ("_workspace_warm_timer", "_evidence_refresh_timer",
+                         "_collection_refresh_timer", "search_timer"):
+                getattr(window, name).stop()
+            window.media.shutdown()
+            window.close()
+            window.deleteLater()
+        controller.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
+
+def test_no_click_sources_and_snapshot_defer_busy_store_without_losing_status(tmp_path, monkeypatch):
+    """A real worker-held SQLite lock must not become a hidden Qt wait."""
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(tmp_path, demo=True)
+    window = None
+    release = threading.Event()
+    locked = threading.Event()
+    worker = None
+    try:
+        window = MainWindow(controller)
+        window.show()
+        app.processEvents()
+        assert window.prepare_initial_workspaces()
+        window._workspace_warm_timer.stop()
+        sid = next(source["id"] for source in controller.catalog
+                   if capability(source)[0])
+        controller.store.set_source_state(sid, {
+            "status": "error", "error": "SYNTHETIC lock-race failure",
+            "next_poll": "2026-11-18T09:00:00+00:00",
+        })
+        revision = controller.store.content_revision()
+        snapshot = {
+            "generation": window._idle_snapshot_generation,
+            "scope": window._archive_scope_key(),
+            "revision_before": revision, "revision_after": revision,
+            "brief_pending": False,
+        }
+
+        def hold_sqlite_lock():
+            with controller.store._lock:
+                locked.set()
+                release.wait(5)
+
+        worker = threading.Thread(target=hold_sqlite_lock, daemon=True)
+        worker.start()
+        assert locked.wait(5), "The real Store worker never acquired its lock"
+        assert controller.store.content_revision_if_available() is None
+        window._dirty_pages.clear()
+        window._dirty_pages.add(3)
+        window._last_navigation_at = time.monotonic() - 3
+        with patch.object(window, "_populate_sources",
+                          side_effect=AssertionError("Hidden Sources blocked on worker")):
+            start = time.perf_counter()
+            window._warm_next_workspace()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+        assert elapsed_ms < 100, f"Qt waited {elapsed_ms:.1f} ms for a worker lock"
+        assert 3 in window._dirty_pages, "Busy Store dropped a real status update"
+        assert window._workspace_warm_timer.isActive()
+
+        applied = []
+        # Model a real in-flight worker response rather than a free-standing
+        # callback. Busy revision deferral must retain single-flight ownership.
+        window._idle_snapshot_inflight = True
+        with monkeypatch.context() as m:
+            m.setattr(window, "refresh_data",
+                      lambda *args, **kwargs: applied.append(kwargs))
+            start = time.perf_counter()
+            window._apply_idle_snapshot(snapshot)
+            assert (time.perf_counter() - start) * 1000 < 100, (
+                "Idle revision validation blocked on background SQLite")
+            assert not applied, "Busy revision was incorrectly accepted as current"
+            assert window._idle_snapshot_inflight, (
+                "Busy Store allowed a second idle snapshot to start")
+            release.set()
+            worker.join(5)
+            assert not worker.is_alive()
+            # A deferred snapshot is checked again and can only be accepted
+            # after the Store lock is released and the revision still matches.
+            QTest.qWait(320)
+            assert len(applied) == 1
+            assert applied[0]["_idle_snapshot"] is snapshot
+            assert not window._idle_snapshot_inflight
+
+        window._workspace_warm_timer.stop()
+        window._last_navigation_at = time.monotonic() - 3
+        window._warm_next_workspace()
+        window._workspace_warm_timer.stop()
+        assert 3 not in window._dirty_pages
+        row = _existing_source_rows(window.source_table)[sid]
+        assert window.source_table.item(row, 3).text() == "Last check failed"
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(5)
         if window is not None:
             window._force_close = True
             for name in ("_workspace_warm_timer", "_evidence_refresh_timer",
