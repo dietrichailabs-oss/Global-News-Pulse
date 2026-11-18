@@ -81,6 +81,7 @@ class WorldMap(QWidget):
         self.crisis_layers = {"conflict": True, "unrest": True, "migration": True}
         self.crisis_overlay_enabled = True
         self.country_activity = {}
+        self._pending_preclassified_country = None
         self.country_only_evidence = {}  # Neutral/historical country-only archive
         self.country_category_evidence = {}  # All attributed categories, including current reports
         self._country_badge_hits = []
@@ -189,7 +190,12 @@ class WorldMap(QWidget):
     def point(self, lon, lat):
         return self._transform().map(self.normalized(lon, lat))
 
-    def set_events(self, events, *, country_events=None, observations=None):
+    def set_events(self, events, *, country_events=None, observations=None,
+                   preclassified_country=None):
+        # A worker may supply pure-Python classification, never widget data.
+        # This short-lived token is consumed exactly once by the matching
+        # source snapshot. Direct calls keep the original GUI classifier.
+        self._pending_preclassified_country = preclassified_country
         self.events = list(events)[:5000]
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
         self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
@@ -197,7 +203,10 @@ class WorldMap(QWidget):
         self._cluster_view_key = None
         self._cluster_groups = ()
         self._activity_categories = object()
-        self._refresh_country_activity()
+        try:
+            self._refresh_country_activity()
+        finally:
+            self._pending_preclassified_country = None
         self.update()
 
     def _refresh_country_activity(self):
@@ -212,9 +221,21 @@ class WorldMap(QWidget):
             # records qualify on their own. Reuse that exact answer in the
             # neutral-archive pass; never repeat a full 5k-record source/date
             # classifier once per country-only row on the GUI thread.
-            single_record_credits = set()
-            self.country_activity = build_country_activity(
-                selected, now=now, single_record_credits=single_record_credits)
+            prepared=self._pending_preclassified_country
+            if (isinstance(prepared, dict)
+                    and prepared.get("category_key")==key
+                    and prepared.get("record_ids")==tuple(
+                        id(record) for record in self.evidence_events)):
+                # The worker's source dictionaries are the very same objects
+                # handed to set_events. Never reuse an index after a category
+                # change or a copied/changed report; fall back to normal local
+                # classification for direct/map-only updates.
+                self.country_activity=prepared["activity"]
+                single_record_credits=prepared["credits"]
+            else:
+                single_record_credits = set()
+                self.country_activity = build_country_activity(
+                    selected, now=now, single_record_credits=single_record_credits)
             # Keep precisely attributed, country-only archives discoverable even
             # when they have no point/area or do not qualify for a current crisis
             # stripe. These are *records*, not new crisis assertions.
