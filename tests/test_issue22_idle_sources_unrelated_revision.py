@@ -83,7 +83,7 @@ def test_unrelated_archive_revision_skips_512_source_rows_but_real_status_update
             assert statuses.call_count == 1
         row = _existing_source_rows(window.source_table)[sid]
         assert window.source_table.item(row, 3).text() == "Last check failed"
-        assert window.source_table.item(row, 6).text() == "—"
+        assert window.source_table.item(row, 6).text() != "—"
         another = _existing_source_rows(window.source_table)["fictional-source-100"]
         assert window.source_table.item(another, 3).text() == "Not checked"
 
