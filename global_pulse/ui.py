@@ -1104,13 +1104,17 @@ class MainWindow(SituationActions, QMainWindow):
         if self._background_warm_enabled and idle_for < 1.8:
             self._evidence_refresh_timer.start(max(100,int((1.8-idle_for)*1000)))
             return
-        # The source snapshot now runs off the GUI thread. Starting its
-        # single-flight read by 3 seconds of post-splash idle avoids carrying
-        # a stale visible feed for the old 5-second synchronous-refresh wait,
-        # while the 1.8-second navigation pause remains mandatory.
+        # No-click collector updates were held for a separate three seconds
+        # *before* starting a 500/5000-event worker read. The exact hosted
+        # heavy-archive profiler proved that window could exhaust its freshness
+        # deadline despite an already responsive Qt heartbeat. Start the
+        # worker after the existing bounded signal coalescing plus one second
+        # since the last committed display. The independent 1.8-second
+        # navigation pause above still protects rapid real user interaction.
+        # This advances real source reading, not the test deadline or UI PASS.
         since_last=time.monotonic()-self._last_full_refresh_at
-        if self._background_warm_enabled and since_last < 3.0:
-            self._evidence_refresh_timer.start(max(100,int((3.0-since_last)*1000)))
+        if self._background_warm_enabled and since_last < 1.0:
+            self._evidence_refresh_timer.start(max(100,int((1.0-since_last)*1000)))
             return
         if self._background_warm_enabled:
             self._start_idle_snapshot()
