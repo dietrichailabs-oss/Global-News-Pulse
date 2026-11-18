@@ -987,7 +987,14 @@ class MainWindow(SituationActions, QMainWindow):
         if self.controller.store.content_revision_if_available() is None:
             self._workspace_warm_timer.start(250)
             return
-        if page==5:
+        if page==2:
+            # Economy prewarm is passive. The first lock probe can race the
+            # collector, so consume only its already-validated worker snapshot.
+            # No hidden tab may wait on a second Store read on the Qt thread.
+            if not self._populate_economy(idle=True):
+                self._workspace_warm_timer.start(250)
+                return
+        elif page==5:
             # The initial nonblocking probe above does not reserve the Store
             # lock. Another collector can acquire it before Brief presentation.
             # A passive hidden warm must NEVER fall back to Brief SQL on Qt.
@@ -1239,6 +1246,12 @@ class MainWindow(SituationActions, QMainWindow):
                 result["map_events"]=controller.events(**map_filters)
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
+                # The Economy tab is independent of Monitor's search, country
+                # and history filters. Even with the map economy layer hidden,
+                # prewarm exact dated observations on the SAME Store worker.
+                result["economy_observations"]=(
+                    result["observations"] if show_observations
+                    else store.list_observations())
                 # Bookmark markers and headline preference were still fetched
                 # synchronously by _populate_feed on every no-click collector
                 # refresh. Capture both on this Store worker before the final
@@ -1557,20 +1570,22 @@ class MainWindow(SituationActions, QMainWindow):
                                  and not filters.get("region")
                                  and filters.get("category") in {"", "Economy"})
             economy_revision_before=(
-                _idle_snapshot["revision_before"] if _idle_snapshot is not None and show_observations
+                _idle_snapshot["revision_before"] if _idle_snapshot is not None
                 else self.controller.store.content_revision() if show_observations else None)
             observations=(
                 _idle_snapshot["observations"] if _idle_snapshot is not None
                 else self.controller.store.list_observations() if show_observations else [])
             economy_revision_after=(
-                _idle_snapshot["revision_after"] if _idle_snapshot is not None and show_observations
+                _idle_snapshot["revision_after"] if _idle_snapshot is not None
                 else self.controller.store.content_revision() if show_observations else None)
-            # Reuse only a source-consistent revision in the deferred Economy
-            # workspace. Worker writes, including those made after the initial
-            # paint, MUST invalidate the old in-RAM rows before prewarm.
-            valid_economy_revision=(show_observations
+            # Monitor map-layer filters must not filter the independent Economy
+            # workspace. Both lists were read on the same source-checked worker;
+            # only the map receives the filtered/possibly empty observation list.
+            economy_rows=(_idle_snapshot["economy_observations"]
+                          if _idle_snapshot is not None else observations)
+            valid_economy_revision=((_idle_snapshot is not None or show_observations)
                                     and economy_revision_before==economy_revision_after)
-            self._deferred_economy_observations=(observations
+            self._deferred_economy_observations=(economy_rows
                                                  if valid_economy_revision else None)
             self._deferred_economy_revision=(economy_revision_after
                                              if valid_economy_revision else None)
@@ -1610,7 +1625,9 @@ class MainWindow(SituationActions, QMainWindow):
             else:self._render_empty_brief()
             page=self.pages.currentIndex()
             if page==1:self._populate_situations()
-            elif page==2:self._populate_economy(observations if show_observations else None)
+            elif page==2:self._populate_economy(
+                _idle_snapshot["economy_observations"] if _idle_snapshot is not None
+                else observations if show_observations else None)
             elif page==3 and _idle_snapshot is None:self._populate_sources()
             elif page==4:self._populate_alerts()
             elif page==5 and _idle_snapshot is None:
@@ -2075,7 +2092,23 @@ class MainWindow(SituationActions, QMainWindow):
             parts.append(f"<p>{esc(report_time(report))} — <a href='{esc(report.get('url',''))}'>{esc(report.get('publisher','Source'))}</a><br>{esc(report.get('title',''))}<br><span style='color:#8e9cb3'>{esc(credit)}</span></p>")
         self.situation_browser.setHtml("".join(parts))
 
-    def _populate_economy(self,observations=None):
+    def _populate_economy(self,observations=None,*,idle=False):
+        if idle:
+            # This scheduled, non-user operation cannot block on Store SQLite.
+            # A prewarm probe in _warm_next_workspace does not reserve its RLock:
+            # another collector may acquire it before the original second
+            # blocking revision check and list_observations below.
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                return False
+            cached=getattr(self,"_deferred_economy_observations",None)
+            if (cached is None
+                    or revision!=getattr(self,"_deferred_economy_revision",None)):
+                # Missing/stale evidence is never represented as an empty chart.
+                # Request an exact worker refresh while retaining the old view.
+                self._schedule_evidence_refresh()
+                return False
+            observations=cached
         # During a collector refresh, the map already read all dated economy
         # observations. Reuse that exact source snapshot ONCE in scheduled
         # idle workspace prewarm, rather than a second synchronous SQLite read.
@@ -2100,7 +2133,7 @@ class MainWindow(SituationActions, QMainWindow):
         if (self._pending_economic_country is None
                 and hasattr(self, "_observations")
                 and fresh_observations == self._observations):
-            return
+            return True
         self._observations=fresh_observations
         by_indicator={}
         for observation in self._observations:
@@ -2120,6 +2153,7 @@ class MainWindow(SituationActions, QMainWindow):
             self._populate_economic_selection()
         else:
             self._apply_pending_economic_country()
+        return True
 
     def _manual_economy_selection(self,*args):
         """A deliberate dropdown choice supersedes an older queued map click."""
