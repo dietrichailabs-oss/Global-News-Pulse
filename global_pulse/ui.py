@@ -1698,7 +1698,15 @@ class MainWindow(SituationActions, QMainWindow):
                 preclassified_country=(_idle_snapshot.get("map_classification")
                                        if _idle_snapshot is not None else None),
             )
-            if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
+            if self.gdelt_panel is not None:
+                if _idle_snapshot is not None:
+                    # Post-splash collector refresh must NEVER run the GDELT
+                    # 20k-row SQLite projection on the Qt heartbeat thread.
+                    self.gdelt_panel.refresh_idle(filters)
+                else:
+                    # Splash-owned first paint / deliberate filters are still
+                    # immediate current-source actions.
+                    self.gdelt_panel.refresh(filters)
             self._populate_feed(
                 saved_ids=(_idle_snapshot["saved_situation_ids"]
                            if _idle_snapshot is not None else None),
