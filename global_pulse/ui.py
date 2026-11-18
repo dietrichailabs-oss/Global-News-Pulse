@@ -987,7 +987,15 @@ class MainWindow(SituationActions, QMainWindow):
         if self.controller.store.content_revision_if_available() is None:
             self._workspace_warm_timer.start(250)
             return
-        self._populate_workspace(page)
+        if page==5:
+            # The initial nonblocking probe above does not reserve the Store
+            # lock. Another collector can acquire it before Brief presentation.
+            # A passive hidden warm must NEVER fall back to Brief SQL on Qt.
+            if not self._generate_brief(idle=True):
+                self._workspace_warm_timer.start(250)
+                return
+        else:
+            self._populate_workspace(page)
         self._dirty_pages.discard(page)
         self._schedule_workspace_warm()
 
@@ -1605,8 +1613,13 @@ class MainWindow(SituationActions, QMainWindow):
             elif page==2:self._populate_economy(observations if show_observations else None)
             elif page==3 and _idle_snapshot is None:self._populate_sources()
             elif page==4:self._populate_alerts()
-            elif page==5:self._generate_brief()
-            if page!=3 or _idle_snapshot is None:
+            elif page==5 and _idle_snapshot is None:
+                self._generate_brief()
+            # A fresh collector snapshot must not synchronously query the
+            # Brief Store on Qt. Its separately validated worker result will
+            # trigger the next hidden/visible workspace prewarm.
+            if ((page!=3 or _idle_snapshot is None)
+                    and (page!=5 or _idle_snapshot is None)):
                 self._dirty_pages.discard(page)
             self._schedule_workspace_warm()
             confirmed=self.controller.store.content_revision_if_available()
@@ -2153,16 +2166,39 @@ class MainWindow(SituationActions, QMainWindow):
         event_id=a.get("event_id") or (a.get("event") or {}).get("id")
         if event_id:self.navigate_event(event_id)
 
-    def _generate_brief(self):
+    def _generate_brief(self, *, idle=False):
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
-        # A collector-driven idle refresh has already queried this exact
-        # period off Qt. Verify the same Store revision before presentation;
-        # user period changes and intervening evidence writes use a new query.
-        # No stale cached brief can replace a newer or corrected story.
+        # The Brief collector already runs on a worker. During hidden/visible
+        # no-click presentation, NEVER execute a fresh Brief SQL query on Qt,
+        # even if the Store lock is acquired after the earlier warm probe.
+        # Explicit period changes and startup/manual refresh preserve the
+        # previous synchronous, current-source semantics.
         cached=getattr(self,"_deferred_brief_events",None)
-        valid=(cached is not None
-               and getattr(self,"_deferred_brief_period",None)==period
-               and getattr(self,"_deferred_brief_revision",None)==self.controller.store.content_revision())
+        cached_period=getattr(self,"_deferred_brief_period",None)
+        cached_revision=getattr(self,"_deferred_brief_revision",None)
+        if idle:
+            if cached is None or cached_period!=period:
+                if not self._idle_brief_inflight:
+                    self._schedule_evidence_refresh()
+                return False
+            revision=self.controller.store.content_revision_if_available()
+            if revision is None:
+                # Preserve pending evidence and the dirty Brief workspace;
+                # the next idle turn rechecks the exact source revision.
+                return False
+            if revision!=cached_revision:
+                self._deferred_brief_events=None
+                self._deferred_brief_revision=None
+                self._deferred_brief_period=None
+                if not self._idle_brief_inflight:
+                    self._schedule_evidence_refresh()
+                return False
+            valid=True
+        else:
+            # Direct user request keeps current-source semantics, including
+            # the normal fallback if the cached period/revision is outdated.
+            valid=(cached is not None and cached_period==period
+                   and cached_revision==self.controller.store.content_revision())
         self._deferred_brief_events=None
         self._deferred_brief_revision=None
         self._deferred_brief_period=None
@@ -2170,6 +2206,7 @@ class MainWindow(SituationActions, QMainWindow):
             since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period))
         from .brief_rendering import brief_html
         self.brief_browser.setHtml(brief_html(events,period))
+        return True
 
     def _export_brief(self):
         path,_=QFileDialog.getSaveFileName(self,"Export intelligence brief","Global-Pulse-brief.html","HTML with severity colors (*.html);;Markdown (*.md);;Text (*.txt)")
