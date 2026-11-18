@@ -1435,6 +1435,27 @@ class Store:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()
             return json.loads(row[0]) if row else {}
 
+    def list_source_states(self, source_ids: Iterable[str]) -> dict[str, dict]:
+        """Read only requested provider health in bounded SQLite batches.
+
+        An idle Sources repaint previously acquired the Store lock and ran a
+        SELECT for every configured source. One batch per 400 IDs avoids that
+        main-thread query fan-out, without caching error/retry checkpoints.
+        """
+        identities = list(dict.fromkeys(source_ids))
+        if any(not isinstance(sid, str) or not sid for sid in identities):
+            raise ValueError("Invalid source identity")
+        states: dict[str, dict] = {}
+        with self._lock:
+            for start in range(0, len(identities), 400):
+                batch = identities[start:start + 400]
+                sql = ("SELECT source_id,body FROM source_states WHERE source_id IN (" +
+                       ",".join("?" for _ in batch) + ")")
+                for row in self._conn.execute(sql, batch):
+                    states[row[0]] = json.loads(row[1])
+        return states
+
+
     def any_source_error(self, source_ids: Iterable[str]) -> bool:
         """One bounded, consistent source-state scan for the native tray icon.
 
