@@ -107,6 +107,14 @@ def _existing_source_rows(table):
 
 
 def populate_sources(window):
+    """Reconcile only changed provider status after the initial widget build.
+
+    Collector status pulses and unrelated map/economy evidence updates can
+    dirty the Sources page many times per idle interval. Identical source
+    status must not re-sort/layout hundreds of Qt table cells on the GUI
+    thread; genuine status and enabled changes remain immediately visible
+    at the next scheduled reconciliation.
+    """
     from .ui import timestamp
     table = window.source_table
     current = table.item(table.currentRow(), 0)
@@ -117,6 +125,36 @@ def populate_sources(window):
     fingerprint = _catalog_fingerprint(catalog)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
+
+    # One consistent bounded SQLite read, not N provider-specific locks.
+    states = window.controller.store.list_source_states(s["id"] for s in catalog)
+    prepared = []
+    new_values = {}
+    collectable = 0
+    for source in catalog:
+        sid = source["id"]
+        available, kind, reason = capability(source)
+        collectable += int(available)
+        state = states.get(sid) or {}
+        on = sid in enabled
+        collection = ("Enabled" if window.controller.monitoring else "Enabled; monitoring paused") if on else "Off" if available else "Not connected"
+        values = [source.get("name", sid), kind, collection,
+                  health_text(state) if available else reason,
+                  timestamp(state.get("last_success")) if available else "—",
+                  timestamp(state.get("latest_publication")) if state.get("latest_publication") else "Unknown",
+                  timestamp(state.get("next_poll")) if on and state.get("next_poll") else "—",
+                  str(max(1, int(source.get("min_interval", 600))) // 60) + " min" if available else "—"]
+        signature = (tuple(str(value) for value in values), reason, available, on)
+        new_values[sid] = signature
+        prepared.append((source, available, kind, reason, on, values, signature))
+    summary = f"{collectable} automatic feeds · {len(enabled)} enabled · {len(catalog)-collectable} website/setup/unavailable entries (not collecting)"
+    previous_values = getattr(window, "_source_display_values", {})
+    if (reuse and previous_values == new_values
+            and window.source_summary.text() == summary):
+        # No QTableWidget sort toggle, repaint, layout, or source-detail HTML
+        # construction on no-change source-status and evidence signals.
+        return
+
     blocked = table.blockSignals(True)
     sorting = table.isSortingEnabled()
     selected_row = None
@@ -125,26 +163,19 @@ def populate_sources(window):
         if not reuse:
             table.clearContents()
             table.setRowCount(len(catalog))
-        collectable = 0
-        for catalog_row, source in enumerate(catalog):
+        for catalog_row, (source, available, kind, reason, on, values, signature) in enumerate(prepared):
             sid = source["id"]
             row = old_rows[sid] if reuse else catalog_row
-            available, kind, reason = capability(source)
-            collectable += int(available)
-            state = window.controller.store.get_source_state(sid) or {}
-            on = sid in enabled
-            collection = ("Enabled" if window.controller.monitoring else "Enabled; monitoring paused") if on else "Off" if available else "Not connected"
-            values = [source.get("name", sid), kind, collection,
-                      health_text(state) if available else reason,
-                      timestamp(state.get("last_success")) if available else "—",
-                      timestamp(state.get("latest_publication")) if state.get("latest_publication") else "Unknown",
-                      timestamp(state.get("next_poll")) if on and state.get("next_poll") else "—",
-                      str(max(1, int(source.get("min_interval", 600))) // 60) + " min" if available else "—"]
+            if sid == selected_id:
+                selected_row = row
+            if reuse and previous_values.get(sid) == signature:
+                continue
             for column, value in enumerate(values):
                 if reuse:
                     item = table.item(row, column)
                     if item is None:
                         item = QTableWidgetItem()
+                        item.setData(Qt.ItemDataRole.UserRole, source)
                         table.setItem(row, column, item)
                     if item.text() != str(value):
                         item.setText(str(value))
@@ -162,14 +193,10 @@ def populate_sources(window):
                     if action.text() != desired:
                         action.setText(desired)
                     action.setAccessibleName(desired + ": " + str(source.get("name", sid)))
-                # Capability doesn't change without a catalog edit. A changed
-                # catalog necessarily triggers a full widget rebuild.
             elif available:
                 action = QPushButton("Disable collection" if on else "Enable collection")
                 action.setProperty("source_id", sid)
                 action.setAccessibleName(action.text() + ": " + str(source.get("name", sid)))
-                # Compute target on click, not at construction: live collection
-                # state can change without destroying 170 buttons.
                 action.clicked.connect(
                     lambda checked=False, identity=sid: set_enabled(
                         window, identity, identity not in _effective(window)
@@ -184,9 +211,6 @@ def populate_sources(window):
                 action.setToolTip(reason)
                 table.setCellWidget(row, 8, action)
                 table.setCellWidget(row, 9, _site_button(window, source))
-            if sid == selected_id:
-                selected_row = row
-        summary = f"{collectable} automatic feeds · {len(enabled)} enabled · {len(catalog)-collectable} website/setup/unavailable entries (not collecting)"
         if window.source_summary.text() != summary:
             window.source_summary.setText(summary)
         if not reuse:
@@ -197,12 +221,19 @@ def populate_sources(window):
                 table.clearSelection()
                 table.setCurrentCell(-1, -1)
                 window.source_browser.setPlainText("Select a provider to inspect access, attribution, limitations and its last recorded result.")
+        # Commit only after a complete successful reconciliation. A source or
+        # setting mutation between passes cannot be mistaken for an old view.
+        window._source_display_values = new_values
     finally:
         table.setSortingEnabled(sorting)
         table.blockSignals(blocked)
     if selected_row is not None and not reuse:
         source_selected(window)
-
+    elif (reuse and selected_id
+          and previous_values.get(selected_id) != new_values.get(selected_id)):
+        # The selected provider details include the last error/status; keep
+        # them current without refreshing every other provider's HTML.
+        source_selected(window)
 
 def source_selected(window):
     from .ui import timestamp
