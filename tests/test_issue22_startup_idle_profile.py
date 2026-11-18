@@ -181,6 +181,14 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             finally:
                 label = (name if cls in (MainWindow, EconomicChart, EconomicTableModel)
                          else cls.__name__ + "." + name)
+                # Attribute each real worker read separately: a single slow
+                # Store.list_events aggregate hides whether feed, sourced
+                # country-area projection, or point-map SQL is the bottleneck.
+                # Keep the same timed call and unchanged no-click assertions.
+                if cls in (Store, Controller) and name in ("list_events", "events"):
+                    kind = ("country_evidence" if kwargs.get("map_evidence")
+                            else "point_map" if kwargs.get("map_view") else "feed")
+                    label += ":" + kind
                 bucket = (methods if threading.get_ident() == gui_thread_id
                           else worker_methods)
                 bucket[phase["value"] + ":" + label].append(
@@ -210,7 +218,9 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             # Store lock, computing catalog fingerprints or spending time in
             # Qt row/header layout. No fabricated heartbeat thresholds.
             for name in ("list_events", "list_observations",
-                         "list_source_states", "content_revision"):
+                         "list_source_states", "content_revision",
+                         "event_filter_options", "_map_evidence_page_unlocked",
+                         "_get_event_unlocked"):
                 trace_method(Store, name, stack)
             for name in ("events", "get_setting"):
                 trace_method(Controller, name, stack)
