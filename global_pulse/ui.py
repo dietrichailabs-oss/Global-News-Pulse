@@ -5,6 +5,7 @@ is rendered as plain text or escaped HTML. No source HTML is executed here.
 """
 from __future__ import annotations
 
+import copy
 import html
 import json
 import math
@@ -1724,14 +1725,24 @@ class MainWindow(SituationActions, QMainWindow):
             if self._selected_id:
                 selected=(self._selected_event() if _idle_snapshot is None
                           else _idle_snapshot["selected_event"])
-                if selected:self._render_event(
-                    selected, english_enabled=(_idle_snapshot["english_headlines_enabled"]
-                                               if _idle_snapshot is not None else None),
-                    starred_override=(
-                        self._selected_id in _idle_snapshot["saved_situation_ids"]
-                        if _idle_snapshot is not None else None))
-                else:self._render_empty_brief()
-            else:self._render_empty_brief()
+            else:
+                selected=None
+            if _idle_snapshot is not None:
+                # A report/observation collected elsewhere in the world must
+                # not rebuild the same selected QTextBrowser or reset camera
+                # context on every no-click map revision. This fast path checks
+                # complete selected-source evidence, headline preference and
+                # Star state; corrected/withdrawn reports still repaint.
+                self._render_idle_selection(
+                    selected,
+                    english_enabled=_idle_snapshot["english_headlines_enabled"],
+                    starred_override=(self._selected_id in _idle_snapshot["saved_situation_ids"]
+                                      if selected else None),
+                )
+            elif selected:
+                self._render_event(selected)
+            else:
+                self._render_empty_brief()
             page=self.pages.currentIndex()
             keep_alert_dirty=False
             if page==1:self._populate_situations(
@@ -1987,12 +1998,35 @@ class MainWindow(SituationActions, QMainWindow):
             self.intelligence_mode.setCurrentIndex(1)
 
     def _render_empty_brief(self):
+        self._last_idle_selection_key=("empty",)
         self.intel_browser.setHtml("<p style='color:#a78bfa;font-size:18px'><b>Connect the evidence.</b></p><p style='color:#a5afc1'>Select an event to inspect its recap, original sources, verification state, and competing claims.</p><p style='color:#748198'>Official attribution and independent corroboration are shown separately. Coverage gaps remain visible.</p>")
         self.evidence_status_text.setPlainText("No event selected · no confidence inferred.")
         self.change_status_text.setPlainText("Saved situations and recorded changes appear here.")
         if hasattr(self.media,"set_event"):self.media.set_event(None)
         for b in (self.save_button,self.original_button,self.translate_button):b.setEnabled(False)
         self._sync_situation_star(None)
+
+    def _render_idle_selection(self, event, *, english_enabled, starred_override):
+        """Avoid unchanged selected evidence and camera redraw on idle signals.
+
+        Equality includes full source dictionaries (including nested corrections,
+        retractions and rights metadata), actual English display preference,
+        current saved Star and history mode. Manual and translation actions
+        continue to render directly; a prior translation-only repaint never
+        satisfies a later media-capable idle render.
+        """
+        if event is None:
+            if getattr(self,"_last_idle_selection_key",None)==("empty",):
+                return False
+            self._render_empty_brief()
+            return True
+        desired=("event",event,english_enabled,starred_override,
+                 bool(self._history_at),True)
+        if getattr(self,"_last_idle_selection_key",None)==desired:
+            return False
+        self._render_event(event,english_enabled=english_enabled,
+                           starred_override=starred_override)
+        return True
 
     def _render_event(self,event, *, update_media=True, english_enabled=None, starred_override=None):
         view=(self.controller.headline_view(event,enabled_override=english_enabled)
@@ -2048,6 +2082,12 @@ class MainWindow(SituationActions, QMainWindow):
             f"{len(event.get('changes',[]))} recorded change(s)")
         self._sync_situation_star(event,saved_override=starred_override);self.original_button.setEnabled(bool(reports and reports[0].get("url")));self.translate_button.setEnabled(bool(reports))
         if update_media and hasattr(self.media,"set_event"):self.media.set_event(dict(event,historical_view=bool(self._history_at)))
+        # Keep a frozen Python source snapshot; an in-place edit to a report or
+        # nested warning polygon must invalidate the no-click repaint cache.
+        self._last_idle_selection_key=(
+            "event",copy.deepcopy(event),english_enabled,starred_override,
+            bool(self._history_at),bool(update_media),
+        )
 
     def _feed_selected(self,item,previous):
         if item:
