@@ -1872,8 +1872,20 @@ class MainWindow(SituationActions, QMainWindow):
                 observations=getattr(self,"_deferred_economy_observations",None)
         self._deferred_economy_observations=None
         self._deferred_economy_revision=None
-        self._observations=(self.controller.store.list_observations()
+        fresh_observations=(self.controller.store.list_observations()
                             if observations is None else observations)
+        # A collector can change a crisis/feed/source checkpoint while the
+        # dated economy dataset is byte-for-byte unchanged. The hidden idle
+        # warm used to reset the virtual table model, invalidate the chart
+        # pixmap, and rebuild both dropdowns for all 3,200 unchanged rows.
+        # Compare complete source dictionaries, not only a Store revision or
+        # row count: corrected values, dates, attribution and withdrawal must
+        # still repaint. A queued map country selection must always execute.
+        if (self._pending_economic_country is None
+                and hasattr(self, "_observations")
+                and fresh_observations == self._observations):
+            return
+        self._observations=fresh_observations
         by_indicator={}
         for observation in self._observations:
             by_indicator.setdefault(str(observation.get("indicator","")),[]).append(observation)
