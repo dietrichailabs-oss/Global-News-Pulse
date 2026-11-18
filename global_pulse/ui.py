@@ -1324,9 +1324,10 @@ class MainWindow(SituationActions, QMainWindow):
         # Explicit user/filter refresh subsumes a pending collector refresh.
         if self._evidence_refresh_timer.isActive():
             self._evidence_refresh_timer.stop()
-        # An evidence/user-triggered refresh already includes latest status;
-        # cancel its redundant queued status-only repaint.
-        if self._collection_refresh_timer.isActive():
+        # User-triggered refreshes reconcile providers directly. An
+        # evidence-only worker snapshot does NOT include source health; never
+        # swallow a separately queued provider failure/retry status pulse.
+        if _idle_snapshot is None and self._collection_refresh_timer.isActive():
             self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
@@ -1335,7 +1336,13 @@ class MainWindow(SituationActions, QMainWindow):
             self._deferred_brief_events=None
             self._deferred_brief_period=None
             self._deferred_brief_revision=None
-            self._dirty_pages.update(range(1,6))
+            # An archive/economy evidence revision cannot by itself change
+            # source checkpoint state or catalog metadata. The dedicated
+            # source_status_changed signal marks Sources dirty when needed.
+            # Keep any *already* queued status refresh; never clear it here.
+            self._dirty_pages.update(
+                range(1,6) if _idle_snapshot is None else (1,2,4,5)
+            )
             if _idle_snapshot is None:
                 filters=self.events_filters()
                 self._events=self.controller.events(**filters)
@@ -1449,10 +1456,11 @@ class MainWindow(SituationActions, QMainWindow):
             page=self.pages.currentIndex()
             if page==1:self._populate_situations()
             elif page==2:self._populate_economy(observations if show_observations else None)
-            elif page==3:self._populate_sources()
+            elif page==3 and _idle_snapshot is None:self._populate_sources()
             elif page==4:self._populate_alerts()
             elif page==5:self._generate_brief()
-            self._dirty_pages.discard(page)
+            if page!=3 or _idle_snapshot is None:
+                self._dirty_pages.discard(page)
             self._schedule_workspace_warm()
             self._last_full_refresh_at=time.monotonic()
         except Exception as exc:
