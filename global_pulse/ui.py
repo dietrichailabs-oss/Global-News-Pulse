@@ -1116,6 +1116,12 @@ class MainWindow(SituationActions, QMainWindow):
         # The worker may process plain source dictionaries, never Qt widgets.
         map_categories=(None if self.world_map.categories is None
                         else tuple(self.world_map.categories))
+        # The daily/weekly intelligence brief is another expensive hidden
+        # workspace prewarm. Capture its period/cutoff before entering the
+        # Store worker; only immutable source dictionaries cross the thread.
+        brief_period=self.brief_period.currentText().lower()
+        brief_since=(datetime.now(timezone.utc)-timedelta(
+            days=1 if brief_period=="daily" else 7)).isoformat()
         controller=self.controller
         signal=self._idle_snapshot_ready
         self._idle_snapshot_inflight=True
@@ -1130,6 +1136,9 @@ class MainWindow(SituationActions, QMainWindow):
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
                 result["filter_options"]=controller.event_filter_options()
+                result["brief_events"]=controller.brief_events(
+                    since=brief_since, period=brief_period)
+                result["brief_period"]=brief_period
                 result["feed"]=controller.events(**filters)
                 result["country_evidence"]=controller.events(
                     **dict(map_filters,map_evidence=True))
@@ -1242,6 +1251,14 @@ class MainWindow(SituationActions, QMainWindow):
             self._collection_refresh_timer.stop()
         self._refreshing=True
         try:
+            # Apply a source-revision-consistent brief snapshot in a later
+            # hidden workspace warm. A manual refresh never reuses old briefs.
+            self._deferred_brief_events=(
+                _idle_snapshot["brief_events"] if _idle_snapshot is not None else None)
+            self._deferred_brief_period=(
+                _idle_snapshot["brief_period"] if _idle_snapshot is not None else None)
+            self._deferred_brief_revision=(
+                _idle_snapshot["revision_after"] if _idle_snapshot is not None else None)
             self._dirty_pages.update(range(1,6))
             if _idle_snapshot is None:
                 filters=self.events_filters()
@@ -1846,9 +1863,20 @@ class MainWindow(SituationActions, QMainWindow):
         if event_id:self.navigate_event(event_id)
 
     def _generate_brief(self):
-        from .core import build_brief
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
-        events=self.controller.brief_events(since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period)
+        # A collector-driven idle refresh has already queried this exact
+        # period off Qt. Verify the same Store revision before presentation;
+        # user period changes and intervening evidence writes use a new query.
+        # No stale cached brief can replace a newer or corrected story.
+        cached=getattr(self,"_deferred_brief_events",None)
+        valid=(cached is not None
+               and getattr(self,"_deferred_brief_period",None)==period
+               and getattr(self,"_deferred_brief_revision",None)==self.controller.store.content_revision())
+        self._deferred_brief_events=None
+        self._deferred_brief_revision=None
+        self._deferred_brief_period=None
+        events=(cached if valid else self.controller.brief_events(
+            since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period))
         from .brief_rendering import brief_html
         self.brief_browser.setHtml(brief_html(events,period))
 
