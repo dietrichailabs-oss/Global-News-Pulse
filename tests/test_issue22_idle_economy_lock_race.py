@@ -16,8 +16,9 @@ from global_pulse.ui import MainWindow
 def _rows(size=64):
     return [
         {"indicator": "synthetic-gdp", "indicator_name": "Fictional test GDP",
-         "country_name": f"Fictional Land {i % 8}", "date": "2026-11-01",
-         "value": float(i), "source_id": "offline-fixture",
+         "country_name": f"Fictional Land {i % 8}",
+         "country": f"FL-{i % 8}", "date": f"2026-11-{(i % 28) + 1:02d}",
+         "synthetic": True, "value": float(i), "source_id": "offline-fixture",
          "description": "Synthetic test only", "attribution": "Fictional publisher",
          "url": "https://example.invalid/fictional"}
         for i in range(size)
