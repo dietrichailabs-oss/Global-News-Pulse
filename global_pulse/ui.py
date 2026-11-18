@@ -1112,6 +1112,10 @@ class MainWindow(SituationActions, QMainWindow):
         show_observations=(not historical_at and not filters.get("query")
                            and not filters.get("region")
                            and filters.get("category") in {"","Economy"})
+        # Capture map-only category selection while still on Qt's GUI thread.
+        # The worker may process plain source dictionaries, never Qt widgets.
+        map_categories=(None if self.world_map.categories is None
+                        else tuple(self.world_map.categories))
         controller=self.controller
         signal=self._idle_snapshot_ready
         self._idle_snapshot_inflight=True
@@ -1128,6 +1132,27 @@ class MainWindow(SituationActions, QMainWindow):
                 result["map_events"]=controller.events(**map_filters)
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
+                # This expensive, pure source/date/corroboration classification
+                # used to run on the GUI thread immediately after the Store
+                # worker returned. Compute it on the same bounded worker;
+                # pass back the exact source object identities for validation.
+                from .crisis_overlay import build_country_activity
+                from .map_widget import _map_category
+                category_key=(None if map_categories is None else
+                              frozenset(_map_category(c) for c in map_categories))
+                evidence=result["country_evidence"][:5000]
+                selected=[record for record in evidence
+                          if category_key is None or
+                          _map_category(record.get("category")) in category_key]
+                credits=set()
+                classified=build_country_activity(
+                    selected, now=datetime.now(timezone.utc),
+                    single_record_credits=credits)
+                result["map_classification"]={
+                    "category_key":category_key,
+                    "record_ids":tuple(id(record) for record in evidence),
+                    "activity":classified, "credits":credits,
+                }
                 after=store.content_revision()
                 result["revision_before"]=before
                 result["revision_after"]=after
@@ -1305,6 +1330,8 @@ class MainWindow(SituationActions, QMainWindow):
                  else _idle_snapshot["map_events"]),
                 country_events=country_evidence,
                 observations=observations,
+                preclassified_country=(_idle_snapshot.get("map_classification")
+                                       if _idle_snapshot is not None else None),
             )
             if self.gdelt_panel is not None:self.gdelt_panel.refresh(filters)
             self._populate_feed()
