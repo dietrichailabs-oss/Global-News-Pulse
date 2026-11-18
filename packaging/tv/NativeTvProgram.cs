@@ -85,6 +85,9 @@ internal sealed class TvForm : Form
         "youtube.com", "youtube-nocookie.com", "youtubei.googleapis.com",
         "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com",
     };
+    // Publisher-owned URL in the existing app. This alone is not evidence
+    // of a Windows-registered package identity under Google's requirements.
+    private const string PublisherReferer = "https://www.dietrichailabs.com/";
     private const long WsChild = 0x40000000;
     private const long WsPopup = unchecked((long)0x80000000);
     private const uint SwpFrameChanged = 0x0020;
@@ -113,6 +116,7 @@ internal sealed class TvForm : Form
     private readonly string privateFolder;
     private bool initialized;
     private bool pollPending;
+    private bool identityObservationSent;
     private bool played;
     // Commands may arrive before YouTube creates its <video> element.
     // Native WebView2 starts muted before navigation, independent of HTML.
@@ -358,12 +362,40 @@ internal sealed class TvForm : Form
             web.WebResourceRequested += (_, e) => {
                 if (InternalResource(e.Request.Uri))
                     return;
-                if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var u) || !Allowed(u))
+                if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var u) || !Allowed(u)) {
                     e.Response = web.Environment.CreateWebResourceResponse(null, 403, "Blocked", "Content-Type: text/plain");
+                    return;
+                }
+                // Inspect the trusted, exact consented document *before* WebView2
+                // sends it. Do not echo headers/URLs, alter subresources, or
+                // mistake this callback for proof of what YouTube received.
+                if (!identityObservationSent && !offlineProbe
+                    && e.ResourceContext == CoreWebView2WebResourceContext.Document
+                    && ExactVideoNavigation(e.Request.Uri, videoId, fullWatch)) {
+                    identityObservationSent = true;
+                    bool present = false;
+                    bool publisherMatch = false;
+                    try {
+                        if (e.Request.Headers.Contains("Referer")) {
+                            string value = e.Request.Headers.GetHeader("Referer");
+                            present = !string.IsNullOrWhiteSpace(value);
+                            publisherMatch = string.Equals(value, PublisherReferer, StringComparison.Ordinal);
+                        }
+                    } catch (COMException) {
+                        // A failed inspection is UNKNOWN, never a passed identity gate.
+                    }
+                    Reply(new { type = "web_request_identity", stage = "pre_network",
+                        referer_present = present, publisher_url_match = publisherMatch,
+                        os_app_identity_verified = false, network_delivery_verified = false });
+                }
             };
             web.NavigationStarting += (_, e) => {
                 if (offlineProbe && e.Uri == "about:blank") return;
-                if (!ExactVideoNavigation(e.Uri, videoId, fullWatch)) e.Cancel = true;
+                bool permitted = ExactVideoNavigation(e.Uri, videoId, fullWatch);
+                if (e.IsRedirected)
+                    Reply(new { type = "navigation_redirect", allowed = permitted,
+                        actual_network_result_verified = false });
+                if (!permitted) e.Cancel = true;
             };
             web.FrameNavigationStarting += (_, e) => {
                 if (!FrameAllowed(e.Uri,videoId,fullWatch)) e.Cancel = true;
@@ -413,10 +445,12 @@ internal sealed class TvForm : Form
             var url = fullWatch
                 ? "https://www.youtube.com/watch?v=" + videoId + "&autoplay=0"
                 : "https://www.youtube.com/embed/" + videoId + "?autoplay=0&mute=1&playsinline=1";
-            // Referer matches our actual publisher domain; it is not a forged
-            // Google origin. YouTube otherwise returns embed error 153.
-            var request = environment.CreateWebResourceRequest(
-                url, "GET", null, "Referer: https://www.dietrichailabs.com/\r\n");
+            // Google requires an identifying Referer for a desktop WebView;
+            // use the documented WebView2 SetHeader API. The publisher URL
+            // is not itself verified OS app/package identity. No playback pass
+            // until physical Windows confirms YouTube received an admissible ID.
+            var request = environment.CreateWebResourceRequest(url, "GET", null, "");
+            request.Headers.SetHeader("Referer", PublisherReferer);
             web.NavigateWithWebResourceRequest(request);
             started = DateTime.UtcNow;
             telemetry.Start();

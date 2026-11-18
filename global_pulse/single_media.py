@@ -29,6 +29,7 @@ class Television(_MediaTile):
         self._player_signal_connected=False
         self._last_decode_info=""
         self._last_native_status_at=0.0
+        self._native_identity_note=""
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -388,6 +389,7 @@ class Television(_MediaTile):
         self._had_playback=False
         self._progress_at=time.monotonic()
         self._last_native_status_at=0.0
+        self._native_identity_note=""
         self.tv_status.setText("CONNECTING · native Windows video decoder")
         self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
         started=self.native_tv.play(video,full_watch=full_watch)
@@ -416,6 +418,25 @@ class Television(_MediaTile):
             )
             self.native_tv.command("MUTE 1")
             self.native_tv.command("VOLUME "+str(self.volume.value()))
+        elif kind=="web_request_identity":
+            # This is an observed PRE-NETWORK WebView2 header, not proof
+            # YouTube received it or that Windows registered the app ID.
+            present=event.get("referer_present") is True
+            match=event.get("publisher_url_match") is True
+            self._native_identity_note=(
+                "WebView2 pre-send Referer: "+
+                ("publisher URL observed" if present and match else
+                 "present, publisher mismatch" if present else "missing/unknown")+
+                " · OS app identity and server receipt NOT verified"
+            )
+            self.tv_diagnostics.setText(self._native_identity_note+
+                                        " · no video playback confirmed")
+        elif kind=="navigation_redirect":
+            if event.get("allowed") is not True:
+                self.tv_status.setText("BLOCKED · unapproved video redirect")
+                self.tv_diagnostics.setText(
+                    "WebView2 blocked a navigation outside the exact consented video. "+
+                    self._native_identity_note)
         elif kind=="page_loaded":
             success=event.get("success") is True
             self.tv_status.setText(
@@ -431,7 +452,8 @@ class Television(_MediaTile):
             self.tv_diagnostics.setText(
                 "Windows decoder H.264: "+codec+
                 " · decoded frames "+str(event.get("frames",0))+
-                " · picture/audio not confirmed"
+                " · picture/audio not confirmed"+
+                (" · "+self._native_identity_note if self._native_identity_note else "")
             )
         elif kind=="advancing":
             self._had_playback=True
@@ -449,7 +471,8 @@ class Television(_MediaTile):
                 "Native Edge H.264 "+str(event.get("h264") or "unknown")+
                 " · time "+str(event.get("current_time"))+
                 "s · decoded frames "+str(event.get("decoded_frames"))+
-                " · picture and audio require owner verification"
+                " · picture and audio require owner verification"+
+                (" · "+self._native_identity_note if self._native_identity_note else "")
             )
         elif kind=="error":
             reason=str(event.get("reason") or "unknown")[:80]
