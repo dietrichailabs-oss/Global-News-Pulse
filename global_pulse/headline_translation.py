@@ -96,10 +96,14 @@ class HeadlineTranslations(QObject):
             self.deferred_completed = 0
             self._notify()
 
-    def view(self, event, *, defer_language=False):
+    def view(self, event, *, defer_language=False, enabled_override=None):
         title = str(event.get("title") or "Untitled event")
         result = {"title": title, "original": title, "state": "original", "label": "Original headline"}
-        if self.closed or self.enabled() is not True:
+        # Source-revision-validated collector snapshots already carry this
+        # preference. Never acquire Store SQLite once per headline on Qt.
+        # Explicit callers without an override retain the current live read.
+        if self.closed or (self.enabled() is not True if enabled_override is None
+                           else enabled_override is not True):
             if self.deferred:
                 self.deferred_timer.stop()
                 self.deferred.clear()

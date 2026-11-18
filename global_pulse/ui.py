@@ -1564,7 +1564,9 @@ class MainWindow(SituationActions, QMainWindow):
             self.count_label.setText(f"{count} feed events · "+self.world_map.coverage_summary()+suffix+cap)
             if self._selected_id:
                 selected=self._selected_event()
-                if selected:self._render_event(selected)
+                if selected:self._render_event(
+                    selected, english_enabled=(_idle_snapshot["english_headlines_enabled"]
+                                               if _idle_snapshot is not None else None))
                 else:self._render_empty_brief()
             else:self._render_empty_brief()
             page=self.pages.currentIndex()
@@ -1685,7 +1687,8 @@ class MainWindow(SituationActions, QMainWindow):
             selected_item=None
             for index,event in enumerate(events):
                 starred=str(event.get("id","")) in saved_ids
-                view=(self.controller.headline_view(event,defer_language=True)
+                view=(self.controller.headline_view(event,defer_language=True,
+                                                    enabled_override=english_enabled)
                       if hasattr(self.controller,"headline_view")
                       else {"title":str(event.get("title","Untitled event")),
                             "original":str(event.get("title","")),
@@ -1791,8 +1794,9 @@ class MainWindow(SituationActions, QMainWindow):
         for b in (self.save_button,self.original_button,self.translate_button):b.setEnabled(False)
         self._sync_situation_star(None)
 
-    def _render_event(self,event, *, update_media=True):
-        view=self.controller.headline_view(event) if hasattr(self.controller,"headline_view") else {"title":str(event.get("title","")),"original":str(event.get("title","")),"label":"Original headline"}
+    def _render_event(self,event, *, update_media=True, english_enabled=None):
+        view=(self.controller.headline_view(event,enabled_override=english_enabled)
+              if english_enabled is not None else self.controller.headline_view(event)) if hasattr(self.controller,"headline_view") else {"title":str(event.get("title","")),"original":str(event.get("title","")),"label":"Original headline"}
         severity=event.get("severity","unassessed");color=SEVERITY.get(severity,SEVERITY["unassessed"])
         reports=event.get("reports",[]);ind=event.get("independent_origins",[])
         if not isinstance(ind,list):ind=[]
