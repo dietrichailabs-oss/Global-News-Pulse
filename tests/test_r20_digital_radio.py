@@ -104,6 +104,20 @@ def test_ham_step_keys_change_exact_requested_frequency_without_auto_connect(pan
     assert not panel.receiver_connected
 
 
+def test_fractional_ham_tune_preserves_exact_requested_dial_and_provider_url(panel):
+    panel._select_na5b_test()
+    panel.frequency.setText("7100.123")
+    assert panel.ham_frequency_display.text() == "7.100123 MHz"
+    assert "7100.123 kHz" in panel.ham_frequency_detail.text()
+    url, _ = panel._tuned_receiver_url()
+    assert url.endswith("?tune=7100.123usb"), url
+    panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("kiwi"))
+    panel.receiver_url.setText("https://radio.example.org/")
+    kiwi_url, _ = panel._tuned_receiver_url()
+    assert kiwi_url.endswith("?f=7100.123usb&vol=40"), kiwi_url
+    assert not panel.receiver_connected
+
+
 def test_operator_bands_are_only_reported_when_directory_supplies_them(panel):
     data = json.dumps({"receivers": [
         {"url": "https://radio.example.org/", "name": "Example SDR",
