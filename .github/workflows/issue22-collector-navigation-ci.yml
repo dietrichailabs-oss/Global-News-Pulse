@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: issue22-r19-full-suite-contract-diagnostic
+  group: issue22-collector-navigation-precompute-20261119
   cancel-in-progress: true
 jobs:
   verify:
