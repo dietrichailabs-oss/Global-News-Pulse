@@ -114,6 +114,11 @@ class WorldMap(QWidget):
         # only. Cursor hover/selection can reuse the same 5,000-point grouping.
         self._cluster_view_key = None
         self._cluster_groups = ()
+        # Visible point clustering is already cached. Prepare each cluster's
+        # representative, center, member IDs and style once per source/view;
+        # passive map paints must not walk every event again for these values.
+        self._cluster_paint_key = None
+        self._cluster_paint_specs = ()
         self._load_map()
 
     def _load_map(self):
@@ -222,6 +227,8 @@ class WorldMap(QWidget):
         self.area_layer.set_events(self.evidence_events)
         self._cluster_view_key = None
         self._cluster_groups = ()
+        self._cluster_paint_key = None
+        self._cluster_paint_specs = ()
         self._activity_categories = object()
         try:
             self._refresh_country_activity()
@@ -663,6 +670,45 @@ class WorldMap(QWidget):
         self._cluster_view_key = key
         return self._cluster_groups
 
+    def _visible_cluster_paint_specs(self):
+        """Prepare exact point-cluster style and hit metadata per source/view.
+
+        Marker selection is applied LIVE from a cached membership set, so
+        selecting a story never requires rebuilding thousands of source
+        dictionaries. Geometry/category changes reuse visible_clusters()'s
+        existing source-and-view invalidation. All Qt colors/points stay on
+        the GUI thread and the original hit groups remain interactive.
+        """
+        groups = self.visible_clusters()
+        key = self._cluster_view_key
+        if self._cluster_paint_key == key:
+            return self._cluster_paint_specs
+        severity_order = {"critical": 4, "high": 3, "moderate": 2,
+                          "informational": 1, "unassessed": 0}
+        specs = []
+        for group in groups:
+            size = len(group)
+            center = QPointF(sum(p.x() for _, p in group) / size,
+                             sum(p.y() for _, p in group) / size)
+            representative = max(
+                group, key=lambda item: severity_order.get(
+                    item[0].get("severity"), 0))[0]
+            specs.append({
+                "group": group,
+                "size": size,
+                "center": center,
+                "radius": 6 if size == 1 else min(14, 8 + math.log2(size) * 2),
+                "color": QColor(SEVERITY.get(
+                    representative.get("severity"), SEVERITY["unassessed"])),
+                "verification": representative.get("verification", "unverified"),
+                "approximate": representative.get("geo_precision") in (
+                    "approximate", "regional", "country", "region"),
+                "members": frozenset(str(event.get("id")) for event, _ in group),
+            })
+        self._cluster_paint_specs = tuple(specs)
+        self._cluster_paint_key = key
+        return self._cluster_paint_specs
+
     def _paint_country_backdrop(self, painter, projected_paths):
         """Paint static offline geography on the GUI thread for this exact view.
 
@@ -844,21 +890,21 @@ class WorldMap(QWidget):
                 ))
 
         self._hits.clear()
-        for group in self.visible_clusters():
-            center = QPointF(sum(p.x() for _, p in group)/len(group), sum(p.y() for _, p in group)/len(group))
-            severity_order = {"critical": 4, "high": 3, "moderate": 2, "informational": 1, "unassessed": 0}
-            representative = max(group, key=lambda item: severity_order.get(item[0].get("severity"), 0))[0]
-            color = QColor(SEVERITY.get(representative.get("severity"), SEVERITY["unassessed"]))
-            selected = any(str(e.get("id")) == self.selected_event for e, _ in group)
+        for marker in self._visible_cluster_paint_specs():
+            group = marker["group"]
+            size = marker["size"]
+            center = marker["center"]
+            color = marker["color"]
+            selected = self.selected_event in marker["members"]
             if self.density:
-                radius = min(55, 21 + len(group)*5)
-                gradient = QRadialGradient(center, radius)
-                glow = QColor(color); glow.setAlpha(min(100, 30 + len(group)*12))
+                glow_radius = min(55, 21 + size * 5)
+                gradient = QRadialGradient(center, glow_radius)
+                glow = QColor(color); glow.setAlpha(min(100, 30 + size * 12))
                 gradient.setColorAt(0, glow); gradient.setColorAt(1, QColor(0,0,0,0))
                 painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(gradient)
-                painter.drawEllipse(center, radius, radius)
-            radius = 6 if len(group) == 1 else min(14, 8 + math.log2(len(group))*2)
-            verification = representative.get("verification", "unverified")
+                painter.drawEllipse(center, glow_radius, glow_radius)
+            radius = marker["radius"]
+            verification = marker["verification"]
             pen = QPen(color, 1.2)
             if verification == "unverified":
                 pen.setStyle(Qt.PenStyle.DotLine)
@@ -876,10 +922,10 @@ class WorldMap(QWidget):
                 painter.drawEllipse(center, radius+7, radius+7)
             painter.setPen(QPen(QColor("#0b111b"), 1)); painter.setBrush(color)
             painter.drawEllipse(center, radius, radius)
-            if representative.get("geo_precision") in ("approximate", "regional", "country", "region"):
+            if marker["approximate"]:
                 painter.setPen(QPen(QColor("#131927"), 1.5))
                 painter.drawLine(QPointF(center.x()-3, center.y()), QPointF(center.x()+3, center.y()))
-            if len(group) > 1:
+            if size > 1:
                 painter.setPen(QColor("#0c111b")); painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
                 painter.drawText(QRectF(center.x()-radius,center.y()-radius,radius*2,radius*2),Qt.AlignmentFlag.AlignCenter,str(len(group)))
             self._hits.append((center, radius+8, group))
