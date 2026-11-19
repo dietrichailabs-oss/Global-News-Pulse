@@ -17,7 +17,7 @@ NATIVE = ROOT / "packaging" / "tv" / "NativeTvProgram.cs"
 
 def test_webview2_observes_exact_consented_request_and_still_blocks_redirects():
     src = NATIVE.read_text(encoding="utf-8")
-    assert 'request.Headers.SetHeader("Referer", PublisherReferer);' in src
+    assert 'request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);' in src
     assert 'web.NavigateWithWebResourceRequest(request);' in src
     assert src.index('web.WebResourceRequested +=') < src.index(
         'web.NavigateWithWebResourceRequest(request);')
@@ -26,7 +26,8 @@ def test_webview2_observes_exact_consented_request_and_still_blocks_redirects():
     assert 'e.Request.Headers.GetHeader("Referer")' in src
     assert 'type = "web_request_identity"' in src
     assert 'stage = "pre_network"' in src
-    assert 'os_app_identity_verified = false' in src
+    assert 'os_app_identity_verified = registeredMatch' in src
+    assert 'registered_app_id_match = registeredMatch' in src
     assert 'network_delivery_verified = false' in src
     assert 'if (e.IsRedirected)' in src
     assert 'if (!permitted) e.Cancel = true;' in src
@@ -57,7 +58,7 @@ def test_visible_video_diagnostic_distinguishes_header_from_delivery_and_decodin
         "type": "waiting", "h264": "probably", "frames": 0,
     })
     assert "decoded frames 0" in receipt.tv_diagnostics.text()
-    assert "OS app identity" in receipt.tv_diagnostics.text()
+    assert "YouTube receipt" in receipt.tv_diagnostics.text()
     assert "picture/audio not confirmed" in receipt.tv_diagnostics.text()
     Television._native_tv_receipt(receipt, {
         "type": "navigation_redirect", "allowed": False,
@@ -77,11 +78,11 @@ def test_missing_or_changed_referrer_never_becomes_verified_identity():
     )
     for present, matches, expected in (
         (False, False, "missing/unknown"),
-        (True, False, "publisher mismatch"),
+        (True, False, "present, identity unknown"),
     ):
         Television._native_tv_receipt(status, {
             "type": "web_request_identity",
             "referer_present": present, "publisher_url_match": matches,
         })
         assert expected in status.tv_diagnostics.text()
-        assert "OS app identity and server receipt NOT verified" in status.tv_diagnostics.text()
+        assert "YouTube receipt and playback NOT verified" in status.tv_diagnostics.text()

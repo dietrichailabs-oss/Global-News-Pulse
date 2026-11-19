@@ -95,6 +95,42 @@ internal sealed class TvForm : Form
         }
     }
 
+    // The OS, not a publisher URL or an installer-provided string, supplies
+    // the Windows package Name used for YouTube's required desktop Referer.
+    // GetCurrentPackageFullName is unavailable for an unpackaged Inno EXE.
+    // Never emit the Name, full identity, or resulting header through IPC.
+    private static string? PackageNameFromFullName(string fullName)
+    {
+        string[] parts = fullName.Split('_');
+        if (parts.Length != 5) return null;
+        string name = parts[0];
+        if (name.Length < 3 || name.Length > 50 || name.Contains("..", StringComparison.Ordinal)
+            || !Regex.IsMatch(name, @"\A[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]\z")
+            || !Regex.IsMatch(parts[1], @"\A[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\z")
+            || parts[2] is not ("x86" or "x64" or "arm" or "arm64" or "neutral")
+            || !Regex.IsMatch(parts[4], @"\A[A-Za-z0-9]+\z"))
+            return null;
+        return name;
+    }
+
+    private static string? RegisteredWindowsAppReferer()
+    {
+        try
+        {
+            uint length = 0;
+            if (GetCurrentPackageFullName(ref length, null) != 122
+                || length == 0 || length > 512) return null;
+            var buffer = new StringBuilder((int)length);
+            if (GetCurrentPackageFullName(ref length, buffer) != 0) return null;
+            string? name = PackageNameFromFullName(buffer.ToString());
+            return name is null ? null : "https://" + name.ToLowerInvariant() + "/";
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
     // Microsoft documents that these host-machine overrides can silently
     // replace the requested private profile, redirect the runtime, or expose
     // the page to script debuggers. The helper fails closed on any override.
@@ -323,8 +359,14 @@ internal sealed class TvForm : Form
         // A missing package identity is valid for classic EXE installs.
         string installedPackageState = InstalledPackageIdentityState();
         if (installedPackageState is not ("present" or "absent" or "unknown")) failures++;
+        // Offline parser cases: use the package's actual manifest Name only.
+        if (PackageNameFromFullName("DietrichAI.GlobalPulse_1.2.3.4_x64__abc123")
+            != "DietrichAI.GlobalPulse") failures++;
+        if (PackageNameFromFullName("malicious.example_1.2.3.4_x64__abc123") != "malicious.example") failures++;
+        if (PackageNameFromFullName("DietrichAI.GlobalPulse_1.2.3.4_x64__abc123\r\nX-Injected:yes") != null) failures++;
+        if (PackageNameFromFullName("Fake_1.2.3.4_x64__") != null) failures++;
         Console.WriteLine(JsonSerializer.Serialize(new {
-            type="policy_self_test", cases=exact.Length * 2 + 12,
+            type="policy_self_test", cases=exact.Length * 2 + 16,
             passed=failures==0, failures, network="none",
             os_package_identity_state=installedPackageState
         }));
@@ -361,6 +403,7 @@ internal sealed class TvForm : Form
         try
         {
             RejectWebView2Overrides();
+            string? registeredAppReferer = offlineProbe ? null : RegisteredWindowsAppReferer();
             var environmentOptions = new CoreWebView2EnvironmentOptions {
                 ExclusiveUserDataFolderAccess = true,
                 AllowSingleSignOnUsingOSPrimaryAccount = false,
@@ -408,18 +451,22 @@ internal sealed class TvForm : Form
                     identityObservationSent = true;
                     bool present = false;
                     bool publisherMatch = false;
+                    bool registeredMatch = false;
                     try {
                         if (e.Request.Headers.Contains("Referer")) {
                             string value = e.Request.Headers.GetHeader("Referer");
                             present = !string.IsNullOrWhiteSpace(value);
                             publisherMatch = string.Equals(value, PublisherReferer, StringComparison.Ordinal);
+                            registeredMatch = registeredAppReferer != null
+                                && string.Equals(value, registeredAppReferer, StringComparison.Ordinal);
                         }
                     } catch (COMException) {
                         // A failed inspection is UNKNOWN, never a passed identity gate.
                     }
                     Reply(new { type = "web_request_identity", stage = "pre_network",
                         referer_present = present, publisher_url_match = publisherMatch,
-                        os_app_identity_verified = false, network_delivery_verified = false });
+                        registered_app_id_match = registeredMatch,
+                        os_app_identity_verified = registeredMatch, network_delivery_verified = false });
                 }
             };
             // Exact consented document URL only. WebView2 HTTP status is NOT
@@ -495,20 +542,18 @@ internal sealed class TvForm : Form
             var url = fullWatch
                 ? "https://www.youtube.com/watch?v=" + videoId + "&autoplay=0"
                 : "https://www.youtube.com/embed/" + videoId + "?autoplay=0&mute=1&playsinline=1";
-            // Google requires an identifying Referer for a desktop WebView;
-            // use the documented WebView2 SetHeader API. The publisher URL
-            // is not itself verified OS app/package identity. No playback pass
-            // until physical Windows confirms YouTube received an admissible ID.
-            // Read actual OS package registration once, before any network
-            // navigation. An observed Windows package name is still not
-            // evidence that this Referer is the app's registered Name.
+            // YouTube requires the OS-registered app ID, when available, as
+            // HTTPS Referer for desktop WebViews. Classic Inno installations
+            // have no MSIX package identity: retain the historical publisher
+            // fallback only as a best-effort request, never as a passing gate.
+            // Registration and server acceptance require separate evidence.
             Reply(new { type = "installed_package_identity",
                 state = InstalledPackageIdentityState(),
                 source = "GetCurrentPackageFullName",
-                referer_matches_registered_app_id = false,
+                referer_matches_registered_app_id = registeredAppReferer != null,
                 provider_acceptance_verified = false });
             var request = environment.CreateWebResourceRequest(url, "GET", null, "");
-            request.Headers.SetHeader("Referer", PublisherReferer);
+            request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);
             web.NavigateWithWebResourceRequest(request);
             started = DateTime.UtcNow;
             telemetry.Start();

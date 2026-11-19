@@ -425,10 +425,14 @@ class Television(_MediaTile):
             # OS-owned Win32 package query, not a publisher-site assumption.
             # The helper never emits the actual registered name or publisher.
             state=event.get("state")
+            registered=event.get("referer_matches_registered_app_id") is True
             self._native_package_note=(
                 "Windows package identity: absent for this process; "
                 "publisher URL is not a registered package ID"
                 if state=="absent" else
+                "Windows registered package ID selected for Referer; "
+                "YouTube acceptance NOT verified"
+                if state=="present" and registered else
                 "Windows package identity detected locally; Referer match "
                 "and YouTube acceptance NOT verified"
                 if state=="present" else
@@ -441,11 +445,13 @@ class Television(_MediaTile):
             # YouTube received it or that Windows registered the app ID.
             present=event.get("referer_present") is True
             match=event.get("publisher_url_match") is True
+            app_id_match=event.get("registered_app_id_match") is True
             self._native_identity_note=(
                 "WebView2 pre-send Referer: "+
-                ("publisher URL observed" if present and match else
-                 "present, publisher mismatch" if present else "missing/unknown")+
-                " · OS app identity and server receipt NOT verified"
+                ("registered Windows app ID observed" if present and app_id_match else
+                 "publisher URL observed (not an app ID)" if present and match else
+                 "present, identity unknown" if present else "missing/unknown")+
+                " · YouTube receipt and playback NOT verified"
             )
             self.tv_diagnostics.setText(self._native_identity_note+
                                         (" · "+getattr(self,"_native_package_note","")

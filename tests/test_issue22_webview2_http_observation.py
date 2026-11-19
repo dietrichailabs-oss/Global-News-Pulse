@@ -12,7 +12,7 @@ def test_native_exact_url_status_observation_is_bounded_and_guarded():
               'type = "exact_video_http_response"',
               'provider_identity_acceptance_verified = false',
               'picture_audio_verified = false',
-              'request.Headers.SetHeader("Referer", PublisherReferer);',
+              'request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);',
               'if (!permitted) e.Cancel = true;'):
         assert s in src
     assert src.index("web.WebResourceRequested +=")<src.index("web.WebResourceResponseReceived +=")

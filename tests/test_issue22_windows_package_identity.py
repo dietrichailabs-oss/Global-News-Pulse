@@ -24,11 +24,17 @@ def test_native_package_identity_is_os_backed_not_a_publisher_website():
     assert 'type = "installed_package_identity"' in src
     assert 'string installedPackageState = InstalledPackageIdentityState();' in src
     assert 'os_package_identity_state=installedPackageState' in src
-    assert 'cases=exact.Length * 2 + 12' in src
+    assert 'cases=exact.Length * 2 + 16' in src
+    assert 'RegisteredWindowsAppReferer()' in src
+    assert 'PackageNameFromFullName' in src
+    assert 'GetCurrentPackageFullName(ref length, buffer)' in src
+    assert 'registered_app_id_match = registeredMatch' in src
+    assert 'os_app_identity_verified = registeredMatch' in src
     assert 'source = "GetCurrentPackageFullName"' in src
-    assert 'referer_matches_registered_app_id = false' in src
+    assert 'referer_matches_registered_app_id = registeredAppReferer != null' in src
     assert 'provider_acceptance_verified = false' in src
-    assert 'request.Headers.SetHeader("Referer", PublisherReferer);' in src
+    assert 'request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);' in src
+    assert 'string? registeredAppReferer = offlineProbe ? null : RegisteredWindowsAppReferer();' in src
     assert src.index('type = "installed_package_identity"') < src.index(
         'web.NavigateWithWebResourceRequest(request);')
     # Identity values, user folder and registry state must never be logged.
@@ -60,6 +66,19 @@ def test_no_package_identity_is_reported_without_invented_google_acceptance():
             assert expected in receipt.tv_diagnostics.text()
             assert "no video playback confirmed" in receipt.tv_diagnostics.text()
             assert "https://" not in receipt.tv_diagnostics.text()
+        Television._native_tv_receipt(receipt, {
+            "type": "installed_package_identity", "state": "present",
+            "referer_matches_registered_app_id": True,
+        })
+        assert "registered package ID selected" in receipt.tv_diagnostics.text()
+        assert "YouTube acceptance NOT verified" in receipt.tv_diagnostics.text()
+        Television._native_tv_receipt(receipt, {
+            "type": "web_request_identity",
+            "referer_present": True, "registered_app_id_match": True,
+            "publisher_url_match": False,
+        })
+        assert "registered Windows app ID observed" in receipt.tv_diagnostics.text()
+        assert "YouTube receipt and playback NOT verified" in receipt.tv_diagnostics.text()
         Television._native_tv_receipt(receipt, {
             "type": "installed_package_identity", "state": "absent",
         })
