@@ -972,6 +972,15 @@ class MainWindow(SituationActions, QMainWindow):
         if (not self._background_warm_enabled or self._force_close
                 or getattr(self.controller,"_closed",False) or not self._dirty_pages):
             return
+        # A collected evidence revision must finish its single-flight,
+        # source-checked Store worker before hidden Economy/Brief/Sources
+        # prewarm competes for the same SQLite RLock. Otherwise repeated
+        # hidden table reads can starve current source delivery well beyond
+        # the navigation cooldown, even when the visible Qt heartbeat ticks.
+        # Keep all pages dirty; never claim they were rendered or refreshed.
+        if self._idle_snapshot_inflight:
+            self._workspace_warm_timer.start(250)
+            return
         # Never let a hidden-table rebuild interrupt an active sequence of
         # clicks. Users continue to see the fully initialized cached view.
         if time.monotonic()-self._last_navigation_at < 1.8:
