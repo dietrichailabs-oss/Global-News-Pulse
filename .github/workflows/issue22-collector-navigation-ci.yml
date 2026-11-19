@@ -1,0 +1,64 @@
+name: Issue22 collector worker during navigation — exact source diagnostic
+on:
+  push:
+    branches: [eng/issue22-collector-precompute-during-navigation-20261119]
+permissions:
+  contents: read
+concurrency:
+  group: issue22-r19-full-suite-contract-diagnostic
+  cancel-in-progress: true
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install SHA256-locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact PR177 parent and bounded source correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD
+          git diff --name-only 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD | python -c "import sys; expected={'.github/workflows/issue22-collector-navigation-ci.yml','global_pulse/ui.py','tests/test_issue82_owner_tab_paint_cpu.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Real hosted Windows Qt backend
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Run exact source scheduler and real 120-navigation Store-to-Qt delivery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse tests
+          python -m pytest -s -q --tb=short tests/test_issue22_idle_collector_snapshot.py tests/test_issue74_row_lifetime.py tests/test_issue82_owner_tab_paint_cpu.py tests/test_issue82_owner_win11_optin_sources_tabs.py
+      - name: Tracked tree unchanged
+        if: always()
+        shell: bash
+        run: git diff --exit-code
