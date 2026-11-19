@@ -130,7 +130,10 @@ def test_warmed_tab_navigation_does_not_populate_or_read_on_click(desktop, monke
     calls = []
     for name in ("_populate_situations", "_populate_economy", "_populate_sources",
                  "_populate_alerts", "_generate_brief"):
-        monkeypatch.setattr(window, name, lambda name=name: calls.append(name))
+        monkeypatch.setattr(
+            window, name,
+            lambda *args, name=name, **kwargs: (calls.append((name, kwargs)), True)[1]
+        )
     for _ in range(30):
         for page in (1, 2, 3, 4, 5, 0):
             window.open_page(page)
