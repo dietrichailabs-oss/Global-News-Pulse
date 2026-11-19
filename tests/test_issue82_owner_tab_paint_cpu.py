@@ -9,6 +9,8 @@ import json
 import statistics
 import threading
 import time
+import sys
+import traceback
 from datetime import datetime, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -352,6 +354,17 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
         if not visible:
             # Do not weaken the real collector→Store→worker→Qt acceptance
             # assertion. Capture where this previously silent failure lives.
+            # A bounded Python stack snapshot identifies whether the worker
+            # is still in SQLite, pure classification, or Qt delivery.
+            frames=sys._current_frames()
+            workers_stacks={}
+            for thread in threading.enumerate():
+                if thread.ident and thread.name.startswith("pulse-idle"):
+                    frame=frames.get(thread.ident)
+                    workers_stacks[thread.name]=(
+                        [(os.path.basename(f.filename),f.name,f.lineno)
+                         for f in traceback.extract_stack(frame)[-12:]]
+                        if frame else [])
             stored=controller.events(**window.events_filters())
             print("ISSUE82_COLLECTOR_DELIVERY_DIAGNOSTIC="+json.dumps({
                 "stored_visible":any(e.get("title")=="Navigation fixture 9001"
@@ -365,6 +378,7 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
                 "navigation_idle_s":round(time.monotonic()-window._last_navigation_at,3),
                 "since_full_refresh_s":round(time.monotonic()-window._last_full_refresh_at,3),
                 "generation":window._idle_snapshot_generation,
+                "worker_stacks":workers_stacks,
                 "status":window.status_label.text(),
             },sort_keys=True))
         assert visible, (
