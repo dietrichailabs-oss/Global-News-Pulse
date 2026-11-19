@@ -1,4 +1,4 @@
-name: Issue22 R19 Native Windows Owner-Test (private workflow artifacts)
+name: Issue22 R19 Windows SDK10 Owner-Test (short-lived separate artifacts)
 
 on:
   push:
@@ -58,18 +58,22 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.403'
-      - name: Verify selected .NET 10 SDK before installing Inno
+      - name: Verify stable SDK 10 selected before packaging
         run: |
           $ErrorActionPreference = 'Stop'
-          $sdk = (Get-Command dotnet.exe -ErrorAction Stop).Source
-          $selected = @(& $sdk --version 2>&1 | ForEach-Object { $_.ToString().Trim() })
-          $sdkExit = $LASTEXITCODE
-          Write-Host "DOTNET_SELECTED_EXE=$sdk"
-          foreach ($line in $selected) { Write-Host "DOTNET_SELECTED_VERSION_LINE=[$line]" }
-          $sdks = @(& $sdk --list-sdks 2>&1 | ForEach-Object { $_.ToString().Trim() })
-          $listExit = $LASTEXITCODE
-          foreach ($line in $sdks) { Write-Host "DOTNET_INSTALLED_SDK_LINE=[$line]" }
-          $selectedVersions = @($selected | Where-Object { $_ -match '^10\.\d+\.\d+        run: |
+          $dotnetVersion = (& dotnet --version).Trim()
+          Write-Host "SELECTED_DOTNET_SDK=$dotnetVersion"
+          if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') { throw 'Pinned SDK10 selection failed before package tests' }
+      - name: Require exact PR175 ancestor for R19 package evidence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git merge-base --is-ancestor ca9766810aef2cc66ac1f96026f37f7be5c3dabe HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Expected PR175 baseline not found' }
+          $actual = @(git diff --name-only ca9766810aef2cc66ac1f96026f37f7be5c3dabe HEAD)
+          $expected = @('.github/workflows/issue22-r19-native-sdk-owner-package.yml', '.github/workflows/issue22-windows-sdk-selection-ci.yml', 'scripts/build_windows.ps1', 'global.json')
+          if (Compare-Object $expected $actual) { throw 'Unexpected exact-source delta for R19 package' }
+      - name: Prepare reviewed Inno compiler
+        run: |
           $ErrorActionPreference = 'Stop'
           $setup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
           Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $setup -TimeoutSec 120
@@ -121,29 +125,27 @@ jobs:
           } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:GP_OUTPUT 'OWNER_TEST_RECEIPT.json') -Encoding utf8
           Write-Host "SETUP_EXE_SHA256=$exeSha"
           Write-Host "SETUP_ZIP_SHA256=$zipSha"
-      - name: Check setup ZIP has only the verified EXE
+      - name: Check ZIP contains exactly the one installer EXE
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.IO.Compression
-          $zipPath = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.zip'
-          $exePath = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.exe'
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          $zip = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.zip'
+          $exe = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.exe'
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
-            if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].Name -ne (Split-Path $exePath -Leaf) -or
-                $archive.Entries[0].Length -ne (Get-Item -LiteralPath $exePath).Length) {
-              throw 'Quick-test setup archive is not the verified single EXE'
+            if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].Name -ne (Split-Path $exe -Leaf) -or $archive.Entries[0].Length -ne (Get-Item -LiteralPath $exe).Length) {
+              throw 'R19 owner ZIP is not a verified one-EXE ZIP'
             }
-          }
-          finally { $archive.Dispose() }
-          Write-Host 'R19_QUICK_TEST_SINGLE_EXE=true'
-      - name: Upload ONLY setup EXE ZIP (primary owner test)
+          } finally { $archive.Dispose() }
+          Write-Host 'R19_INSTALLER_ZIP_SINGLE_EXE=PASS'
+      - name: Upload R19 quick-test setup ZIP ONLY
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: GlobalPulse-R19-QUICK-TEST-SETUP-ONLY-${{ github.sha }}
           path: ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-setup.zip
           if-no-files-found: error
           retention-days: 1
-      - name: Upload portable ZIP SEPARATELY (optional)
+      - name: Upload optional portable ZIP SEPARATELY
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: GlobalPulse-R19-PORTABLE-OPTIONAL-${{ github.sha }}
