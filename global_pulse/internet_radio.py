@@ -14,22 +14,40 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider, QMessageBox, QLineEdit
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
+    QSlider, QMessageBox, QLineEdit, QTabWidget,
+)
 from .security import safe_url
 from .sdr_directory import (
     DIRECTORY_URLS, MAX_DIRECTORY_BYTES, parse_directory, public_receiver_url,
 )
 
 STATIONS = (
-    # News / talk only. Music-only WQXR, New Sounds and Operavore entries were
-    # removed after physical owner testing; culture/music programming is kept
-    # out of the default news radio bank.
-    {"id":"wnyc_fm","name":"WNYC 93.9 FM","language":"English · News/Talk","url":"https://fm939.wnyc.org/wnycfm","documentation":"https://prod.wnyc.org/audio-other-formats/"},
-    {"id":"deutschlandfunk","name":"Deutschlandfunk","language":"German · News/Talk","url":"https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
-    {"id":"wnyc_am","name":"WNYC 820 AM","language":"English · News/Talk","url":"https://am820.wnyc.org/wnycam","documentation":"https://prod.wnyc.org/audio-other-formats/"},
-    {"id":"deutschlandfunk_nova","name":"Deutschlandfunk Nova","language":"German · News/Talk","url":"https://st03.sslstream.dlf.de/dlf/03/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
-    {"id":"deutschlandfunk_debatten","name":"Deutschlandfunk Dokumente & Debatten","language":"German · News/Debate","url":"https://st04.sslstream.dlf.de/dlf/04/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    # Deliberately finite publisher-documented HTTPS MP3 streams, not arbitrary
+    # URLs supplied by a community aggregator. Stream availability, user region,
+    # broadcaster redistribution rights and native codec support require QA.
+    # The dial labels ONLY a publisher-advertised broadcast RF frequency.
+    {"id":"wnyc_fm","name":"WNYC 93.9 FM","category":"News & Talk","dial":"FM · 93.9 MHz","language":"English","url":"https://fm939.wnyc.org/wnycfm","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"wnyc_am","name":"WNYC 820 AM","category":"News & Talk","dial":"AM · 820 kHz","language":"English","url":"https://am820.wnyc.org/wnycam","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"wqxr","name":"WQXR 105.9 FM","category":"Classical","dial":"FM · 105.9 MHz","language":"English","url":"https://stream.wqxr.org/wqxr","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"new_sounds","name":"New Sounds","category":"Music","dial":"INTERNET STREAM","language":"English","url":"https://q2stream.wqxr.org/q2","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"operavore","name":"Operavore","category":"Classical","dial":"INTERNET STREAM","language":"English","url":"https://opera-stream.wqxr.org/operavore","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"new_standards","name":"New Standards","category":"Music","dial":"INTERNET STREAM","language":"English","url":"https://tjc.wnyc.org/js-stream","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"deutschlandfunk","name":"Deutschlandfunk","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_kultur","name":"Deutschlandfunk Kultur","category":"Culture","dial":"INTERNET STREAM","language":"German","url":"https://st02.sslstream.dlf.de/dlf/02/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_nova","name":"Deutschlandfunk Nova","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st03.sslstream.dlf.de/dlf/03/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_debatten","name":"Deutschlandfunk Dokumente & Debatten","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st04.sslstream.dlf.de/dlf/04/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"france_inter","name":"France Inter","category":"News & Talk","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceinter-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_info","name":"franceinfo","category":"News & Talk","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceinfo-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_culture","name":"France Culture","category":"Culture","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceculture-lofi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_musique","name":"France Musique","category":"Classical","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/francemusique-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"fip","name":"FIP","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fip-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_rock","name":"FIP Rock","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fiprock-midfi.mp3?id_station=71","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_electro","name":"FIP Electro","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fipelectro-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_metal","name":"FIP Metal","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fipmetal-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
 )
+BROADCAST_CATEGORIES = ("All stations", "News & Talk", "Music", "Classical", "Culture")
 
 # The owner tested this public WebSDR on its operator's original HTTP/8901
 # endpoint. It is a legacy *unencrypted* service; only this exact origin is
@@ -63,7 +81,7 @@ def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
 
 
 HAM_DIRECTORIES = (
-    {"id":"websdr","name":"WebSDR public receivers","url":"https://websdr.org/","note":"Manual ham-band tuning on public receiver pages; provider controls availability."},
+    {"id":"websdr","name":"WebSDR public receivers","url":"http://www.websdr.org/","note":"The provider documents an HTTP-only public directory; no automatic connection."},
     {"id":"kiwisdr","name":"KiwiSDR public receivers","url":"https://kiwisdr.com/public/","note":"Manual ham/shortwave tuning on public receiver pages; provider controls availability."},
 )
 
@@ -231,13 +249,32 @@ class RadioPanel(QWidget):
         self.scan_step = None
         self.scan_direction = 1
         self.setObjectName("InternetRadio")
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8,8,8,8)
+        self.radio_tabs = QTabWidget(self)
+        self.radio_tabs.setAccessibleName("Choose broadcast radio or HAM SDR tuner")
+        broadcast_tab=QWidget(self.radio_tabs)
+        ham_tab=QWidget(self.radio_tabs)
+        self.radio_tabs.addTab(broadcast_tab,"AM / FM / INTERNET RADIO")
+        self.radio_tabs.addTab(ham_tab,"HAM / SDR")
+        root.addWidget(self.radio_tabs)
+        layout = QVBoxLayout(broadcast_tab)
         layout.setContentsMargins(8,8,8,8)
-        title = QLabel("INTERNET RADIO")
+        title = QLabel("BROADCAST RADIO — DIRECT INTERNET STREAMS")
         title.setObjectName("Eyebrow")
         layout.addWidget(title)
+        category_row=QHBoxLayout()
+        category_row.addWidget(QLabel("Genre"))
+        self.broadcast_category=QComboBox()
+        self.broadcast_category.setAccessibleName("Broadcast radio station genre")
+        for category in BROADCAST_CATEGORIES:
+            self.broadcast_category.addItem(category,category)
+        category_row.addWidget(self.broadcast_category,1)
+        self.broadcast_count=QLabel(f"{len(STATIONS)} documented streams")
+        category_row.addWidget(self.broadcast_count)
+        layout.addLayout(category_row)
         tuning = QHBoxLayout()
-        self.previous = QPushButton("◀")
+        self.previous = QPushButton("◀ PREV")
         self.previous.setAccessibleName("Previous radio station")
         self.previous.clicked.connect(lambda:self.select_relative(-1))
         self.selector = QComboBox()
@@ -246,18 +283,28 @@ class RadioPanel(QWidget):
         self.selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         for item in STATIONS:
             self.selector.addItem(item["name"], item["id"])
-        self.next = QPushButton("▶")
+        self.broadcast_category.currentIndexChanged.connect(self._category_changed)
+        self.next = QPushButton("NEXT ▶")
         self.next.setAccessibleName("Next radio station")
         self.next.clicked.connect(lambda:self.select_relative(1))
         tuning.addWidget(self.previous);tuning.addWidget(self.selector,1);tuning.addWidget(self.next)
         layout.addLayout(tuning)
+        self.frequency_display=QLabel()
+        self.frequency_display.setTextFormat(Qt.TextFormat.PlainText)
+        self.frequency_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.frequency_display.setAccessibleName("Exact published AM FM frequency or internet-only stream")
+        self.frequency_display.setStyleSheet(
+            "font-family:Consolas,monospace;font-size:30px;font-weight:800;padding:8px;background:#101818;"
+            "color:#86f5c7;border:1px solid #407b67;border-radius:8px;"
+        )
+        layout.addWidget(self.frequency_display)
         self.display = QLabel()
         self.display.setTextFormat(Qt.TextFormat.PlainText)
         self.display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display.setWordWrap(True)
         self.display.setMinimumHeight(75)
-        self.display.setStyleSheet("font-size:19px;font-weight:600;padding:12px;background:#151619;border:1px solid #494052;border-radius:8px;")
-        layout.addWidget(self.display,1)
+        self.display.setStyleSheet("font-size:19px;font-weight:600;padding:10px;background:#151619;border:1px solid #494052;border-radius:8px;")
+        layout.addWidget(self.display)
         self.status = QLabel("OFF")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setAccessibleName("Radio playback state")
@@ -295,10 +342,56 @@ class RadioPanel(QWidget):
         help_text.setWordWrap(True)
         help_text.setObjectName("Muted")
         layout.addWidget(help_text)
+        more_row=QHBoxLayout()
+        self.browse_radio=QPushButton("Explore more radio stations")
+        self.browse_radio.setAccessibleName("Open community radio directory in browser")
+        self.browse_radio.clicked.connect(self._browse_radio_directory)
+        more_row.addWidget(self.browse_radio)
+        more_row.addStretch()
+        layout.addLayout(more_row)
+        disclaimer=QLabel(
+            "Only publisher-documented HTTPS MP3 streams play inside Pulse. "
+            "Some stations have no fixed AM/FM frequency. The external community "
+            "directory is for discovery, not a claim of tested playback or reuse rights."
+        )
+        disclaimer.setWordWrap(True)
+        disclaimer.setObjectName("Muted")
+        layout.addWidget(disclaimer)
+        layout.addStretch(1)
 
+        layout=QVBoxLayout(ham_tab)
+        self.ham_layout=layout
+        layout.setContentsMargins(8,8,8,8)
         ham_title=QLabel("HAM / SDR RECEIVERS")
         ham_title.setObjectName("Eyebrow")
         layout.addWidget(ham_title)
+        self.ham_receiver_name=QLabel("Choose a public receiver")
+        self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_receiver_name.setWordWrap(True)
+        self.ham_receiver_name.setStyleSheet("font-size:17px;font-weight:700;color:#b9e8ee;")
+        layout.addWidget(self.ham_receiver_name)
+        self.ham_frequency_display=QLabel("7.100 MHz")
+        self.ham_frequency_display.setAccessibleName("Pulse requested HAM frequency and mode, not verified on operator")
+        self.ham_frequency_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ham_frequency_display.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_frequency_display.setStyleSheet(
+            "font-family:Consolas,monospace;font-size:34px;font-weight:800;color:#86f5c7;background:#101818;"
+            "padding:10px;border:1px solid #407b67;border-radius:8px;"
+        )
+        layout.addWidget(self.ham_frequency_display)
+        self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
+        self.ham_frequency_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ham_frequency_detail.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_frequency_detail.setWordWrap(True)
+        self.ham_frequency_detail.setAccessibleName("Exact requested kilohertz and mode; operator playback unverified")
+        layout.addWidget(self.ham_frequency_detail)
+        self.ham_bands=QLabel(
+            "Available bands: choose a receiver. Only operator-supplied bands are shown."
+        )
+        self.ham_bands.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_bands.setWordWrap(True)
+        self.ham_bands.setAccessibleName("Bands reported for selected SDR receiver")
+        layout.addWidget(self.ham_bands)
         ham_row=QHBoxLayout()
         self.ham_selector=QComboBox()
         self.ham_selector.setAccessibleName("Public ham and SDR receiver directory")
@@ -408,12 +501,30 @@ class RadioPanel(QWidget):
             self.mode.addItem(label,value)
         self.tune_button=QPushButton("Tune")
         self.tune_button.clicked.connect(self._manual_tune)
+        self.frequency.textChanged.connect(lambda _value:self._update_ham_dial())
+        self.mode.currentIndexChanged.connect(lambda _index:self._update_ham_dial())
         tuner_row.addWidget(self.receiver_type)
         tuner_row.addWidget(QLabel("kHz"))
         tuner_row.addWidget(self.frequency,1)
         tuner_row.addWidget(self.mode)
         tuner_row.addWidget(self.tune_button)
         layout.addLayout(tuner_row)
+        stepping=QHBoxLayout()
+        self.ham_back=QPushButton("◀ LOWER")
+        self.ham_back.setAccessibleName("Tune lower by selected kilohertz step")
+        self.ham_back.clicked.connect(lambda:self.step_receiver(-1))
+        self.ham_step=QComboBox()
+        self.ham_step.setAccessibleName("HAM tuning increment in kilohertz")
+        for step in (1,5,10,25,100):
+            self.ham_step.addItem(f"{step} kHz step",step)
+        self.ham_step.setCurrentIndex(1)
+        self.ham_forward=QPushButton("HIGHER ▶")
+        self.ham_forward.setAccessibleName("Tune higher by selected kilohertz step")
+        self.ham_forward.clicked.connect(lambda:self.step_receiver(1))
+        stepping.addWidget(self.ham_back)
+        stepping.addWidget(self.ham_step,1)
+        stepping.addWidget(self.ham_forward)
+        layout.addLayout(stepping)
 
         scan_row=QHBoxLayout()
         self.scan_start=QLineEdit("7000")
@@ -434,7 +545,15 @@ class RadioPanel(QWidget):
         scan_row.addWidget(QLabel("Step"));scan_row.addWidget(self.scan_step_edit)
         scan_row.addWidget(QLabel("Dwell s"));scan_row.addWidget(self.scan_dwell)
         scan_row.addWidget(self.scan_button);scan_row.addWidget(self.scan_stop)
-        layout.addLayout(scan_row)
+        self.scan_controls=QWidget(ham_tab)
+        self.scan_controls.setLayout(scan_row)
+        self.scan_controls.hide()
+        self.advanced_scan=QPushButton("Advanced frequency scan ▸")
+        self.advanced_scan.setCheckable(True)
+        self.advanced_scan.setAccessibleName("Show or hide advanced HAM frequency scan")
+        self.advanced_scan.toggled.connect(self._advanced_scan_toggled)
+        layout.addWidget(self.advanced_scan)
+        layout.addWidget(self.scan_controls)
 
         self.ham_note=QLabel(
             "Receiver screen/waterfall is the public provider's own embedded UI. Tune sets the receiver URL frequency/mode. "
@@ -447,12 +566,115 @@ class RadioPanel(QWidget):
         self.selector.currentIndexChanged.connect(self._station_changed)
         self._station_changed()
         self._preset_labels()
+        self._update_ham_dial()
+        self._change_receiver_directory()
 
     def configure_preferences(self, getter, setter):
         self._setter = setter
         self.presets = valid_presets(getter("internet_radio_presets_v1",[None]*5))
         self._preset_labels()
         # Legacy receiver/frequency presets are deliberately not overwritten.
+
+    def _category_changed(self, *_):
+        """Filter only our publisher-documented streams; never auto-fetch media."""
+        category=self.broadcast_category.currentData()
+        selected=self.selector.currentData()
+        matches=[s for s in STATIONS if category=="All stations" or s["category"]==category]
+        self.selector.blockSignals(True)
+        try:
+            self.selector.clear()
+            for item in matches:
+                self.selector.addItem(item["name"],item["id"])
+            index=self.selector.findData(selected)
+            if index>=0:
+                self.selector.setCurrentIndex(index)
+        finally:
+            self.selector.blockSignals(False)
+        self.broadcast_count.setText(f"{len(matches)} documented streams")
+        if matches:
+            self._station_changed()
+
+    def _browse_radio_directory(self):
+        """Unvetted community links remain in the user's external browser."""
+        if self._closed:
+            return False
+        approved=QMessageBox.question(
+            self,"Explore additional radio stations?",
+            "Open the public Radio Browser community directory in your default "
+            "browser? Its catalog is not vetted for safe in-app playback, "
+            "publisher redistribution rights or actual availability. Continue?",
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )==QMessageBox.StandardButton.Yes
+        return bool(approved and QDesktopServices.openUrl(
+            QUrl("https://www.radio-browser.info/")
+        ))
+
+    def _advanced_scan_toggled(self, shown):
+        self.scan_controls.setVisible(bool(shown))
+        self.advanced_scan.setText(
+            "Advanced frequency scan ▾" if shown else
+            "Advanced frequency scan ▸"
+        )
+
+    def _update_ham_dial(self):
+        """Display the exact requested frequency, never assert RF/audio lock."""
+        try:
+            khz=self._frequency_value(self.frequency.text())
+            display=f"{khz / 1000:.6f}"
+            integral,fraction=display.split(".")
+            fraction=fraction.rstrip("0").ljust(3,"0")
+            self.ham_frequency_display.setText(f"{integral}.{fraction} MHz")
+            self.ham_frequency_detail.setText(
+                f"{khz:g} kHz · {self.mode.currentText()} · "
+                "Pulse requested setting; receiver audio unverified"
+            )
+        except (ValueError,TypeError):
+            self.ham_frequency_display.setText("— MHz")
+            self.ham_frequency_detail.setText(
+                "Enter a valid requested frequency in kHz"
+            )
+
+    def step_receiver(self, direction):
+        """Real button-driven tuning, bounded to valid user-requested kHz."""
+        if direction not in (-1,1) or self._closed:
+            return False
+        try:
+            previous=self._frequency_value(self.frequency.text())
+            delta=int(self.ham_step.currentData())*direction
+            target=self._frequency_value(round(previous+delta,6))
+        except (ValueError,TypeError,OverflowError):
+            self.ham_note.setText("Frequency step is outside the supported dial range.")
+            return False
+        self.stop_scan()
+        return self.tune_receiver(target)
+
+    def _selected_receiver_bands(self, receiver=None):
+        info=receiver if isinstance(receiver,dict) else {}
+        bands=info.get("bands")
+        if isinstance(bands,list):
+            labels=[str(item)[:30] for item in bands[:24]
+                    if isinstance(item,str) and item.strip()]
+        else:
+            labels=[]
+        if labels:
+            self.ham_bands.setText(
+                "Operator-listed bands: "+" · ".join(labels)
+                +". Exact bounds/availability are not live verified."
+            )
+        elif self.receiver_url.text().startswith(OWNER_TEST_WEBDR_ORIGIN):
+            # Only the labels visibly reported by the owner's NA5B screenshot.
+            # Never infer MHz limits, availability or a universal band plan.
+            self.ham_bands.setText(
+                "NA5B band labels seen on owner's receiver page: "
+                "MW–160 · 80m · 40m · 30m · 25m · 20m · 15m · 10m. "
+                "Operator controls exact coverage."
+            )
+        else:
+            self.ham_bands.setText(
+                "Receiver band list unavailable from this directory entry. "
+                "Use the operator's receiver page to see actual coverage."
+            )
 
     def _preset_labels(self):
         for i,control in enumerate(self.preset_buttons):
@@ -473,10 +695,21 @@ class RadioPanel(QWidget):
 
     def recall_preset(self,index):
         if type(index) is not int or not 0<=index<5 or not self.presets[index]:return False
-        self.selector.setCurrentIndex(self.selector.findData(self.presets[index]));return True
+        selected=self.selector.findData(self.presets[index])
+        if selected<0:
+            # A saved station may be hidden by the current genre filter.
+            # Restore the full documented catalog before recalling it.
+            self.broadcast_category.setCurrentIndex(0)
+            selected=self.selector.findData(self.presets[index])
+        if selected<0:return False
+        self.selector.setCurrentIndex(selected)
+        return True
 
     def select_relative(self,step):
-        self.selector.setCurrentIndex((self.selector.currentIndex()+(-1 if step<0 else 1))%self.selector.count())
+        if self.selector.count():
+            self.selector.setCurrentIndex(
+                (self.selector.currentIndex()+(-1 if step<0 else 1))%self.selector.count()
+            )
 
     def _sdr_state_change(self, state, message=""):
         """Visual state reflects the receiver page load, never the Connect click."""
@@ -504,6 +737,8 @@ class RadioPanel(QWidget):
             self.receiver_type.findData("websdr")
         )
         self.receiver_url.setText(OWNER_TEST_WEBDR_ORIGIN)
+        self.ham_receiver_name.setText("NA5B · WebSDR public receiver")
+        self._selected_receiver_bands()
         self.receiver_list_note.setText(
             "NA5B selected: public operator HTTP/8901 WebSDR. "
             "Connection is unencrypted and will require explicit consent; "
@@ -517,7 +752,14 @@ class RadioPanel(QWidget):
         except ValueError:
             self.receiver_connect.setEnabled(False)
             self.receiver_external.setEnabled(False)
+            self.ham_receiver_name.setText("Enter a public receiver URL")
+            self._selected_receiver_bands()
             return
+        if item["url"].startswith(OWNER_TEST_WEBDR_ORIGIN):
+            self.ham_receiver_name.setText("NA5B · WebSDR public receiver")
+        else:
+            self.ham_receiver_name.setText("Selected receiver · "+item["host"])
+        self._selected_receiver_bands()
         legacy = _owner_legacy_websdr(item, self.receiver_type.currentData())
         self.receiver_connect.setEnabled(item["embedded_candidate"] or legacy)
         self.receiver_external.setEnabled(True)
@@ -537,20 +779,29 @@ class RadioPanel(QWidget):
     def _change_receiver_directory(self, *_):
         item = self.ham_selector.currentData() or {}
         provider = item.get("id", "")
-        cached = self.sdr_directory_cache.get(provider, [])
+        cached = list(self.sdr_directory_cache.get(provider, []))
+        if provider == "websdr":
+            # The owner-tested fallback is known by exact identity, not a
+            # claim that the official directory fetched or that audio is live.
+            pinned=dict(public_receiver_url(OWNER_TEST_WEBDR_ORIGIN))
+            pinned.update(name="NA5B · owner-tested link",provider="websdr")
+            cached=[pinned]+[r for r in cached if r["url"]!=pinned["url"]]
         self.receiver_picker.blockSignals(True)
         self.receiver_picker.clear()
         self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
         for row in cached:
             self.receiver_picker.addItem(row["name"] + " — " + row["host"], dict(row))
         self.receiver_picker.blockSignals(False)
-        if cached:
+        if self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(
-                f"{len(cached)} cached public directory links. Status not verified; click Refresh to update."
+                f"{len(cached)} public receiver choices, including any pinned owner-test link. "
+                "Directory labels are unverified until the operator is opened."
             )
         else:
             self.receiver_list_note.setText(
-                "No list loaded. Refresh accesses the selected public directory on request."
+                "No live directory loaded. Refresh requests the selected public "
+                "operator directory; WebSDR's documented endpoint uses unencrypted HTTP. "
+                "The NA5B owner-test link remains selectable when that site is down."
             )
 
     def _select_discovered_receiver(self, *_):
@@ -563,10 +814,11 @@ class RadioPanel(QWidget):
         )
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
+        self.ham_receiver_name.setText(item["name"])
+        self._selected_receiver_bands(item)
         self.receiver_list_note.setText(
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
-        self._receiver_url_changed(item["url"])
 
     def refresh_receiver_directory(self):
         """One bounded, on-demand request to an official directory, never receivers."""
@@ -577,6 +829,17 @@ class RadioPanel(QWidget):
         url = DIRECTORY_URLS.get(provider)
         if not url:
             return False
+        if provider == "websdr":
+            approved=QMessageBox.question(
+                self,"Refresh WebSDR directory over HTTP?",
+                "The WebSDR operator documents an unencrypted HTTP directory. "
+                "Network intermediaries could change the list. Pulse validates "
+                "each public candidate and does not auto-connect. Continue?",
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+            if not approved:
+                return False
         request = QNetworkRequest(QUrl(url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
@@ -1035,7 +1298,7 @@ class RadioPanel(QWidget):
         ):
             settings.setAttribute(flag,False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture,True)
-        self.layout().addWidget(self.receiver_view,2)
+        self.ham_layout.addWidget(self.receiver_view,2)
 
     def _destroy_receiver(self):
         self.stop_scan()
@@ -1064,7 +1327,11 @@ class RadioPanel(QWidget):
 
     def _station_changed(self,*_):
         item=station(self.selector.currentData())
-        self.display.setText(item["name"]+"\n"+item["language"]+" · direct MP3")
+        self.frequency_display.setText(item["dial"])
+        self.display.setText(
+            item["name"]+"\n"+item["language"]+" · "+item["category"]
+            +" · publisher-documented MP3"
+        )
         if self.power.isChecked():self._start_current()
 
     def _power(self,on):
