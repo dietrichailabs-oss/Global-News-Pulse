@@ -106,6 +106,10 @@ class WorldMap(QWidget):
         # Source/view/category changes produce a fresh Qt-GUI-owned pixmap.
         self._country_backdrop_key = None
         self._country_backdrop_pixmap = None
+        # Country label placement and non-overlap are viewport work, not
+        # per-paint work. Preserve the exact painter text/layer order.
+        self._country_label_key = None
+        self._country_label_specs = ()
         # Projected point clusters change with source dataset, view or category
         # only. Cursor hover/selection can reuse the same 5,000-point grouping.
         self._cluster_view_key = None
@@ -701,6 +705,42 @@ class WorldMap(QWidget):
                         shade = QColor(color); shade.setAlpha(185)
                         painter.setBrush(QBrush(shade, style)); painter.drawPath(mapped_path)
 
+    def _visible_country_label_specs(self, painter, projected_paths):
+        """Place country labels once per exact view, not on every idle paint.
+
+        Font and draw order are unchanged. Cache only Qt-GUI-owned rectangles
+        and source geography names; GDELT and warning layers still draw first.
+        A DPI or viewport change recomputes actual font metrics and overlaps.
+        """
+        key = (self._projected_view_key, self.devicePixelRatioF())
+        if self._country_label_key == key:
+            return self._country_label_specs
+        occupied = []
+        specs = []
+        viewport = self.rect()
+        metrics = painter.fontMetrics()
+        for country, mapped_path in zip(self._countries, projected_paths):
+            label = country.get("label")
+            if (not label or not all(_number(v) for v in label)
+                    or country["name"] == "Antarctica"):
+                continue
+            bounds = mapped_path.boundingRect()
+            if bounds.width() * bounds.height() < 2300 and self.zoom < 3:
+                continue
+            position = self.point(*label)
+            name = country["name"].upper()
+            text_width = metrics.horizontalAdvance(name)
+            rect = QRectF(position.x() - text_width / 2,
+                          position.y() - 5, text_width, 11)
+            if (not viewport.contains(rect.toRect())
+                    or any(rect.intersects(used) for used in occupied)):
+                continue
+            specs.append((rect, name))
+            occupied.append(rect.adjusted(-5, -3, 5, 3))
+        self._country_label_specs = tuple(specs)
+        self._country_label_key = key
+        return self._country_label_specs
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -748,22 +788,8 @@ class WorldMap(QWidget):
         if self.labels:
             painter.setFont(QFont("Segoe UI", 7))
             painter.setPen(QColor("#6d7b90"))
-            occupied = []
-            for c, mapped_path in zip(self._countries, projected_paths):
-                label = c.get("label")
-                if not label or not all(_number(v) for v in label) or c["name"] == "Antarctica":
-                    continue
-                bounds = mapped_path.boundingRect()
-                if bounds.width() * bounds.height() < 2300 and self.zoom < 3:
-                    continue
-                p = self.point(*label)
-                name = c["name"].upper()
-                text_width = painter.fontMetrics().horizontalAdvance(name)
-                rect = QRectF(p.x() - text_width/2, p.y() - 5, text_width, 11)
-                if not self.rect().contains(rect.toRect()) or any(rect.intersects(r) for r in occupied):
-                    continue
+            for rect, name in self._visible_country_label_specs(painter, projected_paths):
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, name)
-                occupied.append(rect.adjusted(-5, -3, 5, 3))
         self.area_layer.paint(painter)
 
         # Country-level category dots make country-attributed politics, economy,
