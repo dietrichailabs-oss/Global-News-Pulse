@@ -69,6 +69,10 @@ class WorldMap(QWidget):
         # was measured as part of the blocked main-thread coverage hot path.
         self._coverage_points = 0
         self._coverage_unlocated = 0
+        # The map footer counts actual event coordinates, not country-only
+        # attribution. Cache the count when the exact point dataset changes:
+        # paintEvent can run repeatedly on startup/idle, hover and exposure.
+        self._footer_point_count = 0
         self.area_layer = WarningAreaLayer(self)
         self.selected_event = ""
         self.selected_country = ""
@@ -197,6 +201,9 @@ class WorldMap(QWidget):
         # source snapshot. Direct calls keep the original GUI classifier.
         self._pending_preclassified_country = preclassified_country
         self.events = list(events)[:5000]
+        # Preserve the original all-point (not category-filtered) footer
+        # semantics without re-scanning up to 5,000 events per paint.
+        self._footer_point_count = sum(self.has_location(item) for item in self.events)
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
         self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
@@ -346,6 +353,17 @@ class WorldMap(QWidget):
         return (f"{points} points · {areas} warning areas · {activity} countries with activity"
                 f" · {country_only} country-only records · {economic_countries} economy countries/{economic_rows} observations"
                 f" · {unlocated} unlocated" + suffix)
+
+    def _footer_coverage_text(self):
+        """Exact displayed coverage, with only the point count precomputed.
+
+        Warning geometry and zoom remain live so layer toggles and camera
+        changes do not display stale counts or imply unsupported locations.
+        """
+        return (
+            f"{self._footer_point_count} points / {len(self.evidence_events)} reports assessed"
+            f" · {len(self.area_layer.visible())} warning areas · {self.zoom:.1f}×"
+        )
 
     def empty_coverage_message(self):
         if self.country_category_evidence or self.economic_observations:
@@ -790,9 +808,10 @@ class WorldMap(QWidget):
         painter.setPen(QColor("#718099"))
         painter.drawText(QRectF(12, self.height()-22, self.width()-24, 17), Qt.AlignmentFlag.AlignLeft,
                          "OFFLINE BASE MAP  ·  Natural Earth  ·  Boundaries are illustrative")
-        mapped = sum(self.has_location(e) for e in self.events)
+        # A cheap cursor-hover, window expose or passive timer repaint must
+        # not perform another 5,000-point coordinate validation pass on Qt.
         painter.drawText(QRectF(12, self.height()-22, self.width()-24, 17), Qt.AlignmentFlag.AlignRight,
-                         f"{mapped} points / {len(self.evidence_events)} reports assessed · {len(self.area_layer.visible())} warning areas · {self.zoom:.1f}×")
+                         self._footer_coverage_text())
         if self._map_error:
             painter.setPen(QColor("#ffb1ba"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._map_error)
