@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m compileall -q global_pulse tests/test_issue22_idle_country_badges.py tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_country_label_layout.py
-          python -m pytest -s -q --tb=short tests/test_issue22_idle_country_badges.py tests/test_issue22_idle_country_label_layout.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue58_map_paint_cache.py tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_gdelt_projection.py tests/test_issue22_idle_selected_context.py tests/test_issue22_idle_economy_same_evidence.py tests/test_issue22_idle_source_status_trylock.py tests/test_issue22_idle_archive_storage_trylock.py
+          python -m pytest -s -q --tb=short tests/test_issue22_idle_country_badges.py tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_country_label_layout.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue58_map_paint_cache.py tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_gdelt_projection.py tests/test_issue22_idle_selected_context.py tests/test_issue22_idle_economy_same_evidence.py tests/test_issue22_idle_source_status_trylock.py tests/test_issue22_idle_archive_storage_trylock.py
       - name: Tracked tree clean
         if: always()
         shell: bash
