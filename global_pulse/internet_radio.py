@@ -621,12 +621,12 @@ class RadioPanel(QWidget):
         """Display the exact requested frequency, never assert RF/audio lock."""
         try:
             khz=self._frequency_value(self.frequency.text())
-            display=f"{khz / 1000:.6f}"
+            display=f"{khz / 1000:.9f}"
             integral,fraction=display.split(".")
             fraction=fraction.rstrip("0").ljust(3,"0")
             self.ham_frequency_display.setText(f"{integral}.{fraction} MHz")
             self.ham_frequency_detail.setText(
-                f"{khz:g} kHz · {self.mode.currentText()} · "
+                f"{self._format_khz(khz)} kHz · {self.mode.currentText()} · "
                 "Pulse requested setting; receiver audio unverified"
             )
         except (ValueError,TypeError):
@@ -1048,6 +1048,11 @@ class RadioPanel(QWidget):
             raise ValueError("Frequency must be between 0.1 and 500000 kHz")
         return number
 
+    @staticmethod
+    def _format_khz(value):
+        """Preserve fine manual tuning instead of the six-significant-digit g default."""
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+
     def _tuned_receiver_url(self,frequency=None,mode=None):
         base,host=self._receiver_target()
         frequency=self._frequency_value(self.frequency.text() if frequency is None else frequency)
@@ -1057,10 +1062,10 @@ class RadioPanel(QWidget):
         parsed=urlsplit(base)
         params=dict(parse_qsl(parsed.query,keep_blank_values=True))
         if self.receiver_type.currentData()=="websdr":
-            params["tune"]=f"{frequency:g}{mode}"
+            params["tune"]=f"{self._format_khz(frequency)}{mode}"
             params.pop("f",None)
         else:
-            params["f"]=f"{frequency:g}{mode}"
+            params["f"]=f"{self._format_khz(frequency)}{mode}"
             params["vol"]=str(self.sdr_volume.value())
             params.pop("tune",None)
         return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(params),parsed.fragment)),host
@@ -1125,9 +1130,9 @@ class RadioPanel(QWidget):
                     if not self._load_receiver_url(url, host):
                         return False
             value=self._frequency_value(self.frequency.text() if frequency is None else frequency)
-            self.frequency.setText(f"{value:g}")
+            self.frequency.setText(self._format_khz(value))
             self.ham_note.setText(
-                f"SDR TUNING · {value:g} kHz {str(self.mode.currentText())} · "
+                f"SDR TUNING · {self._format_khz(value)} kHz {str(self.mode.currentText())} · "
                 "receiver page and audio not yet verified; Off ends the session"
             )
             return True
