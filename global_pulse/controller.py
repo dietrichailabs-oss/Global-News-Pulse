@@ -223,12 +223,25 @@ class Controller(QObject):
             self.store.prune(int(value))
         self.data_changed.emit()
 
-    def archive_storage_status(self):
+    def archive_storage_status(self, *, nonblocking=False):
+        """Return honest archive status; passive Qt polls may defer on BUSY.
+
+        The old hidden Settings timer waited for the 5,000-event collector's
+        Store RLock on the GUI thread, even before any clicks. A nonblocking
+        request returns None rather than replacing the last real reading with
+        fabricated free-space/cleanup values. Explicit callers retain their
+        original serialized current-state behavior.
+        """
         from .archive_storage import snapshot, last_cleanup, last_cleanup_attempt
-        with self.store._lock:
+        acquired = self.store._lock.acquire(blocking=not nonblocking)
+        if not acquired:
+            return None
+        try:
             result = snapshot(self.store._conn, self.store.path)
             result["last_cleanup"] = last_cleanup(self.store._conn)
             result["cleanup_attempt"] = last_cleanup_attempt(self.store._conn)
+        finally:
+            self.store._lock.release()
         # The live result takes precedence over an older persisted attempt,
         # including when SQLite could not save the new status.
         if self._gdelt.cleanup_outcome:
