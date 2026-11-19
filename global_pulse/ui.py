@@ -1293,7 +1293,8 @@ class MainWindow(SituationActions, QMainWindow):
                         else tuple(self.world_map.categories))
         # Plain immutable country names/ISO codes only; no Qt painter or
         # QWidget crosses the worker boundary.
-        map_country_rows=tuple((str(c["name"]),str(c.get("code") or ""))
+        map_country_rows=tuple({"name":str(c["name"]),
+                                "code":str(c.get("code") or "")}
                                for c in self.world_map._countries)
         # The daily/weekly intelligence brief is another expensive hidden
         # workspace prewarm. Capture its period/cutoff before entering the
