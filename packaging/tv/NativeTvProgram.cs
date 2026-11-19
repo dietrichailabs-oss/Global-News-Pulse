@@ -319,9 +319,14 @@ internal sealed class TvForm : Form
         if (!WebView2OverrideNames.Contains("WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER")) failures++;
         if (!WebView2PolicyOverrides.Contains("AdditionalBrowserArguments")) failures++;
         if (!WebView2PolicyOverrides.Contains("UserDataFolder")) failures++;
+        // Exercise the real local Win32 API in an offline native test process.
+        // A missing package identity is valid for classic EXE installs.
+        string installedPackageState = InstalledPackageIdentityState();
+        if (installedPackageState is not ("present" or "absent" or "unknown")) failures++;
         Console.WriteLine(JsonSerializer.Serialize(new {
-            type="policy_self_test", cases=exact.Length * 2 + 11,
-            passed=failures==0, failures, network="none"
+            type="policy_self_test", cases=exact.Length * 2 + 12,
+            passed=failures==0, failures, network="none",
+            os_package_identity_state=installedPackageState
         }));
         return failures==0 ? 0 : 1;
     }
