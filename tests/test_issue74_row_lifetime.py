@@ -56,8 +56,11 @@ def test_deferred_title_update_keeps_exact_qt_item_and_id(desktop,monkeypatch,ap
     before_rows=[window.feed_list.item(i) for i in range(window.feed_list.count())]
     original=controller.headline_view
 
-    def fake_view(event, *, defer_language=False):
-        view=dict(original(event,defer_language=defer_language))
+    def fake_view(event, *, defer_language=False, enabled_override=None):
+        # Mirror the current controller contract; this is a translated-row
+        # identity test, not an assertion about language-preference lookups.
+        view=dict(original(event,defer_language=defer_language,
+                           enabled_override=enabled_override))
         if str(event.get("id"))==ids["beta"]:
             view["title"]="Translated synthetic beta"
             view["label"]="Synthetic local translation"

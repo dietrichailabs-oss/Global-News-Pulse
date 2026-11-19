@@ -9,6 +9,8 @@ import json
 import statistics
 import threading
 import time
+import sys
+import traceback
 from datetime import datetime, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -107,22 +109,28 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     window, controller = desktop
     window.prepare_initial_workspaces()
     called = []
-    monkeypatch.setattr(window, "refresh_data", lambda:called.append(1))
+    snapshot_starts = []
+    monkeypatch.setattr(window, "refresh_data", lambda: called.append(1))
+    # Collector notices now initiate a revision-checked worker, not a
+    # synchronous Qt refresh. This test isolates the cooldown scheduler;
+    # separate real-Store/real-Qt cases prove eventual source application.
+    monkeypatch.setattr(window, "_start_idle_snapshot", lambda: snapshot_starts.append(1))
     for _ in range(20):
         window.open_page(2)
         controller.evidence_changed.emit()
         window.open_page(0)
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
-    assert not called, "Collector updates must not build 5k items between clicks"
+    assert not called and not snapshot_starts, "Collector updates must not build 5k items between clicks"
     assert window._evidence_refresh_timer.isActive()
     window._evidence_refresh_timer.stop()
     window._last_navigation_at=time.monotonic()-2
     window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
-    assert called == [1], "Once idle, the pending collector revision is applied"
+    assert snapshot_starts == [1], "Once idle, start one revision-checked worker"
+    assert called == [], "Passive scheduling never synchronously rebuilds Qt"
     controller.data_changed.emit()
-    assert called == [1,1], "Explicit user/settings revisions remain immediate"
+    assert called == [1], "Explicit user/settings revisions remain immediate"
     assert not window._evidence_refresh_timer.isActive()
 
 
@@ -130,19 +138,42 @@ def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, mon
     window, controller = desktop
     assert window.prepare_initial_workspaces()
     calls=[]
-    monkeypatch.setattr(window,"refresh_data",lambda:calls.append(time.monotonic()))
+    monkeypatch.setattr(window,"_start_idle_snapshot",lambda:calls.append(time.monotonic()))
     window._last_navigation_at=time.monotonic()-10
     window._last_full_refresh_at=time.monotonic()
     for _ in range(120):
         controller.evidence_changed.emit()
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
-    assert calls==[], "Fast collector bursts must not force repeated GUI work"
+    assert calls==[], "Fast collector bursts must not start duplicate worker reads"
     assert window._evidence_refresh_timer.isActive()
     window._evidence_refresh_timer.stop()
     window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
-    assert len(calls)==1
+    assert len(calls)==1, "A coalesced burst starts exactly one worker snapshot"
+
+
+def test_idle_worker_has_priority_over_hidden_workspace_prewarm(desktop, monkeypatch):
+    """Do not let a hidden table monopolize SQLite while new reports arrive."""
+    window, controller = desktop
+    assert window.prepare_initial_workspaces()
+    window._dirty_pages.update((1, 2, 3, 4, 5))
+    window._workspace_warm_timer.stop()
+    reads=[]
+    monkeypatch.setattr(
+        controller.store,"content_revision_if_available",
+        lambda: reads.append("hidden database probe") or (0, 0))
+    window._idle_snapshot_inflight=True
+    try:
+        before=set(window._dirty_pages)
+        window._last_navigation_at=0
+        window._warm_next_workspace()
+        assert not reads, "Hidden prewarm must not compete for Store RLock with source read"
+        assert window._dirty_pages==before, "Deferred dirty pages must not be marked current"
+        assert window._workspace_warm_timer.isActive()
+    finally:
+        window._idle_snapshot_inflight=False
+        window._workspace_warm_timer.stop()
 
 
 def test_multi_field_settings_save_repaints_once(desktop, monkeypatch):
@@ -265,8 +296,17 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
         record.update(country=f"C{i%200:03d}",date=str(1980+i//200),synthetic=True)
     for offset in range(0,3200,1600):
         controller.store.put_observations(series[offset:offset+1600])
+    began_initial=time.perf_counter()
     window.refresh_data()
+    initial_refresh_ms=(time.perf_counter()-began_initial)*1000
     assert window.prepare_initial_workspaces()
+
+    worker_attempts=[]
+    original_start=window._start_idle_snapshot
+    def trace_snapshot_start():
+        worker_attempts.append(time.perf_counter())
+        return original_start()
+    monkeypatch.setattr(window,"_start_idle_snapshot",trace_snapshot_start)
 
     # Preserve all real computations while attributing synchronous UI costs.
     # This is a timing spy, never a stub, and only wraps work after prewarm.
@@ -342,7 +382,44 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
             if any(e.get("title")=="Navigation fixture 9001" for e in window._events):
                 break
             QTest.qWait(40)
-        assert any(e.get("title")=="Navigation fixture 9001" for e in window._events), (
+        visible=any(e.get("title")=="Navigation fixture 9001" for e in window._events)
+        if not visible:
+            # Do not weaken the real collector→Store→worker→Qt acceptance
+            # assertion. Capture where this previously silent failure lives.
+            # A bounded Python stack snapshot identifies whether the worker
+            # is still in SQLite, pure classification, or Qt delivery.
+            frames=sys._current_frames()
+            workers_stacks={}
+            for thread in threading.enumerate():
+                if thread.ident and thread.name.startswith("pulse-idle"):
+                    frame=frames.get(thread.ident)
+                    workers_stacks[thread.name]=(
+                        [(os.path.basename(f.filename),f.name,f.lineno)
+                         for f in traceback.extract_stack(frame)[-12:]]
+                        if frame else [])
+            stored=controller.events(**window.events_filters())
+            print("ISSUE82_COLLECTOR_DELIVERY_DIAGNOSTIC="+json.dumps({
+                "stored_visible":any(e.get("title")=="Navigation fixture 9001"
+                                     for e in stored),
+                "store_count":len(stored),
+                "ui_count":len(window._events),
+                "gui_inflight":window._idle_snapshot_inflight,
+                "brief_inflight":window._idle_brief_inflight,
+                "refresh_timer_active":window._evidence_refresh_timer.isActive(),
+                "refresh_timer_remaining":window._evidence_refresh_timer.remainingTime(),
+                "navigation_idle_s":round(time.monotonic()-window._last_navigation_at,3),
+                "since_full_refresh_s":round(time.monotonic()-window._last_full_refresh_at,3),
+                "generation":window._idle_snapshot_generation,
+                "startup_refresh_ms":round(initial_refresh_ms,2),
+                "worker_start_attempts":len(worker_attempts),
+                "worker_start_elapsed_s":(round(time.perf_counter()-worker_attempts[0],3)
+                                          if worker_attempts else None),
+                "completed_phase_ms":{name:round(max(measures),2)
+                                      for name,measures in phase_ms.items() if measures},
+                "worker_stacks":workers_stacks,
+                "status":window.status_label.text(),
+            },sort_keys=True))
+        assert visible, (
             "Latest material collector revision must become visible after navigation settles")
     finally:
         navigator.stop();pulse.stop()

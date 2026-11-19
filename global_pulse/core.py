@@ -1244,6 +1244,93 @@ class Store:
         with self._lock:
             return self._get_event_unlocked(event_id, at)
 
+    def _current_feed_page_unlocked(self, rows: list[sqlite3.Row]) -> list[dict]:
+        """Hydrate a current top-feed page with bounded indexed batch reads.
+
+        The old list_events path performed event alias lookup, event header,
+        report history and full revision-timeline SQL separately for EVERY
+        event. At 500 rows this delayed a genuine new collector revision beyond
+        the owner 7-second no-click window despite a live Qt heartbeat.
+
+        Only ordinary canonical, eligible, E2/E3 records take the batched
+        projection. Future notices, historical policy, merges, absent/inexact
+        counts and legacy revisions use the original complete per-event reader.
+        Source, correction, retraction, chronology and identity are unchanged.
+        Called under the same Store RLock as list_events.
+        """
+        results = []
+        for offset in range(0, len(rows), 128):
+            page = rows[offset:offset + 128]
+            accepted = {}
+            for row in page:
+                event = json.loads(row["body"])
+                count = event.get("report_count")
+                if (event.get("id") != row["id"]
+                        or type(event.get("evidence_policy_version")) is not int
+                        or not 2 <= event["evidence_policy_version"] <= 3
+                        or event.get("merged_source_events")
+                        or type(count) is not int or not 0 <= count <= 64):
+                    continue
+                accepted[row["id"]] = event
+            reports = defaultdict(list)
+            histories = defaultdict(list)
+            if accepted:
+                ids = list(accepted)
+                args = ",".join("?" for _ in ids)
+                for item in self._conn.execute(
+                        "SELECT event_id,body FROM reports WHERE event_id IN (" +
+                        args + ") ORDER BY event_id,published_at,record_key", ids):
+                    reports[item["event_id"]].append(json.loads(item["body"]))
+                for item in self._conn.execute(
+                        "SELECT event_id,at,revision,body FROM event_revisions "
+                        "WHERE event_id IN (" + args +
+                        ") ORDER BY event_id,revision", ids):
+                    histories[item["event_id"]].append(item)
+            for row in page:
+                identity = row["id"]
+                event = accepted.get(identity)
+                if event is None:
+                    results.append(self._get_event_unlocked(identity))
+                    continue
+                entries = reports.get(identity, [])
+                snapshots = histories.get(identity, [])
+                # A pending future publication may require an earlier eligible
+                # immutable source revision, not the latest reports row.
+                # Preserve that path in the canonical reference reader.
+                if (len(entries) != event["report_count"] or not snapshots
+                        or any(_report_is_future(report, event["updated_at"])
+                               for report in entries)
+                        or any(json.loads(item["body"])["event"].get(
+                               "evidence_policy_version", 0) < 2
+                               for item in snapshots)):
+                    results.append(self._get_event_unlocked(identity))
+                    continue
+                selected = []
+                for original in entries:
+                    report = dict(original)
+                    report["future_dated"] = False
+                    report["expired"] = is_expired(report, event["updated_at"])
+                    selected.append(report)
+                _, event["reports"] = _evidence_reports(selected, event["updated_at"])
+                event["timeline"] = []
+                for item in snapshots:
+                    saved = json.loads(item["body"])["event"]
+                    event["timeline"].append({
+                        "at": item["at"], "timestamp": item["at"],
+                        "revision": item["revision"],
+                        "recorded_verification": saved.get("verification"),
+                        "title": saved["title"],
+                        "verification": saved["verification"],
+                        "severity": saved["severity"],
+                        "changes": saved.get("changes", []),
+                        "description": "; ".join(
+                            f"{change['publisher']}: {change['kind']} — {change['title']}"
+                            for change in saved.get("changes", [])),
+                    })
+                event["linked_event_histories"] = {}
+                results.append(event)
+        return results
+
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
@@ -1304,7 +1391,7 @@ class Store:
             order = ("CASE json_extract(body,'$.severity') WHEN 'critical' THEN 4 WHEN 'high' THEN 3 "
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
             sql = ("SELECT body FROM events" if map_view and not map_evidence else
-                   "SELECT id,body FROM events" if map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
+                   "SELECT id,body FROM events" if map_evidence else "SELECT id,body,revision FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
             if map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
@@ -1339,8 +1426,9 @@ class Store:
                 finally:
                     cursor.close()
             else:
-                result = [(json.loads(row[0]) if map_view else self._get_event_unlocked(row[0]))
-                          for row in self._conn.execute(sql + " LIMIT ?", [*params, limit])]
+                page = self._conn.execute(sql + " LIMIT ?", [*params, limit]).fetchall()
+                result = ([json.loads(row[0]) for row in page] if map_view
+                          else self._current_feed_page_unlocked(page))
             if map_view:
                 for item in result:
                     item["retained_on_map"] = bool(keep_significant and since and item["updated_at"] < _iso(since))

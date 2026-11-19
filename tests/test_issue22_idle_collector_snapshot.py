@@ -80,7 +80,10 @@ def test_collector_post_splash_queries_only_worker_and_renders_on_gui(tmp_path, 
         window._last_navigation_at=time.monotonic()-5
         window._last_full_refresh_at=time.monotonic()-10
         controller.evidence_changed.emit()
-        assert _pump_until(app,lambda: len(reads)>=3 and not window._idle_snapshot_inflight
+        # Source-revision cache may reuse unchanged country/economy pages.
+        # One real worker-owned source read suffices; do not require three
+        # redundant SQL reads merely to pass the historical fixture.
+        assert _pump_until(app,lambda: len(reads)>=1 and not window._idle_snapshot_inflight
                            and not window._evidence_refresh_timer.isActive()), reads
         assert reads and all(thread!=owner for thread in reads), reads
         assert len(window._events)==35
@@ -130,3 +133,38 @@ def test_collector_snapshot_discards_change_during_worker_read(tmp_path,monkeypa
     finally:
         release.set()
         _shutdown(app,window,controller)
+
+
+def test_batched_current_feed_retains_full_canonical_report_and_timeline(tmp_path):
+    """Fast current feed must be byte-equivalent to the source-exact event reader.
+
+    The optimization cannot turn a full evidence trail into a headline-only
+    projection, lose a correction/revision, or substitute publisher location.
+    All records and sources are explicitly fictional and network-free.
+    """
+    controller=Controller(tmp_path,demo=True)
+    try:
+        controller.store.ingest([_report(i) for i in range(85)])
+        # Two successive source versions and a second independent record
+        # with the same event_key exercise historical timelines and siblings.
+        for key in (3, 9, 27):
+            edited=_report(key)
+            edited["title"]=f"FICTIONAL corrected local revision {key}"
+            controller.store.ingest([edited])
+        extra=_report(9999)
+        extra["event_key"]=_report(9)["event_key"]
+        controller.store.ingest([extra])
+        actual=controller.events(limit=500)
+        expected=[controller.store.get_event(row["id"]) for row in actual]
+        assert len(actual)==85
+        assert actual==expected, (
+            "Batched current feed must preserve every field, original report, "
+            "correction, history timestamp and event identity")
+        assert any(len(row["reports"])>=2 for row in actual)
+        assert any(len(row["timeline"])>=2 for row in actual)
+        # Explicit map summaries and the historical read retain the original
+        # separate conservative collectors, not the current-feed shortcut.
+        assert controller.events(map_view=True,limit=100)==controller.store.list_events(
+            map_view=True,limit=100)
+    finally:
+        controller.close()
