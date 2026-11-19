@@ -106,7 +106,11 @@ def test_preset_roundtrip_and_legacy_settings_not_overwritten(radio,app):
     values={'radio_presets':[{'receiver':'https://old.example'}]}
     def put(k,v):values[k]=copy.deepcopy(v)
     radio.configure_preferences(lambda k,d=None:values.get(k,d),put)
-    radio.selector.setCurrentIndex(1);assert radio.save_preset(2)
+    # R20 includes music and classical streams, so catalog order is not an
+    # identity. Save a specific station ID and verify it survives the roundtrip.
+    radio.selector.setCurrentIndex(radio.selector.findData('deutschlandfunk'))
+    assert radio.selector.currentData()=='deutschlandfunk'
+    assert radio.save_preset(2)
     assert values['radio_presets']==[{'receiver':'https://old.example'}]
     other=RadioPanel(session_factory=FakeSession,confirm=lambda:True)
     try:
