@@ -22,6 +22,9 @@ def test_native_package_identity_is_os_backed_not_a_publisher_website():
     assert 'result != 122 || length == 0 || length > 512' in src
     assert 'return result == 0 && buffer.Length > 0 ? "present" : "unknown"' in src
     assert 'type = "installed_package_identity"' in src
+    assert 'string installedPackageState = InstalledPackageIdentityState();' in src
+    assert 'os_package_identity_state=installedPackageState' in src
+    assert 'cases=exact.Length * 2 + 12' in src
     assert 'source = "GetCurrentPackageFullName"' in src
     assert 'referer_matches_registered_app_id = false' in src
     assert 'provider_acceptance_verified = false' in src
