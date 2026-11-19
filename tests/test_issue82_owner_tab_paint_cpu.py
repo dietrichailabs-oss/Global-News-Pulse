@@ -273,8 +273,17 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
         record.update(country=f"C{i%200:03d}",date=str(1980+i//200),synthetic=True)
     for offset in range(0,3200,1600):
         controller.store.put_observations(series[offset:offset+1600])
+    began_initial=time.perf_counter()
     window.refresh_data()
+    initial_refresh_ms=(time.perf_counter()-began_initial)*1000
     assert window.prepare_initial_workspaces()
+
+    worker_attempts=[]
+    original_start=window._start_idle_snapshot
+    def trace_snapshot_start():
+        worker_attempts.append(time.perf_counter())
+        return original_start()
+    monkeypatch.setattr(window,"_start_idle_snapshot",trace_snapshot_start)
 
     # Preserve all real computations while attributing synchronous UI costs.
     # This is a timing spy, never a stub, and only wraps work after prewarm.
@@ -378,6 +387,12 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
                 "navigation_idle_s":round(time.monotonic()-window._last_navigation_at,3),
                 "since_full_refresh_s":round(time.monotonic()-window._last_full_refresh_at,3),
                 "generation":window._idle_snapshot_generation,
+                "startup_refresh_ms":round(initial_refresh_ms,2),
+                "worker_start_attempts":len(worker_attempts),
+                "worker_start_elapsed_s":(round(time.perf_counter()-worker_attempts[0],3)
+                                          if worker_attempts else None),
+                "completed_phase_ms":{name:round(max(measures),2)
+                                      for name,measures in phase_ms.items() if measures},
                 "worker_stacks":workers_stacks,
                 "status":window.status_label.text(),
             },sort_keys=True))
