@@ -30,6 +30,7 @@ class Television(_MediaTile):
         self._last_decode_info=""
         self._last_native_status_at=0.0
         self._native_identity_note=""
+        self._native_package_note=""
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -390,6 +391,7 @@ class Television(_MediaTile):
         self._progress_at=time.monotonic()
         self._last_native_status_at=0.0
         self._native_identity_note=""
+        self._native_package_note=""
         self._native_http_note=""
         self.tv_status.setText("CONNECTING · native Windows video decoder")
         self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
@@ -419,6 +421,21 @@ class Television(_MediaTile):
             )
             self.native_tv.command("MUTE 1")
             self.native_tv.command("VOLUME "+str(self.volume.value()))
+        elif kind=="installed_package_identity":
+            # OS-owned Win32 package query, not a publisher-site assumption.
+            # The helper never emits the actual registered name or publisher.
+            state=event.get("state")
+            self._native_package_note=(
+                "Windows package identity: absent for this process; "
+                "publisher URL is not a registered package ID"
+                if state=="absent" else
+                "Windows package identity detected locally; Referer match "
+                "and YouTube acceptance NOT verified"
+                if state=="present" else
+                "Windows package identity unavailable/unknown"
+            )
+            self.tv_diagnostics.setText(self._native_package_note+
+                                        " · no video playback confirmed")
         elif kind=="web_request_identity":
             # This is an observed PRE-NETWORK WebView2 header, not proof
             # YouTube received it or that Windows registered the app ID.
@@ -431,6 +448,8 @@ class Television(_MediaTile):
                 " · OS app identity and server receipt NOT verified"
             )
             self.tv_diagnostics.setText(self._native_identity_note+
+                                        (" · "+getattr(self,"_native_package_note","")
+                                         if getattr(self,"_native_package_note","") else "")+
                                         " · no video playback confirmed")
         elif kind=="exact_video_http_response":
             # Even HTTP 200 does not show Google accepted our app identity.
@@ -444,7 +463,9 @@ class Television(_MediaTile):
             self.tv_diagnostics.setText(
                 self._native_http_note+
                 (" · "+self._native_identity_note if self._native_identity_note else "")+
-                " · picture/audio not confirmed")
+                " · picture/audio not confirmed"+
+                (" · "+getattr(self,"_native_package_note","")
+                 if getattr(self,"_native_package_note","") else ""))
             if code>=400:
                 self.tv_status.setText("VIDEO DOCUMENT HTTP ERROR · "+str(code))
         elif kind=="navigation_redirect":
@@ -471,7 +492,9 @@ class Television(_MediaTile):
                 " · picture/audio not confirmed"+
                 (" · "+self._native_identity_note if self._native_identity_note else "")+
                 (" · "+getattr(self,"_native_http_note","")
-                 if getattr(self,"_native_http_note","") else "")
+                 if getattr(self,"_native_http_note","") else "")+
+                (" · "+getattr(self,"_native_package_note","")
+                 if getattr(self,"_native_package_note","") else "")
             )
         elif kind=="advancing":
             self._had_playback=True
@@ -492,7 +515,9 @@ class Television(_MediaTile):
                 " · picture and audio require owner verification"+
                 (" · "+self._native_identity_note if self._native_identity_note else "")+
                 (" · "+getattr(self,"_native_http_note","")
-                 if getattr(self,"_native_http_note","") else "")
+                 if getattr(self,"_native_http_note","") else "")+
+                (" · "+getattr(self,"_native_package_note","")
+                 if getattr(self,"_native_package_note","") else "")
             )
         elif kind=="error":
             reason=str(event.get("reason") or "unknown")[:80]
