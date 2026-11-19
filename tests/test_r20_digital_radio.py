@@ -7,7 +7,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from global_pulse.internet_radio import (
     BROADCAST_CATEGORIES,
@@ -144,3 +145,40 @@ def test_ham_advanced_scan_starts_hidden_and_stays_explicit(panel):
     assert not panel.scan_timer.isActive()
     panel.advanced_scan.click()
     assert panel.scan_controls.isHidden()
+
+
+def test_open_directory_warns_about_plaintext_http_and_requires_separate_consent(panel, monkeypatch):
+    """Browser-only action must disclose HTTP and do nothing on refusal."""
+    prompts, opened = [], []
+    decision = [QMessageBox.StandardButton.No]
+
+    def ask(*args, **kwargs):
+        prompts.append(args[2])
+        return decision[0]
+
+    def open_browser(url):
+        opened.append(url.toString())
+        return True
+
+    monkeypatch.setattr(QMessageBox, "question", ask)
+    monkeypatch.setattr(QDesktopServices, "openUrl", open_browser)
+    assert panel.ham_selector.currentData()["id"] == "websdr"
+    assert panel.open_ham_directory() is False
+    assert "unencrypted HTTP" in prompts[-1]
+    assert "Network intermediaries" in prompts[-1]
+    assert "IP address" in prompts[-1]
+    assert opened == []
+
+    decision[0] = QMessageBox.StandardButton.Yes
+    assert panel.open_ham_directory() is True
+    assert opened == ["http://www.websdr.org/"]
+
+    panel.ham_selector.setCurrentIndex(panel.ham_selector.findData(
+        next(row for row in (panel.ham_selector.itemData(i)
+                             for i in range(panel.ham_selector.count()))
+             if row["id"] == "kiwisdr")
+    ))
+    assert panel.open_ham_directory() is True
+    assert "uses HTTPS" in prompts[-1]
+    assert "unencrypted HTTP" not in prompts[-1]
+    assert opened[-1] == "https://kiwisdr.com/public/"

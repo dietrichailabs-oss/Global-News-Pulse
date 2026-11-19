@@ -1008,9 +1008,15 @@ class RadioPanel(QWidget):
         if url not in {entry["url"] for entry in HAM_DIRECTORIES}:
             self.ham_note.setText("Receiver directory is not in the reviewed list.")
             return False
+        transport_warning = (
+            "This WebSDR directory uses unencrypted HTTP. Network intermediaries "
+            "may read or alter its page. "
+            if url.startswith("http://") else "This directory uses HTTPS. "
+        )
         approved=QMessageBox.question(
             self,"Open public ham receiver directory?",
-            "Open the selected public WebSDR/KiwiSDR directory in your browser to choose a receiver? "
+            transport_warning
+            + "Open the selected public WebSDR/KiwiSDR directory in your browser to choose a receiver? "
             "The directory provider receives your IP address. Copy one specific public HTTPS receiver URL back into Pulse "
             "to use the in-app receiver. Global Pulse does not record, retransmit, or bypass access controls.",
             QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,

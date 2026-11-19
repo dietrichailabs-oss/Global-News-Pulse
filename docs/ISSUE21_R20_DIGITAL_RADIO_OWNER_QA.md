@@ -23,7 +23,10 @@ Do not merge, publish or reuse streams commercially from this draft.
 - HAM receiver selector is populated only from on-demand, bounded public
   directory metadata. An exact NA5B owner-tested HTTP/8901 link is pinned even
   when WebSDR's HTTP directory is unavailable. Network directory refresh
-  requires explicit user approval for unencrypted HTTP. No automatic receiver
+  requires explicit user approval for unencrypted HTTP. The separate external
+  **Open directory** action also names plaintext HTTP and IP disclosure before
+  opening the WebSDR URL; refusal opens no browser and makes no request.
+  No automatic receiver
   connection, no recording, no transmission, no unreviewed origin expansion.
 - If an operator provides explicit `bands` as JSON metadata, the GUI displays
   those labels, without claiming exact bounds. NA5B's screenshot-observed band
