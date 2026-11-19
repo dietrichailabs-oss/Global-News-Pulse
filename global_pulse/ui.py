@@ -1229,6 +1229,10 @@ class MainWindow(SituationActions, QMainWindow):
                          self.region.currentData() or self.search.text().strip())
                          else ", all categories") +
                         " local feed and retained map evidence")
+        # Sort controls belong to Qt; capture their value, then prepare the
+        # exact canonical feed key on the worker rather than serializing up to
+        # 500 full nested source records on every no-click GUI repaint.
+        feed_sort_index=self.sort_combo.currentIndex()
         controller=self.controller
         signal=self._idle_snapshot_ready
         brief_pending=not self._idle_brief_inflight
@@ -1242,7 +1246,7 @@ class MainWindow(SituationActions, QMainWindow):
                     "explicit_selection_id":explicit_selection_id,
                     "history_at":historical_at,"show_observations":show_observations,
                     "brief_pending":brief_pending,"brief_period":brief_period,
-                    "brief_since":brief_since}
+                    "brief_since":brief_since,"feed_sort_index":feed_sort_index}
             try:
                 store=controller.store
                 before=store.content_revision()
@@ -1295,6 +1299,24 @@ class MainWindow(SituationActions, QMainWindow):
                 result["situation_rows"]=store.list_situations()
                 result["english_headlines_enabled"]=(
                     controller.get_setting("english_headlines",True) is True)
+                # This canonical JSON was still being recomputed on Qt even
+                # when the 500-row feed had not changed. Prepare the same
+                # sorted source order here, without touching Qt or changing
+                # any source/translation bytes. Selection pins inserted after
+                # capture and user sort changes fall back to current Qt data.
+                digest_rows=list(result["feed"])
+                if feed_sort_index==1:
+                    order={"critical":4,"high":3,"moderate":2,
+                           "informational":1,"unassessed":0}
+                    digest_rows.sort(
+                        key=lambda e:(order.get(e.get("severity"),0),
+                                      str(e.get("updated_at",""))),reverse=True)
+                elif feed_sort_index==2:
+                    digest_rows.sort(
+                        key=lambda e:int(e.get("report_count",0)),reverse=True)
+                result["feed_serialized"]=json.dumps(
+                    digest_rows,sort_keys=True,ensure_ascii=False,
+                    separators=(",",":"),default=str)
                 # This expensive, pure source/date/corroboration classification
                 # used to run on the GUI thread immediately after the Store
                 # worker returned. Compute it on the same bounded worker;
@@ -1685,10 +1707,12 @@ class MainWindow(SituationActions, QMainWindow):
             # modified visible feed so the older selected source stays linked.
             # Otherwise even the 5,000-source shortlist and HTML rendering
             # belong to the worker, not the no-click GUI critical path.
-            if (_idle_snapshot is not None
-                    and len(self._events)==len(_idle_snapshot["feed"])
-                    and all(a is b for a,b in zip(
-                        self._events,_idle_snapshot["feed"]))):
+            feed_unchanged_for_worker=(
+                _idle_snapshot is not None
+                and len(self._events)==len(_idle_snapshot["feed"])
+                and all(a is b for a,b in zip(
+                    self._events,_idle_snapshot["feed"])))
+            if feed_unchanged_for_worker:
                 self._overview_events=_idle_snapshot["overview_events"]
                 overview_precomputed=_idle_snapshot["overview_html"]
             else:
@@ -1743,6 +1767,11 @@ class MainWindow(SituationActions, QMainWindow):
                            if _idle_snapshot is not None else None),
                 english_enabled=(_idle_snapshot["english_headlines_enabled"]
                                  if _idle_snapshot is not None else None),
+                serialized_feed=(
+                    _idle_snapshot["feed_serialized"]
+                    if (feed_unchanged_for_worker and
+                        self.sort_combo.currentIndex()==_idle_snapshot["feed_sort_index"])
+                    else None),
             )
             self._update_world_overview(precomputed_html=overview_precomputed)
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
@@ -1838,7 +1867,7 @@ class MainWindow(SituationActions, QMainWindow):
                 finally:
                     combo.blockSignals(blocked)
 
-    def _populate_feed(self,*args,saved_ids=None,english_enabled=None):
+    def _populate_feed(self,*args,saved_ids=None,english_enabled=None,serialized_feed=None):
         if not hasattr(self,"feed_list"):
             return
         # Explicit user updates preserve their direct Store reads. Validated
@@ -1867,8 +1896,13 @@ class MainWindow(SituationActions, QMainWindow):
         # Star state, user sort and language preference are separate inputs.
         # On an unchanged collector revision there is no reason to touch 500
         # Qt rows or repeat 500 local headline-resolution calls on the GUI thread.
-        feed_key=(json.dumps(events,sort_keys=True,ensure_ascii=False,
-                             separators=(",",":"),default=str),
+        # A validated no-click worker already serialized precisely these
+        # sorted source bytes. Do not repeat the deep JSON traversal on Qt.
+        # An explicit refresh, changed sort, or newly pinned archived story
+        # must still serialize its actual current visible rows.
+        feed_key=((serialized_feed if serialized_feed is not None
+                   else json.dumps(events,sort_keys=True,ensure_ascii=False,
+                                   separators=(",",":"),default=str)),
                   tuple(sorted(saved_ids)),self.sort_combo.currentIndex(),
                   english_enabled)
         if (feed_key==getattr(self,"_feed_snapshot_key",None)
