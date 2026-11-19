@@ -153,6 +153,29 @@ def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, mon
     assert len(calls)==1, "A coalesced burst starts exactly one worker snapshot"
 
 
+def test_idle_worker_has_priority_over_hidden_workspace_prewarm(desktop, monkeypatch):
+    """Do not let a hidden table monopolize SQLite while new reports arrive."""
+    window, controller = desktop
+    assert window.prepare_initial_workspaces()
+    window._dirty_pages.update((1, 2, 3, 4, 5))
+    window._workspace_warm_timer.stop()
+    reads=[]
+    monkeypatch.setattr(
+        controller.store,"content_revision_if_available",
+        lambda: reads.append("hidden database probe") or (0, 0))
+    window._idle_snapshot_inflight=True
+    try:
+        before=set(window._dirty_pages)
+        window._last_navigation_at=0
+        window._warm_next_workspace()
+        assert not reads, "Hidden prewarm must not compete for Store RLock with source read"
+        assert window._dirty_pages==before, "Deferred dirty pages must not be marked current"
+        assert window._workspace_warm_timer.isActive()
+    finally:
+        window._idle_snapshot_inflight=False
+        window._workspace_warm_timer.stop()
+
+
 def test_multi_field_settings_save_repaints_once(desktop, monkeypatch):
     """A form Save is one user action, not one 5k-map redraw per changed key."""
     window, controller = desktop
