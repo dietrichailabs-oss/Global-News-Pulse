@@ -382,7 +382,7 @@ class WorldMap(QWidget):
                 self.country_activity = build_country_activity(
                     selected, now=now, single_record_credits=single_record_credits)
             country_rows = tuple(
-                (str(c["name"]), str(c.get("code") or "")) for c in self._countries)
+                {"name":str(c["name"]), "code":str(c.get("code") or "")} for c in self._countries)
             # Source-category and historical/economy ring indexes are pure
             # Python: the idle worker has already built them for this exact
             # evidence+observation identity and captured Qt's country list.
