@@ -39,12 +39,12 @@ jobs:
           set -euo pipefail
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Exact parent and four-path source guard
+      - name: Exact parent and six-path source guard
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD
-          git diff --name-only 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD | python -c "import sys; expected={'.github/workflows/issue22-registered-app-referer-ci.yml','packaging/tv/NativeTvProgram.cs','global_pulse/single_media.py','tests/test_issue22_windows_package_identity.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD | python -c "import sys; expected={'.github/workflows/issue22-registered-app-referer-ci.yml','packaging/tv/NativeTvProgram.cs','global_pulse/single_media.py','tests/test_issue22_windows_package_identity.py','tests/test_issue22_webview2_http_observation.py','tests/test_issue22_webview2_identity_observation.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native Windows Qt
         if: runner.os == 'Windows'
         shell: bash
