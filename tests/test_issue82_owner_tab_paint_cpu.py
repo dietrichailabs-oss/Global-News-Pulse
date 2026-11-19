@@ -348,7 +348,26 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
             if any(e.get("title")=="Navigation fixture 9001" for e in window._events):
                 break
             QTest.qWait(40)
-        assert any(e.get("title")=="Navigation fixture 9001" for e in window._events), (
+        visible=any(e.get("title")=="Navigation fixture 9001" for e in window._events)
+        if not visible:
+            # Do not weaken the real collector→Store→worker→Qt acceptance
+            # assertion. Capture where this previously silent failure lives.
+            stored=controller.events(**window.events_filters())
+            print("ISSUE82_COLLECTOR_DELIVERY_DIAGNOSTIC="+json.dumps({
+                "stored_visible":any(e.get("title")=="Navigation fixture 9001"
+                                     for e in stored),
+                "store_count":len(stored),
+                "ui_count":len(window._events),
+                "gui_inflight":window._idle_snapshot_inflight,
+                "brief_inflight":window._idle_brief_inflight,
+                "refresh_timer_active":window._evidence_refresh_timer.isActive(),
+                "refresh_timer_remaining":window._evidence_refresh_timer.remainingTime(),
+                "navigation_idle_s":round(time.monotonic()-window._last_navigation_at,3),
+                "since_full_refresh_s":round(time.monotonic()-window._last_full_refresh_at,3),
+                "generation":window._idle_snapshot_generation,
+                "status":window.status_label.text(),
+            },sort_keys=True))
+        assert visible, (
             "Latest material collector revision must become visible after navigation settles")
     finally:
         navigator.stop();pulse.stop()
