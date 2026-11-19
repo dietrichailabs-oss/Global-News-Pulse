@@ -1159,9 +1159,14 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller, "_closed", False):
             return
         idle_for=time.monotonic()-self._last_navigation_at
-        if self._background_warm_enabled and idle_for < 1.8:
-            self._evidence_refresh_timer.start(max(100,int((1.8-idle_for)*1000)))
-            return
+        # A collector revision can be READ on its isolated, revision-checked
+        # worker while the user is switching among already warmed tabs.
+        # Waiting 1.8 seconds AFTER the last tab click to *start* this expensive
+        # source read exhausted the seven-second evidence-delivery deadline
+        # on the actual 900-event/3,200-observation hosted regression. The
+        # worker touches only Store/plain dictionaries: the Qt apply callback
+        # below retains the full navigation cooldown before any repaint.
+        # Never turn the early source prefetch into early UI population.
         # No-click collector updates were held for a separate three seconds
         # *before* starting a 500/5000-event worker read. The exact hosted
         # heavy-archive profiler proved that window could exhaust its freshness
@@ -1175,6 +1180,9 @@ class MainWindow(SituationActions, QMainWindow):
             self._evidence_refresh_timer.start(max(100,int((1.0-since_last)*1000)))
             return
         if self._background_warm_enabled:
+            # This cannot rebuild a Qt widget; all visible changes remain
+            # deferred until 1.8 seconds after the final navigation action.
+            # _start_idle_snapshot is single-flight under collector bursts.
             self._start_idle_snapshot()
         else:
             self.refresh_data()
@@ -1509,6 +1517,20 @@ class MainWindow(SituationActions, QMainWindow):
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
             return
+        # A precomputed source revision may arrive while the owner is still
+        # clicking through warmed pages. Hold the SAME immutable worker result
+        # without probing SQLite or repainting feed/map/economy during that
+        # navigation. The later callback checks generation, selection and
+        # exact Store revision again; a correction or new report cannot be
+        # silently accepted as stale. Do not launch another reader here.
+        if self._background_warm_enabled:
+            idle_for=time.monotonic()-self._last_navigation_at
+            if idle_for < 1.8:
+                self._idle_snapshot_inflight=True
+                QTimer.singleShot(
+                    max(100,min(400,int((1.8-idle_for)*1000))),
+                    lambda s=snapshot:self._apply_idle_snapshot(s))
+                return
         # Even checking a revision acquired the same Store lock as the
         # background 5k-event/3.2k-observation read. Do not stall Qt to verify
         # an idle snapshot while another worker owns that lock. Retry the same

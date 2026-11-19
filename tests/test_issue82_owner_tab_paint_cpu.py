@@ -111,27 +111,33 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     called = []
     snapshot_starts = []
     monkeypatch.setattr(window, "refresh_data", lambda: called.append(1))
-    # Collector notices now initiate a revision-checked worker, not a
-    # synchronous Qt refresh. This test isolates the cooldown scheduler;
-    # separate real-Store/real-Qt cases prove eventual source application.
-    monkeypatch.setattr(window, "_start_idle_snapshot", lambda: snapshot_starts.append(1))
+    # Collector precomputation is allowed on a single Store worker during
+    # rapid navigation; Qt painting and model rebuilds are NOT. This isolated
+    # scheduler test checks worker admission, while the real 900-event/3,200-
+    # observation test below checks actual Store->worker->Qt freshness.
+    def tracked_start():
+        if not window._idle_snapshot_inflight:
+            window._idle_snapshot_inflight=True
+            snapshot_starts.append(1)
+    monkeypatch.setattr(window, "_start_idle_snapshot", tracked_start)
+    window._last_full_refresh_at=time.monotonic()-6
     for _ in range(20):
         window.open_page(2)
         controller.evidence_changed.emit()
         window.open_page(0)
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
-    assert not called and not snapshot_starts, "Collector updates must not build 5k items between clicks"
-    assert window._evidence_refresh_timer.isActive()
-    window._evidence_refresh_timer.stop()
+    assert not called and snapshot_starts == [1], (
+        "One off-Qt source worker may start during navigation; no Qt rebuild")
+    assert not window._evidence_refresh_timer.isActive()
     window._last_navigation_at=time.monotonic()-2
-    window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
-    assert snapshot_starts == [1], "Once idle, start one revision-checked worker"
+    assert snapshot_starts == [1], "In-flight source prefetch stays single-flight"
     assert called == [], "Passive scheduling never synchronously rebuilds Qt"
     controller.data_changed.emit()
     assert called == [1], "Explicit user/settings revisions remain immediate"
     assert not window._evidence_refresh_timer.isActive()
+    window._idle_snapshot_inflight=False
 
 
 def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, monkeypatch):
@@ -351,6 +357,11 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
         start=time.perf_counter()
         window.open_page(steps[index])
         durations.append(time.perf_counter()-start)
+        if index==100:
+            assert not any(e.get("title")=="Navigation fixture 9001"
+                           for e in window._events), (
+                "A new collector revision may be precomputed during rapid "
+                "tabs, but must not rebuild the Qt feed before navigation idle")
         if index==36:
             # The feed is capped at 500. A genuinely newer worker timestamp
             # keeps this fixture in the visible slice, independently of UUID
@@ -368,7 +379,11 @@ def test_actual_collector_revision_overlapping_120_tab_clicks(desktop, app, monk
         deadline=time.monotonic()+15
         while navigator.isActive() and time.monotonic()<deadline:
             QTest.qWait(25)
+        navigation_finished=time.perf_counter()
         assert len(durations)==120, "All 120 navigation callbacks must arrive"
+        assert worker_attempts and worker_attempts[0]<navigation_finished, (
+            "New material source revision must BEGIN worker precomputation "
+            "during rapid navigation, not wait until the owner stops clicking")
         for worker in workers:
             worker_deadline=time.monotonic()+3
             while worker.is_alive() and time.monotonic()<worker_deadline:
