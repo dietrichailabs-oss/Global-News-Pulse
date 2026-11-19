@@ -44,6 +44,111 @@ _CATEGORY_PRIORITY = (
 )
 
 
+def prepare_country_evidence(selected, observations, country_rows, credits, category_key):
+    """Build source-attributed map evidence indexes using plain Python records.
+
+    This is shared by the post-splash Store worker and direct Qt fallback.
+    It never touches a widget or Qt painter; its input source records and
+    observation values are preserved for the exact accepted revision.
+    """
+    # Keep precisely attributed, country-only archives discoverable even
+    # when they have no point/area or do not qualify for a current crisis
+    # stripe. These are *records*, not new crisis assertions.
+    countries = {normalize_country(c["name"]) for c in country_rows}
+    country_only_evidence = {}
+    country_category_evidence = {}
+    # Count the same coverage points/unlocated records while scanning
+    # this selected evidence *once*. Counts include synthetic records,
+    # as they did in coverage_summary; those records remain excluded
+    # from source-backed crisis/country evidence indexes.
+    coverage_points = 0
+    coverage_unlocated = 0
+    for record in selected:
+        country = normalize_country(incident_country(record))
+        located = WorldMap.has_location(record)
+        if located:
+            coverage_points += 1
+        elif not record.get("map_areas") and country not in countries:
+            coverage_unlocated += 1
+        if record.get("synthetic"):
+            continue
+        if not country or country not in countries:
+            continue
+        # A country-category circle summarizes attributable SOURCE
+        # records, including those separately represented by a real
+        # incident point/area or a corroborated current crisis stripe.
+        # It NEVER denotes a new incident at the country label.
+        category = str(record.get("category") or "News").strip().title()
+        category_entry = country_category_evidence.setdefault(
+            country, {"count": 0, "events": [], "categories": {}}
+        )
+        category_entry["count"] += 1
+        category_entry["categories"][category] = (
+            category_entry["categories"].get(category, 0) + 1
+        )
+        category_entry["events"].append(record)
+        # Preserve the old neutral/historical country-only index and
+        # its no-double-counting contract. Current supported crises
+        # stay in the separate stripe, not this neutral archive.
+        if located or record.get("map_areas"):
+            continue
+        # The country activity's event_ids are capped at 20 for display:
+        # do not use that truncated list to decide what is neutral.
+        # Reuse the exact accepted crisis classifier on each *record*,
+        # not the country aggregate (which may contain other records).
+        # A qualifying current report must not also be counted or
+        # drawn as neutral historical country-only evidence.
+        if (id(record), country) in credits:
+            continue
+        entry = country_only_evidence.setdefault(
+            country, {"count": 0, "events": [], "categories": {}}
+        )
+        entry["count"] += 1
+        category = str(record.get("category") or "News").strip().title()
+        entry["categories"][category] = entry["categories"].get(category, 0) + 1
+        # Keep all *already bounded* evidence identities (max 5,000).
+        # Display remains capped to 30 rows, but queries must search
+        # beyond the first 30 or important stories are unreachable.
+        entry["events"].append(record)
+
+    # Economic observations are dated measurements, not crisis events.
+    # Map them by provider ISO3 code when possible, then by exact
+    # country-name identity. They use a separate outline and tooltip.
+    economic_observations = {}
+    if category_key is None or "Economy" in category_key:
+        code_to_country = {
+            str(c.get("code") or "").upper(): normalize_country(c["name"])
+            for c in country_rows if c.get("code")
+        }
+        valid_countries = {normalize_country(c["name"]) for c in country_rows}
+        for observation in observations:
+            code = str(observation.get("country_code") or "").upper()
+            country = code_to_country.get(code) or normalize_country(
+                observation.get("country_name") or observation.get("country")
+            )
+            if not country or country not in valid_countries:
+                continue
+            date = str(observation.get("observation_date") or observation.get("date") or "")
+            if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
+                continue
+            entry = economic_observations.setdefault(
+                country, {"count": 0, "latest": "", "indicators": set()}
+            )
+            entry["count"] += 1
+            entry["latest"] = max(entry["latest"], date)
+            indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
+            if indicator and len(entry["indicators"]) < 8:
+                entry["indicators"].add(indicator)
+
+    return {
+        "country_only_evidence":country_only_evidence,
+        "country_category_evidence":country_category_evidence,
+        "economic_observations":economic_observations,
+        "coverage_points":coverage_points,
+        "coverage_unlocated":coverage_unlocated,
+    }
+
+
 class WorldMap(QWidget):
     event_selected = Signal(str)
     country_selected = Signal(str)
@@ -86,6 +191,7 @@ class WorldMap(QWidget):
         self.crisis_overlay_enabled = True
         self.country_activity = {}
         self._pending_preclassified_country = None
+        self._pending_observation_ids = None
         self.country_only_evidence = {}  # Neutral/historical country-only archive
         self.country_category_evidence = {}  # All attributed categories, including current reports
         self._country_badge_hits = []
@@ -219,6 +325,9 @@ class WorldMap(QWidget):
         # This short-lived token is consumed exactly once by the matching
         # source snapshot. Direct calls keep the original GUI classifier.
         self._pending_preclassified_country = preclassified_country
+        observation_source = list(observations or [])[:10000]
+        self._pending_observation_ids = tuple(id(item) for item in observation_source
+                                              if isinstance(item, dict))
         self.events = list(events)[:5000]
         # Preserve the original all-point (not category-filtered) footer
         # semantics without re-scanning up to 5,000 events per paint.
@@ -231,7 +340,7 @@ class WorldMap(QWidget):
         self._country_badge_specs = ()
         self._country_badge_hits = []
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
-        self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
+        self.observations = [dict(item) for item in observation_source if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
         self._cluster_view_key = None
         self._cluster_groups = ()
@@ -242,6 +351,7 @@ class WorldMap(QWidget):
             self._refresh_country_activity()
         finally:
             self._pending_preclassified_country = None
+            self._pending_observation_ids = None
         self.update()
 
     def _refresh_country_activity(self):
@@ -271,94 +381,29 @@ class WorldMap(QWidget):
                 single_record_credits = set()
                 self.country_activity = build_country_activity(
                     selected, now=now, single_record_credits=single_record_credits)
-            # Keep precisely attributed, country-only archives discoverable even
-            # when they have no point/area or do not qualify for a current crisis
-            # stripe. These are *records*, not new crisis assertions.
-            countries = {normalize_country(c["name"]) for c in self._countries}
-            self.country_only_evidence = {}
-            self.country_category_evidence = {}
-            # Count the same coverage points/unlocated records while scanning
-            # this selected evidence *once*. Counts include synthetic records,
-            # as they did in coverage_summary; those records remain excluded
-            # from source-backed crisis/country evidence indexes.
-            self._coverage_points = 0
-            self._coverage_unlocated = 0
-            for record in selected:
-                country = normalize_country(incident_country(record))
-                located = self.has_location(record)
-                if located:
-                    self._coverage_points += 1
-                elif not record.get("map_areas") and country not in countries:
-                    self._coverage_unlocated += 1
-                if record.get("synthetic"):
-                    continue
-                if not country or country not in countries:
-                    continue
-                # A country-category circle summarizes attributable SOURCE
-                # records, including those separately represented by a real
-                # incident point/area or a corroborated current crisis stripe.
-                # It NEVER denotes a new incident at the country label.
-                category = str(record.get("category") or "News").strip().title()
-                category_entry = self.country_category_evidence.setdefault(
-                    country, {"count": 0, "events": [], "categories": {}}
-                )
-                category_entry["count"] += 1
-                category_entry["categories"][category] = (
-                    category_entry["categories"].get(category, 0) + 1
-                )
-                category_entry["events"].append(record)
-                # Preserve the old neutral/historical country-only index and
-                # its no-double-counting contract. Current supported crises
-                # stay in the separate stripe, not this neutral archive.
-                if located or record.get("map_areas"):
-                    continue
-                # The country activity's event_ids are capped at 20 for display:
-                # do not use that truncated list to decide what is neutral.
-                # Reuse the exact accepted crisis classifier on each *record*,
-                # not the country aggregate (which may contain other records).
-                # A qualifying current report must not also be counted or
-                # drawn as neutral historical country-only evidence.
-                if (id(record), country) in single_record_credits:
-                    continue
-                entry = self.country_only_evidence.setdefault(
-                    country, {"count": 0, "events": [], "categories": {}}
-                )
-                entry["count"] += 1
-                category = str(record.get("category") or "News").strip().title()
-                entry["categories"][category] = entry["categories"].get(category, 0) + 1
-                # Keep all *already bounded* evidence identities (max 5,000).
-                # Display remains capped to 30 rows, but queries must search
-                # beyond the first 30 or important stories are unreachable.
-                entry["events"].append(record)
-
-            # Economic observations are dated measurements, not crisis events.
-            # Map them by provider ISO3 code when possible, then by exact
-            # country-name identity. They use a separate outline and tooltip.
-            self.economic_observations = {}
-            if key is None or "Economy" in key:
-                code_to_country = {
-                    str(c.get("code") or "").upper(): normalize_country(c["name"])
-                    for c in self._countries if c.get("code")
-                }
-                valid_countries = {normalize_country(c["name"]) for c in self._countries}
-                for observation in self.observations:
-                    code = str(observation.get("country_code") or "").upper()
-                    country = code_to_country.get(code) or normalize_country(
-                        observation.get("country_name") or observation.get("country")
-                    )
-                    if not country or country not in valid_countries:
-                        continue
-                    date = str(observation.get("observation_date") or observation.get("date") or "")
-                    if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
-                        continue
-                    entry = self.economic_observations.setdefault(
-                        country, {"count": 0, "latest": "", "indicators": set()}
-                    )
-                    entry["count"] += 1
-                    entry["latest"] = max(entry["latest"], date)
-                    indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
-                    if indicator and len(entry["indicators"]) < 8:
-                        entry["indicators"].add(indicator)
+            country_rows = tuple(
+                {"name":str(c["name"]), "code":str(c.get("code") or "")} for c in self._countries)
+            # Source-category and historical/economy ring indexes are pure
+            # Python: the idle worker has already built them for this exact
+            # evidence+observation identity and captured Qt's country list.
+            # Direct calls, changed views and copied/mutated source records
+            # always use the same local implementation (fail closed).
+            indexed = (prepared.get("evidence_index")
+                       if (isinstance(prepared, dict)
+                           and prepared.get("category_key")==key
+                           and prepared.get("record_ids")==tuple(
+                               id(record) for record in self.evidence_events)
+                           and prepared.get("country_rows")==country_rows
+                           and prepared.get("observation_ids")==self._pending_observation_ids)
+                       else None)
+            if not isinstance(indexed, dict):
+                indexed = prepare_country_evidence(
+                    selected, self.observations, country_rows, single_record_credits, key)
+            self.country_only_evidence = indexed["country_only_evidence"]
+            self.country_category_evidence = indexed["country_category_evidence"]
+            self.economic_observations = indexed["economic_observations"]
+            self._coverage_points = indexed["coverage_points"]
+            self._coverage_unlocated = indexed["coverage_unlocated"]
             self._activity_categories = key
 
     def coverage_summary(self):
