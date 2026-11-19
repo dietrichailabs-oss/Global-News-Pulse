@@ -14,7 +14,10 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 MAX_DIRECTORY_BYTES = 1_000_000
 MAX_RECEIVERS = 400
 DIRECTORY_URLS = {
-    "websdr": "https://websdr.org/",
+    # WebSDR's official FAQ explicitly points to HTTP www.websdr.org for its
+    # live operator list. The GUI requires informed owner action before this
+    # unsecured, bounded discovery request. Never autoconnect these links.
+    "websdr": "http://www.websdr.org/",
     "kiwisdr": "https://kiwisdr.com/public/",
 }
 _IGNORED_HOSTS = {
@@ -101,6 +104,23 @@ def _json_rows(parsed):
     return []
 
 
+def _operator_bands(value):
+    """Only operator-supplied band labels; never fabricate numeric bounds."""
+    if not isinstance(value,list):
+        return []
+    labels=[]
+    for raw in value[:40]:
+        if (not isinstance(raw,str) or not raw.strip()
+                or any(ord(char)<32 for char in raw)):
+            continue
+        label=re.sub(r"\s+"," ",raw).strip()[:30]
+        if label and label not in labels:
+            labels.append(label)
+        if len(labels)>=24:
+            break
+    return labels
+
+
 def parse_directory(provider, content):
     """Return bounded, deduplicated candidates from one official directory.
 
@@ -123,13 +143,13 @@ def parse_directory(provider, content):
                 href = row.get("url") or row.get("link") or row.get("receiver_url")
                 title = row.get("name") or row.get("title") or row.get("location")
                 if isinstance(href, str):
-                    candidates.append((href, title))
+                    candidates.append((href, title, _operator_bands(row.get("bands"))))
     else:
         parser = _Links()
         parser.feed(raw)
-        candidates = parser.links[:MAX_RECEIVERS * 10]
+        candidates = [(href,title,[]) for href,title in parser.links[:MAX_RECEIVERS * 10]]
     results, seen = [], set()
-    for href, title in candidates:
+    for href, title, bands in candidates:
         if not isinstance(href, str):
             continue
         url = urljoin(DIRECTORY_URLS[provider], href)
@@ -145,7 +165,8 @@ def parse_directory(provider, content):
             continue
         seen.add(info["url"])
         label = re.sub(r"\s+", " ", str(title or "")).strip()[:110]
-        info.update({"name": label or info["host"], "provider": provider})
+        info.update({"name": label or info["host"], "provider": provider,
+                     "bands": bands})
         results.append(info)
         if len(results) >= MAX_RECEIVERS:
             break
