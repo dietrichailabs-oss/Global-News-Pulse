@@ -20,15 +20,20 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_direct_radio_lineup_is_news_talk_only_and_documented():
+def test_direct_radio_lineup_is_genre_sorted_and_documented():
     ids={item["id"] for item in STATIONS}
-    assert ids=={"wnyc_fm","wnyc_am","deutschlandfunk",
-                 "deutschlandfunk_nova","deutschlandfunk_debatten"}
-    assert not {"wqxr","new_sounds","operavore","deutschlandfunk_kultur"} & ids
+    assert {"wnyc_fm","wnyc_am","deutschlandfunk",
+            "deutschlandfunk_nova","deutschlandfunk_debatten"} <= ids
+    assert {"wqxr","new_sounds","operavore","deutschlandfunk_kultur"} <= ids
+    assert len(ids) >= 18
+    assert {item["category"] for item in STATIONS} == {
+        "News & Talk", "Music", "Classical", "Culture"
+    }
     for item in STATIONS:
         assert item["url"].startswith("https://")
         assert item["documentation"].startswith("https://")
-        assert "News" in item["language"]
+        assert item["language"] in {"English", "German", "French"}
+        assert item["dial"] == "INTERNET STREAM" or item["dial"].startswith(("AM · ", "FM · "))
 
 
 def test_ham_sdr_receiver_directories_are_visible_without_starting_audio(app):
@@ -225,3 +230,4 @@ def test_news_refresh_does_not_start_radio_tv_or_camera(app):
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
+
