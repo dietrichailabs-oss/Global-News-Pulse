@@ -94,8 +94,11 @@ def test_footer_source_revision_5k_cap_category_warning_and_zoom_semantics():
         # Replacing source data must update the count, never reuse a stale
         # footer value; invalid coordinates must not become point markers.
         world.set_events([_event(20), _event(21, False)], country_events=[])
+        # Source replacement correctly discards the previous synthetic warning
+        # fixtures: only current source geometry may remain on the map.
+        assert not world.area_layer.paths
         assert world._footer_point_count == 1
-        assert "1 points / 0 reports assessed · 1 warning areas · 1.8×" in (
+        assert "1 points / 0 reports assessed · 0 warning areas · 1.8×" in (
             world._footer_coverage_text()
         )
         world.set_events([_event(i) for i in range(5100)], country_events=[])
