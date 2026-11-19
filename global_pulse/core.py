@@ -1351,13 +1351,14 @@ class Store:
 
 
     def list_brief_events(self, *, since: str, per_domain: int = 9) -> list[dict]:
-        """One bounded SQLite read for source-category-balanced Daily/Weekly briefs.
+        """Bounded, category-balanced Brief read without a multi-second Store lock.
 
-        Unlike a newest-500 chronological page, this cannot let a burst of
-        weather records hide stored Health/Conflict records in the same period.
-        SQL selects at most nine per explicit presentation domain, then the
-        existing brief renderer performs final ranking/labels. No network,
-        inferred event category, or unbounded Python report materialization.
+        Each event still goes through the canonical history/evidence projection.
+        Ranking and source bytes must describe one exact committed Store revision.
+        An unchanged source is hydrated with short, individually locked reads so
+        the GUI can probe Store availability between them. If source content
+        changes while reading, retry; on repeated contention use the original
+        atomic path rather than return mixed or fabricated evidence.
         """
         from .brief_selection import _DOMAIN_ALIASES
         count = max(1, min(int(per_domain), 9))
@@ -1380,10 +1381,32 @@ class Store:
             "WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
             "AND updated_at>=?) WHERE brief_rank<=?"
         )
+        values = (*params, _iso(since), count)
+
+        def revision_unlocked():
+            # Catch this Store's own writes and other SQLite connections'
+            # commits, including changes between individual evidence reads.
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+
+        for _attempt in range(2):
+            with self._lock:
+                source_revision = revision_unlocked()
+                ids = [row[0] for row in self._conn.execute(sql, values)]
+            events = []
+            for identity in ids:
+                with self._lock:
+                    event = self._get_event_unlocked(identity)
+                if event is not None:
+                    events.append(event)
+            with self._lock:
+                if revision_unlocked() == source_revision:
+                    return events
+
+        # With continuous source mutations, preserve the old atomic read.
+        # Never return partially mixed revisions just to pass a heartbeat test.
         with self._lock:
-            ids = self._conn.execute(
-                sql, (*params, _iso(since), count)
-            ).fetchall()
+            ids = self._conn.execute(sql, values).fetchall()
             return [event for row in ids
                     if (event := self._get_event_unlocked(row[0])) is not None]
 
