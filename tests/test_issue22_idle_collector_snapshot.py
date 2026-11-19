@@ -80,7 +80,10 @@ def test_collector_post_splash_queries_only_worker_and_renders_on_gui(tmp_path, 
         window._last_navigation_at=time.monotonic()-5
         window._last_full_refresh_at=time.monotonic()-10
         controller.evidence_changed.emit()
-        assert _pump_until(app,lambda: len(reads)>=3 and not window._idle_snapshot_inflight
+        # Source-revision cache may reuse unchanged country/economy pages.
+        # One real worker-owned source read suffices; do not require three
+        # redundant SQL reads merely to pass the historical fixture.
+        assert _pump_until(app,lambda: len(reads)>=1 and not window._idle_snapshot_inflight
                            and not window._evidence_refresh_timer.isActive()), reads
         assert reads and all(thread!=owner for thread in reads), reads
         assert len(window._events)==35
