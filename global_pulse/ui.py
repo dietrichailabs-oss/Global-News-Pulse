@@ -1012,6 +1012,13 @@ class MainWindow(SituationActions, QMainWindow):
             if not self._populate_alerts(idle=True):
                 self._workspace_warm_timer.start(250)
                 return
+        elif page==3:
+            # Source status does not warrant a full map read, but the provider
+            # batch may race a collector lock immediately after the first
+            # nonblocking probe. Defer rather than waiting on the Qt thread.
+            if not self._populate_sources(idle=True):
+                self._workspace_warm_timer.start(250)
+                return
         elif page==5:
             # The initial nonblocking probe above does not reserve the Store
             # lock. Another collector can acquire it before Brief presentation.
@@ -2416,9 +2423,9 @@ class MainWindow(SituationActions, QMainWindow):
         url=self.economy_model.url_at(row)
         if url:self.controller.open_url(url)
 
-    def _populate_sources(self):
+    def _populate_sources(self, *, idle=False):
         from .provider_actions import populate_sources
-        return populate_sources(self)
+        return populate_sources(self, idle=idle)
 
     def _source_selected(self):
         from .provider_actions import source_selected
