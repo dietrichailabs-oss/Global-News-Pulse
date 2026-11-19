@@ -390,6 +390,7 @@ class Television(_MediaTile):
         self._progress_at=time.monotonic()
         self._last_native_status_at=0.0
         self._native_identity_note=""
+        self._native_http_note=""
         self.tv_status.setText("CONNECTING · native Windows video decoder")
         self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
         started=self.native_tv.play(video,full_watch=full_watch)
@@ -431,6 +432,21 @@ class Television(_MediaTile):
             )
             self.tv_diagnostics.setText(self._native_identity_note+
                                         " · no video playback confirmed")
+        elif kind=="exact_video_http_response":
+            # Even HTTP 200 does not show Google accepted our app identity.
+            try: code=int(event.get("http_status",0))
+            except (ValueError,TypeError): code=0
+            if not 100<=code<=599: code=0
+            self._native_http_note=(
+                "Exact video URL HTTP "+str(code) if code
+                else "Exact video URL HTTP status unknown"
+            )+" (WebView2 observed; identity/playback NOT verified)"
+            self.tv_diagnostics.setText(
+                self._native_http_note+
+                (" · "+self._native_identity_note if self._native_identity_note else "")+
+                " · picture/audio not confirmed")
+            if code>=400:
+                self.tv_status.setText("VIDEO DOCUMENT HTTP ERROR · "+str(code))
         elif kind=="navigation_redirect":
             if event.get("allowed") is not True:
                 self.tv_status.setText("BLOCKED · unapproved video redirect")
@@ -453,7 +469,9 @@ class Television(_MediaTile):
                 "Windows decoder H.264: "+codec+
                 " · decoded frames "+str(event.get("frames",0))+
                 " · picture/audio not confirmed"+
-                (" · "+self._native_identity_note if self._native_identity_note else "")
+                (" · "+self._native_identity_note if self._native_identity_note else "")+
+                (" · "+getattr(self,"_native_http_note","")
+                 if getattr(self,"_native_http_note","") else "")
             )
         elif kind=="advancing":
             self._had_playback=True
@@ -472,7 +490,9 @@ class Television(_MediaTile):
                 " · time "+str(event.get("current_time"))+
                 "s · decoded frames "+str(event.get("decoded_frames"))+
                 " · picture and audio require owner verification"+
-                (" · "+self._native_identity_note if self._native_identity_note else "")
+                (" · "+self._native_identity_note if self._native_identity_note else "")+
+                (" · "+getattr(self,"_native_http_note","")
+                 if getattr(self,"_native_http_note","") else "")
             )
         elif kind=="error":
             reason=str(event.get("reason") or "unknown")[:80]

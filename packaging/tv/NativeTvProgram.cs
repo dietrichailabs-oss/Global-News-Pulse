@@ -117,6 +117,7 @@ internal sealed class TvForm : Form
     private bool initialized;
     private bool pollPending;
     private bool identityObservationSent;
+    private int exactVideoHttpResponseCount;
     private bool played;
     // Commands may arrive before YouTube creates its <video> element.
     // Native WebView2 starts muted before navigation, independent of HTML.
@@ -388,6 +389,23 @@ internal sealed class TvForm : Form
                         referer_present = present, publisher_url_match = publisherMatch,
                         os_app_identity_verified = false, network_delivery_verified = false });
                 }
+            };
+            // Exact consented document URL only. WebView2 HTTP status is NOT
+            // proof of installed app identity, Referer acceptance, or playback.
+            // Never emit URL, header, cookie, body, or any sensitive payload.
+            web.WebResourceResponseReceived += (_, e) => {
+                if (offlineProbe || exactVideoHttpResponseCount >= 8
+                    || !ExactVideoNavigation(e.Request.Uri, videoId, fullWatch))
+                    return;
+                exactVideoHttpResponseCount++;
+                int status = 0;
+                try { status = e.Response?.StatusCode ?? 0; }
+                catch (COMException) { /* Unknown remains unknown. */ }
+                Reply(new { type = "exact_video_http_response",
+                    http_status = status, stage = "webview2_response",
+                    provider_identity_acceptance_verified = false,
+                    os_app_identity_verified = false,
+                    picture_audio_verified = false });
             };
             web.NavigationStarting += (_, e) => {
                 if (offlineProbe && e.Uri == "about:blank") return;
