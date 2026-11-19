@@ -10,7 +10,7 @@ from pathlib import Path
 from collections import defaultdict
 
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QTransform, QRadialGradient
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QTransform, QRadialGradient, QPixmap
 from PySide6.QtWidgets import (QWidget, QToolTip, QDialog, QVBoxLayout,
     QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel, QLineEdit, QComboBox)
 
@@ -101,6 +101,11 @@ class WorldMap(QWidget):
         # evidence-status repaint. Qt GUI-thread ownership is unchanged.
         self._projected_view_key = None
         self._projected_paths = ()
+        # Pixel backing for static country geometry. Hover on the same country
+        # and passive idle paints must not redraw every Natural Earth path.
+        # Source/view/category changes produce a fresh Qt-GUI-owned pixmap.
+        self._country_backdrop_key = None
+        self._country_backdrop_pixmap = None
         # Projected point clusters change with source dataset, view or category
         # only. Cursor hover/selection can reuse the same 5,000-point grouping.
         self._cluster_view_key = None
@@ -204,6 +209,10 @@ class WorldMap(QWidget):
         # Preserve the original all-point (not category-filtered) footer
         # semantics without re-scanning up to 5,000 events per paint.
         self._footer_point_count = sum(self.has_location(item) for item in self.events)
+        # Every source replacement invalidates painted stripes/neutral/economy
+        # outlines even if Python reuses a source-list object identifier.
+        self._country_backdrop_key = None
+        self._country_backdrop_pixmap = None
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
         self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
@@ -650,12 +659,13 @@ class WorldMap(QWidget):
         self._cluster_view_key = key
         return self._cluster_groups
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def _paint_country_backdrop(self, painter, projected_paths):
+        """Paint static offline geography on the GUI thread for this exact view.
+
+        GDELT, interactive labels, area geometry, evidence badges and points
+        stay above this backing and retain their live click/hit semantics.
+        """
         painter.fillRect(self.rect(), QColor("#292a2d"))
-        transform = self._transform()
-        projected_paths = self._mapped_country_paths()
         painter.setPen(QPen(QColor("#303135"), 1))
         for lon in range(-180, 181, 30):
             a, b = self.point(lon, 85), self.point(lon, -60)
@@ -683,13 +693,56 @@ class WorldMap(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPath(mapped_path)
             if self.crisis_overlay_enabled:
-                activity = self.country_activity_for(c["name"])
+                activity = self.country_activity.get(country_key, {})
                 stripe_specs = (("conflict", "#d84a52", Qt.BrushStyle.BDiagPattern), ("unrest", "#e3bd4d", Qt.BrushStyle.FDiagPattern), ("migration", "#9a6748", Qt.BrushStyle.HorPattern))
                 painter.setPen(Qt.PenStyle.NoPen)
                 for kind, color, style in stripe_specs:
                     if self.crisis_layers.get(kind, True) and int(activity.get(kind, 0) or 0) > 0:
                         shade = QColor(color); shade.setAlpha(185)
                         painter.setBrush(QBrush(shade, style)); painter.drawPath(mapped_path)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        transform = self._transform()
+        projected_paths = self._mapped_country_paths()
+        # The collection worker can change attributed country evidence after
+        # splash. Refresh the exact accepted source/category index BEFORE
+        # testing the view-cache key; never reuse stripes for changed evidence.
+        self._refresh_country_activity()
+        ratio = self.devicePixelRatioF()
+        backing_key = (
+            self.width(), self.height(), ratio, self.zoom, self.pan_x, self.pan_y,
+            id(self.events), id(self.country_activity),
+            id(self.country_only_evidence), id(self.economic_observations),
+            self._activity_categories, self.selected_country,
+            self._hover_country, self.crisis_overlay_enabled,
+            tuple(sorted(self.crisis_layers.items())),
+        )
+        pixel_width = math.ceil(self.width() * ratio)
+        pixel_height = math.ceil(self.height() * ratio)
+        # The source's bounded 5,000-point cache is distinct from this pixel
+        # backing. Bound memory for large/multi-monitor/high-DPI windows.
+        if (pixel_width > 0 and pixel_height > 0 and
+                pixel_width * pixel_height <= 8_000_000):
+            if self._country_backdrop_key != backing_key:
+                backing = QPixmap(pixel_width, pixel_height)
+                backing.setDevicePixelRatio(ratio)
+                backing_painter = QPainter(backing)
+                backing_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                try:
+                    self._paint_country_backdrop(backing_painter, projected_paths)
+                finally:
+                    backing_painter.end()
+                self._country_backdrop_pixmap = backing
+                self._country_backdrop_key = backing_key
+            painter.drawPixmap(0, 0, self._country_backdrop_pixmap)
+        else:
+            # Huge/invalid viewport: preserve correct painting without keeping
+            # an unbounded pixmap allocation.
+            self._country_backdrop_pixmap = None
+            self._country_backdrop_key = None
+            self._paint_country_backdrop(painter, projected_paths)
         if self.gdelt_layer is not None:
             self.gdelt_layer.paint(painter, transform, self._countries)
         if self.labels:
