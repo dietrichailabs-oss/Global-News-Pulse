@@ -22,8 +22,27 @@ def archive_for(stamp):
     contents = ("\t".join(row) + "\n").encode("utf-8")
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zipped:
-        zipped.writestr(f"{stamp}.export.CSV", contents)
+        # The prior string-name writestr() stamped the *current wall-clock*
+        # into the ZIP member, changing its MD5 across two-second DOS time
+        # boundaries. A restart/replay test regenerated the same published
+        # filename with a different advertised digest and correctly failed
+        # the production immutable-checkpoint check. This is a test-fixture
+        # transport identity fix, never a relaxation of the digest guard.
+        member = zipfile.ZipInfo(f"{stamp}.export.CSV", date_time=(2020, 1, 1, 0, 0, 0))
+        member.compress_type = zipfile.ZIP_DEFLATED
+        zipped.writestr(member, contents)
     return out.getvalue()
+
+
+def test_archives_for_same_official_stamp_have_stable_digest_and_member_time():
+    """Reopening a fixture must not impersonate an upstream digest revision."""
+    first = archive_for(STAMP)
+    replay = archive_for(STAMP)
+    assert first == replay
+    assert hashlib.md5(first).hexdigest() == hashlib.md5(replay).hexdigest()
+    with zipfile.ZipFile(io.BytesIO(replay)) as archive:
+        assert len(archive.infolist()) == 1
+        assert archive.infolist()[0].date_time == (2020, 1, 1, 0, 0, 0)
 
 
 def manifest_for(stamp, contents, size=None):
