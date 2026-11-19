@@ -411,7 +411,22 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             QTest.qWait(7200)
             ticker.stop()
             heartbeat = [(b-a)*1000 for a, b in zip(tick_marks, tick_marks[1:])]
+            # If the exact 7.2-second gate is missed, report where the real
+            # source worker is *right now* without extending the deadline,
+            # changing test assertions or printing any source data/paths.
+            import sys
+            worker_stack_at_deadline = []
+            for worker in threading.enumerate():
+                if worker.name != "pulse-idle-evidence" or worker.ident is None:
+                    continue
+                frame = sys._current_frames().get(worker.ident)
+                while frame is not None and len(worker_stack_at_deadline) < 12:
+                    worker_stack_at_deadline.append(frame.f_code.co_name)
+                    frame = frame.f_back
+                break
             result = {
+                "worker_stack_at_deadline": worker_stack_at_deadline,
+                "worker_inflight_at_deadline": window._idle_snapshot_inflight,
                 "synthetic_archive_reports": 820,
                 "synthetic_economy_observations": 3200,
                 "media_opened": False,
