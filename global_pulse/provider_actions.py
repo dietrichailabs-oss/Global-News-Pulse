@@ -121,6 +121,24 @@ def populate_sources(window, *, idle=False):
     catalog = list(window.controller.catalog)
     fingerprint = _catalog_fingerprint(catalog)
     if idle:
+        # A truly unchanged persisted revision, catalog and monitoring state
+        # cannot have changed source health or enabled preferences. Avoid even
+        # a 512-source SQL scan on a no-op status pulse. A second nonblocking
+        # check rejects writes arriving during this cheap identity comparison.
+        previous = getattr(window, "_source_status_render_key", None)
+        store = window.controller.store
+        revision = store.content_revision_if_available()
+        if revision is None:
+            return False
+        if (previous is not None and len(previous) == 4
+                and previous[0] == revision and previous[1] == fingerprint
+                and previous[3] == bool(window.controller.monitoring)
+                and table.rowCount() == len(catalog)):
+            confirmed = store.content_revision_if_available()
+            if confirmed is None:
+                return False
+            if confirmed == revision:
+                return True
         # The first nonblocking workspace probe cannot reserve the Store
         # RLock. Read enabled preferences, revision and all source health as
         # ONE atomic try-lock snapshot; BUSY retains the dirty tab for retry.
