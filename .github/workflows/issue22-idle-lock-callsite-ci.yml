@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 1e7d24f48416a1446e7153b116774a09b39cc23c HEAD
-          git diff --name-only 1e7d24f48416a1446e7153b116774a09b39cc23c HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-lock-callsite-ci.yml','tests/test_issue22_startup_idle_profile.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 1e7d24f48416a1446e7153b116774a09b39cc23c HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-lock-callsite-ci.yml','tests/test_issue22_startup_idle_profile.py','tests/test_issue22_idle_archive_storage_trylock.py','global_pulse/controller.py','global_pulse/archive_storage_controls.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Native hosted Windows Qt
         if: runner.os == 'Windows'
         shell: bash
@@ -53,8 +53,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q global_pulse tests/test_issue22_startup_idle_profile.py
-          python -m pytest -s -q --tb=short tests/test_issue22_startup_idle_profile.py
+          python -m compileall -q global_pulse tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_archive_storage_trylock.py
+          python -m pytest -s -q --tb=short tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_archive_storage_trylock.py tests/test_issue22_idle_source_status_trylock.py tests/test_issue22_idle_second_lock_check.py tests/test_issue22_idle_brief_lock_commit.py tests/test_issue22_idle_situations_lock_race.py tests/test_issue22_idle_alerts_lock_race.py tests/test_issue22_idle_economy_lock_race.py tests/test_issue22_idle_feed_key_worker.py tests/test_issue22_idle_selected_context.py tests/test_issue22_idle_gdelt_projection.py tests/test_issue22_idle_brief_presentation.py tests/test_issue22_idle_source_status_batch.py tests/test_issue22_idle_source_status_noop.py
       - name: Verify tracked tree clean
         if: always()
         shell: bash
