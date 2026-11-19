@@ -89,6 +89,11 @@ class WorldMap(QWidget):
         self.country_only_evidence = {}  # Neutral/historical country-only archive
         self.country_category_evidence = {}  # All attributed categories, including current reports
         self._country_badge_hits = []
+        # Country category/economy rings are source- and view-dependent, not
+        # frame-dependent. Reuse placement, colors and exact tooltip hit data
+        # on unchanged no-click paints; QPainter stays on the GUI thread.
+        self._country_badge_key = None
+        self._country_badge_specs = ()
         self.country_dialog = None
         self._drag = None
         self._moved = False
@@ -222,6 +227,9 @@ class WorldMap(QWidget):
         # outlines even if Python reuses a source-list object identifier.
         self._country_backdrop_key = None
         self._country_backdrop_pixmap = None
+        self._country_badge_key = None
+        self._country_badge_specs = ()
+        self._country_badge_hits = []
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
         self.observations = [dict(item) for item in list(observations or [])[:10000] if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
@@ -787,6 +795,69 @@ class WorldMap(QWidget):
         self._country_label_key = key
         return self._country_label_specs
 
+    def _visible_country_badge_specs(self):
+        """Prepare sourced country category/economy rings for an exact view.
+
+        The source attribution and actual date/coverage indices were already
+        built by _refresh_country_activity. Badge geometry, category ranking
+        and tooltip hit descriptions do not change on passive expose/hover.
+        The same bounded tuples drive drawing and mouse hit-testing; evidence
+        remains country-level, never invented incident coordinates.
+        """
+        key = (
+            self.width(), self.height(), self.zoom, self.pan_x, self.pan_y,
+            self.devicePixelRatioF(), self._activity_categories,
+            id(self.country_category_evidence), id(self.economic_observations),
+        )
+        if key == self._country_badge_key:
+            return self._country_badge_specs
+        specs = []
+        hits = []
+        viewport = self.rect().adjusted(5, 5, -5, -5)
+        for country in self._countries:
+            name = country["name"]
+            normalized = normalize_country(name)
+            evidence = self.country_category_evidence.get(normalized, {})
+            counts = dict(evidence.get("categories") or {})
+            economy = self.economic_observations.get(normalized, {})
+            if economy and not counts.get("Economy"):
+                counts["Economy"] = 0  # dated observations, not crisis events
+            if not counts or name == "Antarctica":
+                continue
+            label = country.get("label")
+            if not label or not all(_number(value) for value in label):
+                continue
+            position = self.point(*label)
+            if not (-15 < position.x() < self.width() + 15
+                    and -15 < position.y() < self.height() + 15):
+                continue
+            kinds = sorted(
+                counts,
+                key=lambda category: (
+                    _CATEGORY_PRIORITY.index(category)
+                    if category in _CATEGORY_PRIORITY else len(_CATEGORY_PRIORITY),
+                    category,
+                ),
+            )[:8]
+            start_x = position.x() - (len(kinds) - 1) * 6.5
+            for index, category in enumerate(kinds):
+                center = QPointF(start_x + index * 13, position.y() + 11)
+                if not viewport.contains(center.toPoint()):
+                    continue
+                color = QColor(CATEGORY_COLORS.get(category, "#aebdcf"))
+                value = int(counts.get(category, 0))
+                descriptor = (
+                    f"{value} country-attributed source record(s)"
+                    if value else
+                    f"{int(economy.get('count', 0))} dated economic observation(s)"
+                )
+                specs.append((center, color, name, category, descriptor))
+                hits.append((center, 7.5, name, category, descriptor))
+        self._country_badge_specs = tuple(specs)
+        self._country_badge_hits = hits
+        self._country_badge_key = key
+        return self._country_badge_specs
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -844,50 +915,13 @@ class WorldMap(QWidget):
         # They are *not* severity or event pins; their distinct hollow rings
         # and clickable country tooltip express that limitation. No fake
         # centroids or inferred coordinates are added to the event data.
-        self._country_badge_hits.clear()
-        for c in self._countries:
-            key = normalize_country(c["name"])
-            evidence = self.country_category_evidence.get(key, {})
-            category_counts = dict(evidence.get("categories") or {})
-            economy = self.economic_observations.get(key, {})
-            if economy and not category_counts.get("Economy"):
-                category_counts["Economy"] = 0  # dated observations only
-            if not category_counts or c["name"] == "Antarctica":
-                continue
-            label = c.get("label")
-            if not label or not all(_number(v) for v in label):
-                continue
-            point = self.point(*label)
-            if not (-15 < point.x() < self.width()+15 and -15 < point.y() < self.height()+15):
-                continue
-            # Prioritize diverse non-weather evidence on small country labels.
-            kinds = sorted(category_counts,
-                           key=lambda cat: (_CATEGORY_PRIORITY.index(cat)
-                               if cat in _CATEGORY_PRIORITY else len(_CATEGORY_PRIORITY),
-                               cat))[:8]
-            count = len(kinds)
-            # A marker below the geographic label denotes the country, not a
-            # purported incident at the label coordinate.
-            start_x = point.x() - (count-1)*6.5
-            for index, category in enumerate(kinds):
-                center = QPointF(start_x + index*13, point.y()+11)
-                if not self.rect().adjusted(5, 5, -5, -5).contains(center.toPoint()):
-                    continue
-                color = QColor(CATEGORY_COLORS.get(category, "#aebdcf"))
-                painter.setPen(QPen(color, 1.7))
-                painter.setBrush(QColor("#111721"))
-                painter.drawEllipse(center, 5.6, 5.6)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(color)
-                painter.drawEllipse(center, 2.8, 2.8)
-                value = int(category_counts.get(category, 0))
-                descriptor = (
-                    f"{value} country-attributed source record(s)"
-                    if value else f"{int(economy.get('count',0))} dated economic observation(s)"
-                )
-                self._country_badge_hits.append((
-                    center, 7.5, c["name"], category, descriptor
-                ))
+        for center, color, _name, _category, _descriptor in self._visible_country_badge_specs():
+            painter.setPen(QPen(color, 1.7))
+            painter.setBrush(QColor("#111721"))
+            painter.drawEllipse(center, 5.6, 5.6)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawEllipse(center, 2.8, 2.8)
 
         self._hits.clear()
         for marker in self._visible_cluster_paint_specs():
