@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 389f75778b2faa798549e5668f1e17f777834c1a HEAD
-          git diff --name-only 389f75778b2faa798549e5668f1e17f777834c1a HEAD | python -c "import sys; expected={'.github/workflows/issue22-r19-full-suite-contract-diagnostic.yml','tests/test_issue22_idle_collector_snapshot.py','tests/test_issue74_row_lifetime.py','tests/test_issue82_owner_tab_paint_cpu.py','tests/test_issue82_owner_win11_optin_sources_tabs.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+          git diff --name-only 389f75778b2faa798549e5668f1e17f777834c1a HEAD | python -c "import sys; expected={'.github/workflows/issue22-r19-full-suite-contract-diagnostic.yml','global_pulse/core.py','tests/test_issue22_idle_collector_snapshot.py','tests/test_issue74_row_lifetime.py','tests/test_issue82_owner_tab_paint_cpu.py','tests/test_issue82_owner_win11_optin_sources_tabs.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
       - name: Real hosted Windows Qt backend
         if: runner.os == 'Windows'
         shell: bash
