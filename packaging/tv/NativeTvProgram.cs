@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -68,6 +69,32 @@ internal static class Program
 
 internal sealed class TvForm : Form
 {
+    // This is an OS-backed check of the *current helper process*, not a claim
+    // that the publisher web domain is a Windows package/app identifier.
+    // Classic EXE/Inno installations typically return NO_PACKAGE (15700).
+    // Do not emit the package name, publisher ID, headers or other identity.
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentPackageFullName(
+        ref uint packageFullNameLength, StringBuilder? packageFullName);
+
+    private static string InstalledPackageIdentityState()
+    {
+        try
+        {
+            uint length = 0;
+            int result = GetCurrentPackageFullName(ref length, null);
+            if (result == 15700) return "absent"; // APPMODEL_ERROR_NO_PACKAGE
+            if (result != 122 || length == 0 || length > 512) return "unknown";
+            var buffer = new StringBuilder((int)length);
+            result = GetCurrentPackageFullName(ref length, buffer);
+            return result == 0 && buffer.Length > 0 ? "present" : "unknown";
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return "unknown";
+        }
+    }
+
     // Microsoft documents that these host-machine overrides can silently
     // replace the requested private profile, redirect the runtime, or expose
     // the page to script debuggers. The helper fails closed on any override.
@@ -292,9 +319,14 @@ internal sealed class TvForm : Form
         if (!WebView2OverrideNames.Contains("WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER")) failures++;
         if (!WebView2PolicyOverrides.Contains("AdditionalBrowserArguments")) failures++;
         if (!WebView2PolicyOverrides.Contains("UserDataFolder")) failures++;
+        // Exercise the real local Win32 API in an offline native test process.
+        // A missing package identity is valid for classic EXE installs.
+        string installedPackageState = InstalledPackageIdentityState();
+        if (installedPackageState is not ("present" or "absent" or "unknown")) failures++;
         Console.WriteLine(JsonSerializer.Serialize(new {
-            type="policy_self_test", cases=exact.Length * 2 + 11,
-            passed=failures==0, failures, network="none"
+            type="policy_self_test", cases=exact.Length * 2 + 12,
+            passed=failures==0, failures, network="none",
+            os_package_identity_state=installedPackageState
         }));
         return failures==0 ? 0 : 1;
     }
@@ -467,6 +499,14 @@ internal sealed class TvForm : Form
             // use the documented WebView2 SetHeader API. The publisher URL
             // is not itself verified OS app/package identity. No playback pass
             // until physical Windows confirms YouTube received an admissible ID.
+            // Read actual OS package registration once, before any network
+            // navigation. An observed Windows package name is still not
+            // evidence that this Referer is the app's registered Name.
+            Reply(new { type = "installed_package_identity",
+                state = InstalledPackageIdentityState(),
+                source = "GetCurrentPackageFullName",
+                referer_matches_registered_app_id = false,
+                provider_acceptance_verified = false });
             var request = environment.CreateWebResourceRequest(url, "GET", null, "");
             request.Headers.SetHeader("Referer", PublisherReferer);
             web.NavigateWithWebResourceRequest(request);
