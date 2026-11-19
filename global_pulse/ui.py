@@ -1291,6 +1291,10 @@ class MainWindow(SituationActions, QMainWindow):
         # The worker may process plain source dictionaries, never Qt widgets.
         map_categories=(None if self.world_map.categories is None
                         else tuple(self.world_map.categories))
+        # Plain immutable country names/ISO codes only; no Qt painter or
+        # QWidget crosses the worker boundary.
+        map_country_rows=tuple((str(c["name"]),str(c.get("code") or ""))
+                               for c in self.world_map._countries)
         # The daily/weekly intelligence brief is another expensive hidden
         # workspace prewarm. Capture its period/cutoff before entering the
         # Store worker; only immutable source dictionaries cross the thread.
@@ -1402,7 +1406,7 @@ class MainWindow(SituationActions, QMainWindow):
                 # worker returned. Compute it on the same bounded worker;
                 # pass back the exact source object identities for validation.
                 from .crisis_overlay import build_country_activity
-                from .map_widget import _map_category
+                from .map_widget import _map_category, prepare_country_evidence
                 category_key=(None if map_categories is None else
                               frozenset(_map_category(c) for c in map_categories))
                 evidence=result["country_evidence"][:5000]
@@ -1417,6 +1421,12 @@ class MainWindow(SituationActions, QMainWindow):
                     "category_key":category_key,
                     "record_ids":tuple(id(record) for record in evidence),
                     "activity":classified, "credits":credits,
+                    "country_rows":map_country_rows,
+                    "observation_ids":tuple(id(item) for item in result["observations"][:10000]
+                                            if isinstance(item,dict)),
+                    "evidence_index":prepare_country_evidence(
+                        selected,result["observations"][:10000],map_country_rows,
+                        credits,category_key),
                 }
                 after=store.content_revision()
                 result["revision_before"]=before
