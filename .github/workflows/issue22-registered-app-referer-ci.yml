@@ -1,0 +1,75 @@
+name: Issue22 Registered Windows YouTube Referer Engineering
+on:
+  push:
+    branches: [eng/issue22-youtube-os-registered-referer-20261119]
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install hash-locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact parent and four-path source guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD
+          git diff --name-only 1c7aae874c2cefce03b3fa3d0cd46bb01f5a6768 HEAD | python -c "import sys; expected={'.github/workflows/issue22-registered-app-referer-ci.yml','packaging/tv/NativeTvProgram.cs','global_pulse/single_media.py','tests/test_issue22_windows_package_identity.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Native Windows Qt
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Python syntax and exact response/identity/idle tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse tests/test_issue22_windows_package_identity.py
+          python -m pytest -q --tb=short tests/test_issue22_windows_package_identity.py tests/test_issue22_webview2_http_observation.py tests/test_issue22_webview2_identity_observation.py tests/test_issue82_native_tv_policy.py tests/test_issue22_startup_idle_profile.py
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: '10.0.403'
+      - name: Native helper locked compile and policy self-test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet restore packaging/tv/GlobalPulse.TV.csproj --runtime win-x64 --locked-mode
+          if ($LASTEXITCODE -ne 0) { throw "Locked restore failed" }
+          dotnet publish packaging/tv/GlobalPulse.TV.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --output build/webview2-http-probe -p:PublishSingleFile=false -p:PublishTrimmed=false
+          if ($LASTEXITCODE -ne 0) { throw "Native compile failed" }
+          & build/webview2-http-probe/GlobalPulse.TV.exe --self-test-policy
+          if ($LASTEXITCODE -ne 0) { throw "Native policy failed" }
+      - name: Tree clean
+        if: always()
+        shell: bash
+        run: git diff --exit-code
