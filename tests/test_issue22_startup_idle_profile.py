@@ -195,8 +195,20 @@ class _TimedStoreLock:
                           else frame.f_code.co_name)
                 self._ownership[tid] = (time.perf_counter(), 1, caller)
         if elapsed > 20:
+            # A GUI lock delay alone does not locate the source-level
+            # offender. Capture only method names from the actual call chain:
+            # no source bytes, file paths, report content, or arbitrary data.
+            import sys
+            frame = sys._getframe(1)
+            callsite = []
+            for _ in range(5):
+                if frame is None:
+                    break
+                callsite.append(frame.f_code.co_name)
+                frame = frame.f_back
             self.slowest.append({"kind": "wait", "thread": key,
-                                 "ms": round(elapsed, 3)})
+                                 "ms": round(elapsed, 3),
+                                 "callsite": callsite})
         return acquired
 
     def release(self):
