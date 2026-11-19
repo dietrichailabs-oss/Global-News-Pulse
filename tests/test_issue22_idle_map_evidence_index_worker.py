@@ -39,7 +39,7 @@ def _report(i, category="Health", *, synthetic=False):
 
 
 def _observations():
-    return [{"country_name": "Ukraine", "country_code": "",
+    return [{"country": "Ukraine", "country_name": "Ukraine", "country_code": "",
              "indicator": "fictional_growth", "indicator_name": "Fictional growth",
              "observation_date": "2025-12-01", "value": 2.0,
              "source_id": "offline-index-test", "synthetic": True}]
