@@ -133,3 +133,38 @@ def test_collector_snapshot_discards_change_during_worker_read(tmp_path,monkeypa
     finally:
         release.set()
         _shutdown(app,window,controller)
+
+
+def test_batched_current_feed_retains_full_canonical_report_and_timeline(tmp_path):
+    """Fast current feed must be byte-equivalent to the source-exact event reader.
+
+    The optimization cannot turn a full evidence trail into a headline-only
+    projection, lose a correction/revision, or substitute publisher location.
+    All records and sources are explicitly fictional and network-free.
+    """
+    controller=Controller(tmp_path,demo=True)
+    try:
+        controller.store.ingest([_report(i) for i in range(85)])
+        # Two successive source versions and a second independent record
+        # with the same event_key exercise historical timelines and siblings.
+        for key in (3, 9, 27):
+            edited=_report(key)
+            edited["title"]=f"FICTIONAL corrected local revision {key}"
+            controller.store.ingest([edited])
+        extra=_report(9999)
+        extra["event_key"]=_report(9)["event_key"]
+        controller.store.ingest([extra])
+        actual=controller.events(limit=500)
+        expected=[controller.store.get_event(row["id"]) for row in actual]
+        assert len(actual)==85
+        assert actual==expected, (
+            "Batched current feed must preserve every field, original report, "
+            "correction, history timestamp and event identity")
+        assert any(len(row["reports"])>=2 for row in actual)
+        assert any(len(row["timeline"])>=2 for row in actual)
+        # Explicit map summaries and the historical read retain the original
+        # separate conservative collectors, not the current-feed shortcut.
+        assert controller.events(map_view=True,limit=100)==controller.store.list_events(
+            map_view=True,limit=100)
+    finally:
+        controller.close()
