@@ -79,11 +79,26 @@ $pythonSelector = @()
 if ([System.IO.Path]::GetFileName($pythonCommand) -match '^py(?:\.exe)?$') { $pythonSelector = @('-3.12') }
 $pythonIdentity = & $pythonCommand @pythonSelector -c "import sys,platform; assert sys.version_info[:2]==(3,12), 'Python 3.12 is required'; assert platform.machine().lower() in ('amd64','x86_64'), 'Native x64 Python is required'; print(sys.version.split()[0])"
 if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 x64 prerequisite is not satisfied.' }
+# The first CLI invocation may emit first-use notices. Validate the actual
+# selected stable SDK and its presence in the installed list, never accepting
+# SDK 8/9/11, previews or an absent toolchain.
 $dotnet = (Get-Command 'dotnet.exe' -ErrorAction Stop).Source
-$dotnetVersion = (& $dotnet --version).Trim()
-if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') {
-    throw '.NET SDK 10 stable must be the selected SDK. No SDK or system runtime is downloaded by this script.'
+$dotnetVersionOutput = @(& $dotnet --version 2>&1 | ForEach-Object { $_.ToString().Trim() })
+$dotnetVersionExit = $LASTEXITCODE
+$dotnetVersionMatches = @($dotnetVersionOutput | Where-Object { $_ -match '^\d+\.\d+\.\d+$' })
+$dotnetVersion = if ($dotnetVersionMatches.Count -eq 1) { $dotnetVersionMatches[0] } else { '' }
+$installedSdkLines = @(& $dotnet --list-sdks 2>&1 | ForEach-Object { $_.ToString().Trim() })
+$installedSdkExit = $LASTEXITCODE
+$installedVersion = @($installedSdkLines | Where-Object {
+    $_ -match ('^' + [regex]::Escape($dotnetVersion) + '\s+\[')
+})
+if ($dotnetVersionExit -ne 0 -or $installedSdkExit -ne 0 -or
+        $dotnetVersion -notmatch '^10\.\d+\.\d+$' -or
+        $installedVersion.Count -ne 1) {
+    throw ("Stable .NET SDK 10 selection failed: exe={0}, selected='{1}', version_exit={2}, installed_exit={3}, installed=[{4}]. No SDK is downloaded by this script." -f
+        $dotnet, $dotnetVersion, $dotnetVersionExit, $installedSdkExit, ($installedSdkLines -join '; '))
 }
+Write-Host "VERIFIED_DOTNET_SDK_10=$dotnetVersion PATH=$dotnet"
 if (-not $InnoCompiler) {
     $innoCommand = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
     if ($innoCommand) { $InnoCompiler = $innoCommand.Source }
