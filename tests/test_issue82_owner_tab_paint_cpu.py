@@ -107,22 +107,28 @@ def test_live_revision_waits_for_navigation_idle(desktop, monkeypatch):
     window, controller = desktop
     window.prepare_initial_workspaces()
     called = []
-    monkeypatch.setattr(window, "refresh_data", lambda:called.append(1))
+    snapshot_starts = []
+    monkeypatch.setattr(window, "refresh_data", lambda: called.append(1))
+    # Collector notices now initiate a revision-checked worker, not a
+    # synchronous Qt refresh. This test isolates the cooldown scheduler;
+    # separate real-Store/real-Qt cases prove eventual source application.
+    monkeypatch.setattr(window, "_start_idle_snapshot", lambda: snapshot_starts.append(1))
     for _ in range(20):
         window.open_page(2)
         controller.evidence_changed.emit()
         window.open_page(0)
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
-    assert not called, "Collector updates must not build 5k items between clicks"
+    assert not called and not snapshot_starts, "Collector updates must not build 5k items between clicks"
     assert window._evidence_refresh_timer.isActive()
     window._evidence_refresh_timer.stop()
     window._last_navigation_at=time.monotonic()-2
     window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
-    assert called == [1], "Once idle, the pending collector revision is applied"
+    assert snapshot_starts == [1], "Once idle, start one revision-checked worker"
+    assert called == [], "Passive scheduling never synchronously rebuilds Qt"
     controller.data_changed.emit()
-    assert called == [1,1], "Explicit user/settings revisions remain immediate"
+    assert called == [1], "Explicit user/settings revisions remain immediate"
     assert not window._evidence_refresh_timer.isActive()
 
 
@@ -130,19 +136,19 @@ def test_collector_bursts_are_spaced_to_protect_video_and_tab_input(desktop, mon
     window, controller = desktop
     assert window.prepare_initial_workspaces()
     calls=[]
-    monkeypatch.setattr(window,"refresh_data",lambda:calls.append(time.monotonic()))
+    monkeypatch.setattr(window,"_start_idle_snapshot",lambda:calls.append(time.monotonic()))
     window._last_navigation_at=time.monotonic()-10
     window._last_full_refresh_at=time.monotonic()
     for _ in range(120):
         controller.evidence_changed.emit()
     window._evidence_refresh_timer.stop()
     window._refresh_evidence_when_idle()
-    assert calls==[], "Fast collector bursts must not force repeated GUI work"
+    assert calls==[], "Fast collector bursts must not start duplicate worker reads"
     assert window._evidence_refresh_timer.isActive()
     window._evidence_refresh_timer.stop()
     window._last_full_refresh_at=time.monotonic()-6
     window._refresh_evidence_when_idle()
-    assert len(calls)==1
+    assert len(calls)==1, "A coalesced burst starts exactly one worker snapshot"
 
 
 def test_multi_field_settings_save_repaints_once(desktop, monkeypatch):
