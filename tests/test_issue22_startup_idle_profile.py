@@ -13,7 +13,7 @@ import threading
 import time
 from collections import defaultdict
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -302,6 +302,74 @@ def test_observation_readthrough_cache_preserves_corrections_and_independence(tm
         store.close()
 
 
+
+
+def test_noop_country_evidence_reuses_complete_revision_only(tmp_path):
+    """Actual Store reports; moving cutoff is safe only for stable full pages."""
+    store = Store(tmp_path / "country-noop.sqlite", mode="synthetic")
+    try:
+        assert len(store.ingest(_reports(9))) == 9
+        old_since=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
+        new_since=(datetime.now(timezone.utc)-timedelta(hours=23)).isoformat()
+        scope=("", "", "", 0, 1000)
+        filters={"query":"","category":"","region":"","limit":5000,
+                 "since":old_since,"map_view":True,"keep_significant":True}
+        events=store.list_events(**dict(filters,map_evidence=True))
+        assert len(events)==9
+        token=store.content_revision()
+        cache={"revision":token,"scope":scope,"filters":filters,
+               "events":tuple(events)}
+        current=MainWindow._unchanged_country_evidence(
+            cache,token,scope,{**filters,"since":new_since})
+        assert current is not None
+        assert [e["id"] for e in current]==[e["id"] for e in events]
+        assert all(a is not b for a,b in zip(current,events))
+        assert all(not e["retained_on_map"] for e in current)
+        # Source/datetime changes NEVER mutate the original cached evidence.
+        assert all(not e["retained_on_map"] for e in events)
+        old_event=dict(events[0],updated_at=old_since)
+        crossing=dict(cache,events=(old_event,*events[1:]))
+        trimmed=MainWindow._unchanged_country_evidence(
+            crossing,token,scope,{**filters,"since":new_since})
+        assert trimmed is not None
+        assert events[0]["id"] not in [e["id"] for e in trimmed]
+        important=dict(old_event,severity="critical")
+        crossing=dict(cache,events=(important,*events[1:]))
+        retained=MainWindow._unchanged_country_evidence(
+            crossing,token,scope,{**filters,"since":new_since})
+        assert retained is not None and retained[0]["retained_on_map"]
+        assert retained[0]["map_retention_note"].startswith("Retained significant")
+        assert not important.get("retained_on_map")
+        # Complete page and unchanged query are mandatory. A capped page,
+        # backwards cutoff, new country/filter, or temporal warning cannot
+        # inherit old source evidence.
+        assert MainWindow._unchanged_country_evidence(
+            cache,token,scope,{**filters,"limit":9,"since":new_since}) is None
+        assert MainWindow._unchanged_country_evidence(
+            cache,token,scope,{**filters,"since":old_since[:10]}) is None
+        assert MainWindow._unchanged_country_evidence(
+            cache,token,("new-scope",),filters) is None
+        assert MainWindow._unchanged_country_evidence(
+            cache,token,scope,{**filters,"category":"Conflict"}) is None
+        for extra in ({"map_areas":[{"type":"Polygon"}]},
+                      {"status":"pending"},
+                      {"map_history_incomplete":True},
+                      {"evidence_policy_version":1},
+                      {"reports":[{**events[0]["reports"][0],
+                                  "expires_at":"2026-11-19T00:00:00Z"}]}):
+            unsafe=dict(cache,events=(dict(events[0],**extra),*events[1:]))
+            assert MainWindow._unchanged_country_evidence(
+                unsafe,token,scope,filters) is None
+        # Actual persisted ingest changes revision: no read-through allowed.
+        assert store.ingest([{
+            **_reports(1)[0],"id":"new-map-evidence",
+            "event_key":"new-map-evidence",
+        }])
+        assert MainWindow._unchanged_country_evidence(
+            cache,store.content_revision(),scope,filters) is None
+    finally:
+        store.close()
+
 def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
     """Do not click a tab or open YouTube during the measured idle window."""
     app = QApplication.instance() or QApplication([])
@@ -455,6 +523,8 @@ def test_heavy_first_paint_and_post_splash_no_click_heartbeat(tmp_path):
             assert len(heartbeat) >= 40, "Main-thread heartbeat did not run"
             assert methods["idle:_refresh_evidence_when_idle"], "No collector-triggered idle evidence revision"
             assert methods["idle:refresh_data"], "No real idle full refresh after collector signals"
+            assert not worker_methods.get("idle:Store.list_events:country_evidence"), (
+                "Unchanged complete map source re-read during no-click collector NO-OP")
             # A no-click post-splash source update may read SQLite on its own
             # worker, never block the Qt GUI thread with these archive scans.
             assert not methods.get("idle:Store.list_observations"), (

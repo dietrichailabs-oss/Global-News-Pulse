@@ -408,6 +408,9 @@ class MainWindow(SituationActions, QMainWindow):
         # Last source-consistent display, used only if an evidence signal is a
         # no-op for the underlying SQLite revision. Never a TTL or blind cache.
         self._idle_feed_cache=None
+        # Exact-revision map source evidence can be read through on a no-op
+        # collector signal, but never on a real ingestion or temporal warning.
+        self._idle_country_cache=None
         self._idle_snapshot_ready.connect(
             self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
         self._idle_brief_ready.connect(
@@ -1192,6 +1195,70 @@ class MainWindow(SituationActions, QMainWindow):
         return [event for event in cache["feed"]
                 if newer is None or event["updated_at"] >= newer]
 
+
+    @staticmethod
+    def _unchanged_country_evidence(cache, revision, scope, filters):
+        """Safely reuse a complete current map page after a source NO-OP.
+
+        Store revision proves no source edits; a newer rolling cutoff can only
+        remove non-significant events, never add one. Only accept a complete
+        (<5000) ordinary current event page with no temporal/warning/area
+        projection that might change without a new source revision. Historical
+        views, capped pages, changed filters and any complex source ALWAYS
+        take the exact Store read. This is not a timer/TTL freshness claim.
+        """
+        if not cache or cache["revision"] != revision or cache["scope"] != scope:
+            return None
+        previous = cache["filters"]
+        for key in ("query", "category", "region", "before", "limit",
+                    "map_view", "keep_significant"):
+            if previous.get(key) != filters.get(key):
+                return None
+        old_since, new_since = previous.get("since"), filters.get("since")
+        if (old_since is None) != (new_since is None):
+            return None
+        if old_since is not None and new_since < old_since:
+            return None
+        records = cache["events"]
+        if len(records) >= int(filters.get("limit", 5000)):
+            # The old page may hide more eligible records that move into view.
+            return None
+        for event in records:
+            reports = event.get("reports")
+            if (event.get("status") != "active"
+                    or event.get("map_history_incomplete")
+                    or event.get("evidence_policy_version") != 3
+                    or event.get("map_areas")
+                    or event.get("merged_source_events")
+                    or not isinstance(reports, list)
+                    or event.get("report_count") != len(reports)
+                    or len(reports) > 64 or event.get("future_dated")
+                    or any(r.get("source_id") == "nws"
+                           or r.get("future_dated") or r.get("expired")
+                           or r.get("cap_message_type")
+                           or r.get("expires_at") or r.get("effective_at")
+                           or r.get("valid_from") or r.get("valid_until")
+                           or r.get("hazard_end")
+                           for r in reports)):
+                return None
+        kept = []
+        for event in records:
+            older = new_since is not None and event["updated_at"] < new_since
+            significant = (filters.get("keep_significant")
+                           and event.get("severity") in
+                           {"critical", "high", "moderate"})
+            if older and not significant:
+                continue
+            # Preserve stored evidence dictionaries; only display annotations
+            # depend on the moving cutoff. No object shared with Qt is edited.
+            projected = dict(event)
+            projected["retained_on_map"] = bool(older and significant)
+            projected["map_retention_note"] = (
+                "Retained significant event; no newer status received. Last update "
+                + event["updated_at"] if projected["retained_on_map"] else "")
+            kept.append(projected)
+        return kept
+
     def _start_idle_snapshot(self):
         """Read a bounded collector revision off the main thread, never paint there.
 
@@ -1206,6 +1273,7 @@ class MainWindow(SituationActions, QMainWindow):
         # valid only when the worker confirms the exact stored revision; a
         # real collector write always performs the full fresh source read.
         unchanged_cache=self._idle_feed_cache
+        unchanged_country_cache=self._idle_country_cache
         historical_at=self._history_at
         scope=self._archive_scope_key()
         generation=self._idle_snapshot_generation
@@ -1277,8 +1345,13 @@ class MainWindow(SituationActions, QMainWindow):
                 result["selected_event"]=(
                     controller.event(selected_id, at=historical_at)
                     if selected_id else None)
-                result["country_evidence"]=controller.events(
-                    **dict(map_filters,map_evidence=True))
+                reuse_country=(None if historical_at else
+                    self._unchanged_country_evidence(
+                        unchanged_country_cache,before,scope,map_filters))
+                result["country_evidence"]=(
+                    reuse_country if reuse_country is not None else
+                    controller.events(**dict(map_filters,map_evidence=True)))
+                result["unchanged_revision_country"]=reuse_country is not None
                 # Overview selection ranked up to 5,000 map records and
                 # formatted rich HTML on Qt for EVERY collector revision,
                 # including before the first owner click. Use immutable
@@ -1752,9 +1825,10 @@ class MainWindow(SituationActions, QMainWindow):
                                                  if valid_economy_revision else None)
             self._deferred_economy_revision=(economy_revision_after
                                              if valid_economy_revision else None)
+            point_events=(self.controller.events(**map_filters)
+                          if _idle_snapshot is None else _idle_snapshot["map_events"])
             self.world_map.set_events(
-                (self.controller.events(**map_filters) if _idle_snapshot is None
-                 else _idle_snapshot["map_events"]),
+                point_events,
                 country_events=country_evidence,
                 observations=observations,
                 preclassified_country=(_idle_snapshot.get("map_classification")
@@ -1847,9 +1921,22 @@ class MainWindow(SituationActions, QMainWindow):
                 }
             else:
                 self._idle_feed_cache=None
+            if (confirmed is not None and confirmed==read_revision
+                    and not self._history_at):
+                # Keep this exact source revision, not a guessed next page.
+                # The worker proves page completeness/temporal safety before
+                # reusing a no-op collector notification.
+                self._idle_country_cache={
+                    "revision":confirmed,"scope":self._archive_scope_key(),
+                    "filters":dict(map_filters),
+                    "events":tuple(country_evidence),
+                }
+            else:
+                self._idle_country_cache=None
             self._last_full_refresh_at=time.monotonic()
         except Exception as exc:
             self._idle_feed_cache=None
+            self._idle_country_cache=None
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:self._refreshing=False
 
