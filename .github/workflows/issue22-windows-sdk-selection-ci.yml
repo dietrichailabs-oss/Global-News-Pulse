@@ -1,0 +1,40 @@
+name: Issue22 Windows .NET SDK selection diagnosis
+on:
+  push:
+    branches: [eng/issue22-native-dotnet-sdk-selection-20261119]
+permissions:
+  contents: read
+jobs:
+  native-sdk:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.403'
+      - name: Observe SDK executable, installed SDKs and actual selected version
+        shell: pwsh
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          DOTNET_NOLOGO: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $command = Get-Command dotnet.exe -ErrorAction Stop
+          Write-Host "DOTNET_EXE_PATH=$($command.Source)"
+          Write-Host "DOTNET_ROOT=$env:DOTNET_ROOT"
+          $lines = @(& $command.Source --version 2>&1 | ForEach-Object { $_.ToString() })
+          $code = $LASTEXITCODE
+          Write-Host "DOTNET_VERSION_EXIT=$code"
+          foreach ($line in $lines) { Write-Host "DOTNET_VERSION_LINE=[$line]" }
+          $installed = @(& $command.Source --list-sdks 2>&1 | ForEach-Object { $_.ToString() })
+          Write-Host "DOTNET_LIST_EXIT=$LASTEXITCODE"
+          foreach ($line in $installed) { Write-Host "DOTNET_SDK_LINE=[$line]" }
+          $stable10 = @($lines | Where-Object { $_ -match '^10\.\d+\.\d+$' })
+          $selected = @($lines | Where-Object { $_ -match '^\d+\.\d+\.\d+' })
+          if ($code -ne 0 -or $stable10.Count -ne 1 -or $selected.Count -ne 1) {
+            throw "Actual dotnet SDK selection failed: exit $code, 10.x lines $($stable10.Count), all version lines $($selected.Count)"
+          }
+          Write-Host 'NATIVE_SDK_10_SELECTED_VERIFIED=true'
