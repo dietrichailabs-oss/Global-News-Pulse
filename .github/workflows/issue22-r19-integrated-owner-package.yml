@@ -2,7 +2,7 @@ name: Issue22 R19 integrated nav and YouTube source — private owner-test artif
 
 on:
   push:
-    branches: [eng/issue22-r19-integrated-collector-youtube-20261119]
+    branches: [eng/issue22-r19-integrated-collector-youtube-20261119, eng/issue22-r19-gdelt-replay-fixture-20261119]
   workflow_dispatch:
 
 permissions:
@@ -70,7 +70,7 @@ jobs:
           git merge-base --is-ancestor 484d8641bb58e34e83e10945b0fd30492d75efa3 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Expected PR178 exact parent not found' }
           $actual = @(git diff --name-only 484d8641bb58e34e83e10945b0fd30492d75efa3 HEAD)
-          $expected = @('.github/workflows/issue22-r19-integrated-owner-package.yml', 'global_pulse/ui.py', 'tests/test_issue82_owner_tab_paint_cpu.py')
+          $expected = @('.github/workflows/issue22-r19-integrated-owner-package.yml', 'global_pulse/ui.py', 'tests/test_gdelt_poll.py', 'tests/test_issue82_owner_tab_paint_cpu.py')
           if (Compare-Object $expected $actual) { throw 'Unexpected integration source delta for R19 owner candidate' }
       - name: Prepare reviewed Inno compiler
         run: |
