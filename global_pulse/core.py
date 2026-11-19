@@ -1460,6 +1460,29 @@ class Store:
         return states
 
 
+    def source_status_snapshot_if_available(self, source_ids: Iterable[str]) -> dict | None:
+        """Atomically read provider settings and health without waiting on Qt.
+
+        An initial revision try-lock is not a lease: another collector may
+        acquire the Store lock just before Sources health SELECTs. BUSY means
+        defer (None), never display an empty or falsely healthy registry.
+        No Qt widgets run under this short source-data lock.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            revision = (self._conn.total_changes,
+                        int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+            row = self._conn.execute(
+                "SELECT value FROM settings WHERE key=?", ("enabled_sources",)
+            ).fetchone()
+            enabled = json.loads(row[0]) if row else None
+            states = self.list_source_states(source_ids)
+            return {"revision": revision, "enabled_sources": enabled,
+                    "states": states}
+        finally:
+            self._lock.release()
+
     def any_source_error(self, source_ids: Iterable[str]) -> bool:
         """One bounded, consistent source-state scan for the native tray icon.
 

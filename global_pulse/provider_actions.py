@@ -113,14 +113,44 @@ def _existing_source_rows(table):
     return rows
 
 
-def populate_sources(window):
+def populate_sources(window, *, idle=False):
     from .ui import timestamp
     table = window.source_table
     current = table.item(table.currentRow(), 0)
     selected_id = (current.data(Qt.ItemDataRole.UserRole) or {}).get("id") if current else None
-    enabled = _effective(window)
     catalog = list(window.controller.catalog)
     fingerprint = _catalog_fingerprint(catalog)
+    if idle:
+        # A truly unchanged persisted revision, catalog and monitoring state
+        # cannot have changed source health or enabled preferences. Avoid even
+        # a 512-source SQL scan on a no-op status pulse. A second nonblocking
+        # check rejects writes arriving during this cheap identity comparison.
+        previous = getattr(window, "_source_status_render_key", None)
+        store = window.controller.store
+        revision = store.content_revision_if_available()
+        if revision is None:
+            return False
+        if (previous is not None and len(previous) == 4
+                and previous[0] == revision and previous[1] == fingerprint
+                and previous[3] == bool(window.controller.monitoring)
+                and table.rowCount() == len(catalog)):
+            confirmed = store.content_revision_if_available()
+            if confirmed is None:
+                return False
+            if confirmed == revision:
+                return True
+        # The first nonblocking workspace probe cannot reserve the Store
+        # RLock. Read enabled preferences, revision and all source health as
+        # ONE atomic try-lock snapshot; BUSY retains the dirty tab for retry.
+        snapshot = window.controller.store.source_status_snapshot_if_available(
+            source["id"] for source in catalog)
+        if snapshot is None:
+            return False
+        enabled = enabled_ids(catalog, snapshot["enabled_sources"])
+        store_revision = snapshot["revision"]
+    else:
+        enabled = _effective(window)
+        store_revision = window.controller.store.content_revision()
     # Status-only signals often repeat with no persisted source or registry
     # change. A full 10-column Qt table reconciliation in an idle timer can
     # stall the GUI even when every displayed value is identical. Use the
@@ -128,7 +158,6 @@ def populate_sources(window):
     # unchanged work, never a time-based cache that could hide a real failure.
     # Catalog, enabled-source settings and monitoring state are independent
     # parts of the visible contract and must also invalidate this fast path.
-    store_revision = window.controller.store.content_revision()
     # General archive revisions include unrelated events and observations.
     # They cannot, by themselves, prove that any provider health row changed.
     visual_key = (fingerprint, frozenset(enabled),
@@ -136,19 +165,21 @@ def populate_sources(window):
     render_key = (store_revision, *visual_key)
     if (getattr(window, "_source_status_render_key", None) == render_key
             and table.rowCount() == len(catalog)):
-        return
-    # Unchanged status skips this entirely via the render-key guard above.
-    # New checkpoints use one bounded SQLite read, not N Store lock entries.
-    states = window.controller.store.list_source_states(s["id"] for s in catalog)
+        return True
+    # Unchanged status skips Qt cell reconciliation. Passive work uses the
+    # atomic try-lock snapshot, never a second blocking SQLite read.
+    states = (snapshot["states"] if idle else
+              window.controller.store.list_source_states(s["id"] for s in catalog))
     prior_states = getattr(window, "_source_status_last_states", None)
     prior_visual = getattr(window, "_source_status_visual_key", None)
     # Only a stable complete read can suppress UI work. A concurrent writer
     # invalidates this fast path, so the next status pulse can reconcile it.
-    stable_snapshot = window.controller.store.content_revision() == store_revision
+    stable_snapshot = (idle or
+                       window.controller.store.content_revision() == store_revision)
     if (stable_snapshot and prior_visual == visual_key
             and prior_states == states and table.rowCount() == len(catalog)):
         window._source_status_render_key = render_key
-        return
+        return True
     old_rows = _existing_source_rows(table)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
@@ -246,7 +277,9 @@ def populate_sources(window):
     # A Store write may occur while the table is being rendered. In that
     # case do not bless a mixed status snapshot as current: the next
     # coalesced source-status signal must be allowed to reconcile it.
-    if window.controller.store.content_revision() == store_revision:
+    current_revision = (window.controller.store.content_revision_if_available()
+                        if idle else window.controller.store.content_revision())
+    if current_revision == store_revision:
         window._source_status_render_key = render_key
         window._source_status_last_states = states
         window._source_status_visual_key = visual_key
@@ -255,10 +288,13 @@ def populate_sources(window):
         window._source_status_last_states = None
         window._source_status_visual_key = None
     if selected_row is not None and not reuse:
-        source_selected(window)
+        # Passive detail rendering must not reopen SQLite after the snapshot.
+        # Deliberate user row selection still requests fresh Store evidence.
+        source_selected(window, states=states if idle else None)
+    return current_revision == store_revision if idle else True
 
 
-def source_selected(window):
+def source_selected(window, *, states=None):
     from .ui import timestamp
     item = window.source_table.item(window.source_table.currentRow(), 0)
     if item is None:
@@ -268,7 +304,8 @@ def source_selected(window):
         window.source_browser.setPlainText("This provider is no longer configured.")
         return
     _, kind, reason = capability(source)
-    state = window.controller.store.get_source_state(source["id"]) or {}
+    state = (states.get(source["id"], {}) if states is not None else
+             window.controller.store.get_source_state(source["id"]) or {})
     title, url = source_link(source)
     esc = lambda value: html.escape(str(value or ""), quote=True)
     link = f"<p><a href='{esc(url)}'>{esc(title)}</a> (external browser)</p>" if url else ""
