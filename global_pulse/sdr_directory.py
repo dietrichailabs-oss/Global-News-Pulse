@@ -15,10 +15,19 @@ MAX_DIRECTORY_BYTES = 1_000_000
 MAX_RECEIVERS = 400
 DIRECTORY_URLS = {
     # WebSDR's official FAQ explicitly points to HTTP www.websdr.org for its
-    # live operator list. The GUI requires informed owner action before this
-    # unsecured, bounded discovery request. Never autoconnect these links.
+    # live operator list. It is opened only in the external browser; in-app
+    # dataset import is permission-blocked below. Never autoconnect its links.
     "websdr": "http://www.websdr.org/",
     "kiwisdr": "https://kiwisdr.com/public/",
+}
+# Verified November 20, 2026: WebSDR's public home is a frameset; its
+# official frame loads a JSON receiver dataset whose response expressly
+# requires prior permission for use in another website or automated system.
+# Do not replace the broken HTML scrape with that restricted data endpoint.
+# The public browser directory and owner-supplied individual links still work.
+DIRECTORY_IMPORT_RESTRICTIONS = {
+    "websdr": "WebSDR requires prior operator permission to reuse its full directory in an app. "
+              "Use Open directory for the provider's complete list, or paste an individual receiver URL."
 }
 _IGNORED_HOSTS = {
     "websdr.org", "www.websdr.org", "kiwisdr.com", "www.kiwisdr.com",
@@ -61,13 +70,17 @@ def public_receiver_url(value):
             ascii_host,
         ):
             raise ValueError("Public DNS name required")
+        host = ascii_host
     try:
         port = parts.port
     except ValueError as exc:
         raise ValueError("Invalid receiver port") from exc
     if port is not None and not 1 <= port <= 65535:
         raise ValueError("Invalid receiver port")
-    clean = urlunsplit((parts.scheme.lower(), parts.netloc, parts.path or "/", parts.query, ""))
+    netloc = f"[{host}]" if addr is not None and addr.version == 6 else host
+    if port is not None:
+        netloc += f":{port}"
+    clean = urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", parts.query, ""))
     embedded = parts.scheme.lower() == "https" and port in (None, 443)
     return {"url": clean, "host": host, "embedded_candidate": embedded,
             "reason": ("HTTPS/443 candidate; embedded resources may still fail"

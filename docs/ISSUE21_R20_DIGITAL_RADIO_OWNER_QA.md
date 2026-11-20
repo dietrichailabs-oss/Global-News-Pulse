@@ -1,8 +1,93 @@
-# R20 digital radio — bounded owner-test handoff
+# R20 digital radio and owner-feedback corrections — bounded QA handoff
 
-Status: **DRAFT / private owner test / independent QA pending**. Based on exact
+Status: **DRAFT / owner physical feedback FAIL / corrective QA pending**. Based on exact
 R19 integration parent `76b8164308dd2c8ca6da465e0df729c102715124`.
 Do not merge, publish or reuse streams commercially from this draft.
+
+## November 20 owner feedback and corrected scope
+
+Mark's physical test of the supplied R20 candidate reported missing active
+Sources, a thin Daily Brief, undiscoverable/failing preset saves, HAM controls
+below the visible area, and incomplete receiver discovery. The prior
+`e33c0618fa13b1e490dab7670a9abac83ff7e315` source/package conditional decision
+is historical, not physical acceptance of this new source. The screenshot
+alone does not independently establish the installed binary hash.
+
+- **Sources:** the existing registry has 170 entries; ordinary missing rows
+  were not reproduced as a catalog truncation. The separate GDELT batch
+  collector was absent from the inventory and is now shown with recorded
+  status. Search, collection-state filters, enabled/total/matching counts and
+  Show all retain off, unavailable and never-checked sources. Selected detail
+  state follows enable/disable, monitoring and health changes without an extra
+  Store query. GDELT-linked websites are not counted as registered publishers.
+- **Daily Brief:** actual daily retrieval and rendering increase from four to
+  eight records per non-weather topic (60 total maximum, three weather).
+  Category selection shares the budget before filling busy categories. The
+  brief includes dated source excerpts, recorded changes, topic coverage and
+  evidence counts with an explicit rolling 24-hour/7-day window. Missing topics
+  remain coverage gaps. Severity UNASSESSED and evidence verification are
+  separate; no verification or Store logic was relaxed, and unchecked stories
+  are not relabeled verified. Archive update dates are not event dates.
+- **Radio presets:** visible Save/Recall/Clear controls with named slots;
+  writes require a real storage backend and exact read-back confirmation.
+  SQLite close/reopen/recall/clear is tested. Failed writes do not claim success
+  or discard the prior slot. Recalling a hidden station restores the filter
+  atomically and does not turn power on or briefly play an intermediate station.
+- **HAM:** Lower/Higher, step, frequency, mode, Tune, receiver selector and
+  Connect/Stop sit directly beneath the digital readout. Verbose receiver,
+  volume and scan details are a bounded collapsible area. Production-style
+  600x480 and 960x640 offline layout checks are not physical Windows proof.
+- **Local radio by ZIP:** explicit, opt-in US five-digit ZIP lookup sends the
+  entered ZIP to Zippopotam.us. Radio Browser receives a US geocoded-station
+  query and the client's IP, not the ZIP; distances are calculated locally.
+  No automatic location request, saved ZIP, audio start, cookies or redirects.
+  Station/genre search and 25/50/100-mile radii use approximate ZIP-center
+  distances, not broadcast coverage. Community entries without coordinates
+  are absent; bounded/partial results are labeled. Provider failure invalidates
+  partial results so a filter change cannot hide the failure.
+  Unreviewed stations open only after consent in the default browser. Only an
+  exact existing reviewed stream can select its bundled Pulse station ID.
+  **Ordinary PCs need tuner/SDR hardware for over-air AM/FM**; this feature
+  discovers Internet stations and does not add an RF receiver.
+
+### WebSDR permission blocker — full built-in directory NOT delivered
+
+The official WebSDR landing page is a frameset; its actual receiver metadata
+loads separately and explicitly prohibits reuse in another website or
+automated system without prior permission. No such permission is recorded.
+No restricted list was saved, copied into tests, scraped into the application
+or fetched through an alternate path. No provider-contact request was sent.
+Automatic WebSDR list import therefore remains blocked. The interface explains
+this and retains the explicit official-directory browser action, known NA5B,
+and validated manual receiver URLs. This is not a complete built-in WebSDR
+directory. Kiwi's separate existing import must retain honest unavailable/empty
+status; a directory entry never verifies reception, audio or reuse rights.
+
+Fresh exact-source full Windows packaging and a distinct independent QA
+disposition are required. Original strict 420ms/exactly-two redraw gate and all
+inherited exclusions remain unchanged. No R21, certificate/trust-store change,
+release/tag/merge or claim that YouTube Error 153 is fixed.
+
+### Offline fixture corrections found by the full regression gate
+
+The first local integrated run reported 1,951 passes and two failures with the
+same 14 historical deselections and two ignored modules. Distinct QA reproduced
+both failures on untouched `e33c0618` in a separate checkout:
+
+- The map single-classifier equivalence test compared a fixed November 17
+  baseline with a live-clock widget call. Its +3-day future record becomes
+  current on November 20. The test now supplies the same fixed clock to both
+  sides; all event equality, single-classifier and neutral-evidence assertions
+  remain intact. No product classifier/time behavior changed.
+- The unknown-language Collector test mocked HTTP but left its preceding
+  custom-feed DNS admission live. The test now injects a public-address DNS
+  fixture for the exact test host, asserts that admission was exercised, and
+  retains the real Collector/SQLite persistence checks. No live feed is
+  contacted, and production DNS/SSRF checks remain unchanged.
+
+These are test-input isolation corrections, not new exclusions or threshold
+relaxations. The exact workflow guard additionally names both changed tests.
+They do not claim a repair of physical Windows performance or audio.
 
 ## Intent and limits
 
@@ -12,18 +97,19 @@ Do not merge, publish or reuse streams commercially from this draft.
   station selection; it never scans unreviewed RF frequencies. Genre filters
   cover News & Talk, Music, Classical and Culture, with All stations as default.
 - There are initially **18 pinned publisher-documented HTTPS MP3 streams**.
-  A consented external Radio Browser link supports wider station discovery;
-  community streams are **not** imported into the native player without review.
+  A consented external Radio Browser link and the ZIP-based metadata lookup
+  support wider station discovery; community streams are **not** imported into
+  the native player without review.
   No automatic network call occurs merely by opening the radio tab.
 - The HAM dial shows the **requested** frequency in a large MHz readout and an
   exact kHz/mode caption. Lower/Higher buttons step by selectable 1, 5, 10, 25
   or 100 kHz. Actual operator tune/receive/audio **cannot** be established by
   URL creation or a successful webpage load. The operator's embedded controls
   remain authoritative. Advanced scan is opt-in and initially collapsed.
-- HAM receiver selector is populated only from on-demand, bounded public
-  directory metadata. An exact NA5B owner-tested HTTP/8901 link is pinned even
-  when WebSDR's HTTP directory is unavailable. Network directory refresh
-  requires explicit user approval for unencrypted HTTP. The separate external
+- HAM receiver selector retains the known NA5B owner-tested HTTP/8901 link,
+  manual validated URLs and the separate on-demand bounded Kiwi flow.
+  Automatic WebSDR import is blocked pending permission as described above.
+  The separate external
   **Open directory** action also names plaintext HTTP and IP disclosure before
   opening the WebSDR URL; refusal opens no browser and makes no request.
   No automatic receiver
@@ -38,14 +124,18 @@ Do not merge, publish or reuse streams commercially from this draft.
 | --- | --- | --- |
 | R20-01 | Launch and idle on physical Windows before any clicks | No baseline UI choppiness, stalled startup, or foreground network fetch; capture CPU, click responsiveness and video idle |
 | R20-02 | Open Broadcast tab; navigate 10+ stations rapidly | No freezes; large digital label and selected name stay synchronized; no playback until Power/consent |
-| R20-03 | Filter News, Music, Classical, Culture; save/recall five presets | Only matching stations appear; hidden preset restores All stations; selection does not start playback |
+| R20-03 | Filter News, Music, Classical, Culture; Save/Recall/Clear all five presets; restart | Named slots survive an actual Store close/reopen; save failure is visible; hidden preset restores All stations atomically; selection does not start playback |
 | R20-04 | WNYC FM/AM and WQXR vs internet-only streams | RF frequency shown only where publisher supplies it; otherwise `INTERNET STREAM` |
 | R20-05 | Power/Stop All then switch tabs, pages, sources | Old audio sessions close; no background auto-connection or stale liveness |
-| R20-06 | Select NA5B, change HAM mode; step Lower/Higher | Exact requested kHz/MHz/mode changes and proper receiver page target is loaded after consent; never claim audio from page load |
-| R20-07 | Refresh WebSDR and KiwiSDR directory, including HTTP refusal/failure | Existing available entries remain selectable; malformed/private URL rejected; pinned NA5B available offline; no automatic receiver connect |
+| R20-06 | At 600x480 and 960x640 select NA5B, change mode; step Lower/Higher; expand details | Primary tuner and Connect/Stop stay visible; exact requested kHz/MHz/mode and consented target; no audio claim from page load |
+| R20-07 | WebSDR permission message/external directory; Kiwi refresh/failure | WebSDR import makes no request without recorded reuse permission; explicit external HTTP consent; valid manual/NA5B entries remain usable; no auto-connect or availability claim |
 | R20-08 | Play NA5B live with receiver's own controls and verify waterfall/audio | Record separate results for page load, actual signal/waterfall, and audible audio. No provider controls bypassed |
 | R20-09 | Confirm YouTube player separately | Error 153 still OPEN unless real Windows playback proof is attached; R20 changes do not claim this fixed |
 | R20-10 | Offline suite, exact native Windows build, installer/rollback smoke | Preserve process exit, exclusions, one-EXE quick-test ZIP, portable ZIP separately, and SHA-256 receipts |
+| R20-11 | Sources all/enabled/off/unchecked/search/Show all; selected state changes | All registry entries remain discoverable, exact counts, GDELT separate, no extra passive Store read/network fetch, no stale selected collection status |
+| R20-12 | Actual Store daily brief with more than four reports per topic | Up to eight/topic; bounded weather; original verification preserved; dated attributed detail and changes; no fabricated missing topics, publication dates or corroboration |
+| R20-13 | ZIP discovery accept/refuse/cancel/failure and radius/genre filter | No request before consent; only five-digit ZIP to disclosed provider; bounded async metadata; no redirects/cookies; late responses ignored; failures cannot become success via filtering |
+| R20-14 | Discovered station selection and external URL consent | Only exact reviewed catalog matches select native station; no autoplay; arbitrary community URL remains browser-only with encoded consent text, rights/HTTP disclosure and default refusal |
 
 ## Source and rights provenance
 
@@ -60,6 +150,10 @@ Do not merge, publish or reuse streams commercially from this draft.
 - KiwiSDR operator directory: https://kiwisdr.com/public/
 - Community station discovery, external and unvetted:
   https://www.radio-browser.info/
+- Radio Browser official API and service discovery:
+  https://docs.radio-browser.info/ and https://api.radio-browser.info/
+- ZIP-to-approximate-center metadata (not exact user location):
+  https://api.zippopotam.us/
 
 Public release is **HOLD** until independent QA, live Windows audio/performance
 verification, YouTube handling decisions, and publisher/licensing authorization.

@@ -652,7 +652,7 @@ class Controller(QObject):
         if period not in {"daily", "weekly"}:
             raise ValueError("Brief period must be daily or weekly")
         return self.store.list_brief_events(
-            since=since, per_domain=9 if period == "weekly" else 4
+            since=since, per_domain=9 if period == "weekly" else 8
         )
 
     def export_brief(self, path, period="daily"):

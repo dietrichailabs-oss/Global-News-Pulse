@@ -104,19 +104,25 @@ def balanced_brief_sections(events, *, per_domain=3, max_total=30,
             continue
         seen.add(identity)
         pools[brief_domain(item)].append(item)
-    remaining = max_total
-    selected = []
+    # Allocate one place to every represented category before spending the
+    # remaining budget. Otherwise eight busy categories can exhaust max_total
+    # and hide the final category entirely despite a 'balanced' label.
+    ranked = {}
     for domain in BRIEF_DOMAINS:
-        if remaining <= 0:
-            break
-        cap = min(per_domain, remaining)
+        cap = per_domain
         if domain == "Weather & disasters":
             cap = min(cap, disaster_limit)
-        chosen = sorted(pools.get(domain, ()), key=_rank, reverse=True)[:cap]
-        if chosen:
-            selected.append((domain, chosen))
-            remaining -= len(chosen)
-    return selected
+        ranked[domain] = sorted(pools.get(domain, ()), key=_rank, reverse=True)[:cap]
+    chosen = defaultdict(list)
+    remaining = max_total
+    for position in range(per_domain):
+        for domain in BRIEF_DOMAINS:
+            if remaining and position < len(ranked[domain]):
+                chosen[domain].append(ranked[domain][position])
+                remaining -= 1
+        if not remaining:
+            break
+    return [(domain, chosen[domain]) for domain in BRIEF_DOMAINS if chosen[domain]]
 
 
 def overview_evidence_candidates(feed_events, map_evidence, *, per_domain=2):
