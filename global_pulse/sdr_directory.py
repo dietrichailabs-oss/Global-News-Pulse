@@ -136,7 +136,9 @@ def parse_directory(provider, content):
     if raw.lstrip().startswith(("[", "{")):
         try:
             rows = _json_rows(json.loads(raw))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
+            # A small deeply nested JSON reply can exceed Python's recursion
+            # budget; it must not escape the Qt network completion callback.
             rows = []
         for row in rows[:MAX_RECEIVERS * 3]:
             if isinstance(row, dict):
@@ -152,14 +154,20 @@ def parse_directory(provider, content):
     for href, title, bands in candidates:
         if not isinstance(href, str):
             continue
-        url = urljoin(DIRECTORY_URLS[provider], href)
         try:
+            url = urljoin(DIRECTORY_URLS[provider], href)
             info = public_receiver_url(url)
-        except ValueError:
+        except (ValueError, TypeError):
+            # One malformed URL (including an invalid IPv6 bracket) must not
+            # discard independent valid operators in the same response.
             continue
-        if info["host"] in _IGNORED_HOSTS or info["host"].endswith(
-            (".websdr.org", ".kiwisdr.com")
-        ):
+        host=info["host"]
+        if (host in _IGNORED_HOSTS or host.endswith(".websdr.org")
+                or (host.endswith(".kiwisdr.com")
+                    and not host.endswith(".proxy.kiwisdr.com"))):
+            # Kiwi publishes receiver proxy hostnames at
+            # <id>.proxy.kiwisdr.com; they are real candidate receivers, not
+            # directory navigation links. Transport admission is unchanged.
             continue
         if info["url"] in seen:
             continue
