@@ -81,10 +81,12 @@ def test_ham_expanded_details_keep_viewport_with_taller_font_metrics(panel,app):
     for _ in range(3):
         app.processEvents()
     assert panel.width()<=600 and panel.height()<=480
-    assert panel.ham_details_scroll.viewport().height()>0
-    for control in (panel.ham_back,panel.ham_step,panel.ham_forward,panel.frequency,
+    assert panel.minimumSizeHint().height()<=470,"Keep real minimum-height headroom for native font metrics"
+    assert panel.ham_details_scroll.viewport().height()>=24,"Details must show a usable scrolling row"
+    for control in (panel.ham_receiver_name,panel.ham_frequency_display,
+                    panel.ham_frequency_detail,panel.ham_back,panel.ham_step,panel.ham_forward,panel.frequency,
                     panel.tune_button,panel.receiver_picker,panel.receiver_connect,
-                    panel.receiver_off):
+                    panel.receiver_off,panel.sdr_status,panel.ham_details_toggle):
         assert control.isVisible()
         point=control.mapTo(panel,QPoint(0,0))
         assert 0<=point.y() and point.y()+control.height()<=480

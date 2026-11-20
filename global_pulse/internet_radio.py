@@ -404,14 +404,11 @@ class RadioPanel(QWidget):
 
         layout=QVBoxLayout(ham_tab)
         self.ham_layout=layout
-        # Windows font metrics made the stacked control rows request 495px
-        # when details opened in a 480px panel. Recover real usable room from
-        # the repeated gaps, not by clipping controls or overriding minimums.
+        # Keep real vertical headroom for native Windows font metrics. The tab
+        # already labels HAM / SDR, so start with the selected receiver instead
+        # of stacking a duplicate eyebrow above the actual controls.
         layout.setContentsMargins(6,6,6,6)
         layout.setSpacing(4)
-        ham_title=QLabel("HAM / SDR RECEIVERS")
-        ham_title.setObjectName("Eyebrow")
-        layout.addWidget(ham_title)
         self.ham_receiver_name=QLabel("Choose a public receiver")
         self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_receiver_name.setWordWrap(True)
@@ -423,7 +420,7 @@ class RadioPanel(QWidget):
         self.ham_frequency_display.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_frequency_display.setStyleSheet(
             "font-family:Consolas,monospace;font-size:34px;font-weight:800;color:#86f5c7;background:#101818;"
-            "padding:10px;border:1px solid #407b67;border-radius:8px;"
+            "padding:8px;border:1px solid #407b67;border-radius:8px;"
         )
         layout.addWidget(self.ham_frequency_display)
         self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
@@ -616,9 +613,9 @@ class RadioPanel(QWidget):
         # diagnostics. These controls remain above the receiver surface even
         # when long directory labels or the advanced details are shown.
         layout.removeItem(stepping)
-        layout.insertLayout(4,stepping)
+        layout.insertLayout(3,stepping)
         layout.removeItem(tuner_row)
-        layout.insertLayout(5,tuner_row)
+        layout.insertLayout(4,tuner_row)
         receiver_row.removeWidget(self.receiver_connect)
         receiver_row.removeWidget(self.receiver_off)
         discovery_row.removeWidget(self.receiver_external)
@@ -662,8 +659,8 @@ class RadioPanel(QWidget):
         self.directory_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.directory_summary.setWordWrap(True)
         self.directory_summary.setAccessibleName("Receiver directory load result")
-        layout.insertWidget(8,self.directory_summary)
-        for core_label in (ham_title,self.ham_receiver_name,self.ham_frequency_display,
+        layout.insertWidget(7,self.directory_summary)
+        for core_label in (self.ham_receiver_name,self.ham_frequency_display,
                            self.ham_frequency_detail,self.sdr_status,self.directory_summary):
             core_label.setMinimumWidth(0)
             core_label.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)

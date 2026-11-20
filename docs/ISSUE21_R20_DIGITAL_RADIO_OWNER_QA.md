@@ -116,6 +116,30 @@ gate, installer smoke and distinct downloaded-byte review. No prior green
 Linux run or older package substitutes for them. The exact cumulative workflow
 allowlist includes the renderer and UTF-8 test; test exclusions are unchanged.
 
+### Native 4c0 font-metric boundary failure
+
+The corrective Windows run for `4c0e7bf74a543e16993797dbd53adb343c840979`
+passed 1,954 tests but failed the new taller-font HAM layout regression: the
+600x480 panel expanded to 600x481 when details and scan were expanded. The
+normal-font bounds checks, UTF-8 export fixture, canonical Store fixture and
+all remaining cases passed; the same 14 deselections were retained and Qt
+teardown returned 1,487 objects to zero. Packaging and smoke were skipped and
+the run produced no artifacts. This is another native HOLD, not a ready build.
+
+The next bounded layout correction must recover actual space with a useful
+font-metric margin, while preserving the exact 600x480 assertion, every core
+tuning control and the usable details viewport. A fresh full native run,
+installer smoke and distinct downloaded-byte review remain required. No test
+threshold, font-stress case, backend or exclusion may be relaxed to accept it.
+
+The follow-up removes only the duplicated HAM/SDR eyebrow already supplied by
+the tab and reduces readout padding from 10 to 8 pixels, keeping its 34-pixel
+font and every primary control. This recovers 20 actual vertical pixels beyond
+4c0 in the diagnostic layout. The same stress case additionally requires a
+minimum-height hint of at most 470 pixels and a details viewport of at least
+24 pixels. Local focused radio checks pass, but native acceptance is still
+pending for the new exact source.
+
 ## Intent and limits
 
 - Broadcast and HAM/SDR are separate tabs. The broadcast dial shows the
