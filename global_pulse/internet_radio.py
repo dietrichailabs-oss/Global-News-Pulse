@@ -232,6 +232,9 @@ class RadioPanel(QWidget):
         # Never save page URLs, credentials, contents or player activity.
         self._sdr_load_error = ""
         self.sdr_state = "OFF"
+        # One user-requested latest tune may wait for the current page load.
+        # Never overlap two WebEngine navigations on the same receiver view.
+        self._pending_tune = None
         self.sdr_directory_cache = {}
         self.sdr_directory_reply = None
         self.sdr_directory_data = bytearray()
@@ -591,7 +594,8 @@ class RadioPanel(QWidget):
         finally:
             self.selector.blockSignals(False)
         self.broadcast_count.setText(f"{len(matches)} documented streams")
-        if matches:
+        if matches and self.selector.currentData() != selected:
+            # A filter retaining the same station must not restart audio.
             self._station_changed()
 
     def _browse_radio_directory(self):
@@ -697,9 +701,14 @@ class RadioPanel(QWidget):
         if type(index) is not int or not 0<=index<5 or not self.presets[index]:return False
         selected=self.selector.findData(self.presets[index])
         if selected<0:
-            # A saved station may be hidden by the current genre filter.
-            # Restore the full documented catalog before recalling it.
-            self.broadcast_category.setCurrentIndex(0)
+            # Restore the catalog without making an intermediate selection
+            # observable to an already-playing audio session.
+            self.broadcast_category.blockSignals(True)
+            try:
+                self.broadcast_category.setCurrentIndex(0)
+                self._category_changed()
+            finally:
+                self.broadcast_category.blockSignals(False)
             selected=self.selector.findData(self.presets[index])
         if selected<0:return False
         self.selector.setCurrentIndex(selected)
@@ -783,9 +792,16 @@ class RadioPanel(QWidget):
         if provider == "websdr":
             # The owner-tested fallback is known by exact identity, not a
             # claim that the official directory fetched or that audio is live.
-            pinned=dict(public_receiver_url(OWNER_TEST_WEBDR_ORIGIN))
-            pinned.update(name="NA5B · owner-tested link",provider="websdr")
-            cached=[pinned]+[r for r in cached if r["url"]!=pinned["url"]]
+            matched=next((dict(row) for row in cached
+                          if row.get("url")==OWNER_TEST_WEBDR_ORIGIN),None)
+            pinned=matched or dict(public_receiver_url(OWNER_TEST_WEBDR_ORIGIN))
+            pinned.setdefault("name","NA5B · owner-tested link")
+            pinned["provider"]="websdr"
+            pinned["reason"]=(
+                "Operator HTTP/8901; in-app only after specific unencrypted "
+                "transport consent; audio and availability unverified"
+            )
+            cached=[pinned]+[r for r in cached if r.get("url")!=pinned["url"]]
         self.receiver_picker.blockSignals(True)
         self.receiver_picker.clear()
         self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
@@ -944,6 +960,18 @@ class RadioPanel(QWidget):
         domain = "".join(c for c in str(domain) if c.isalnum())[:40]
         self._sdr_load_error = f"{domain or 'UnknownErrorDomain'} code {int(info.errorCode())}"
 
+    def _flush_pending_tune(self):
+        """Navigate to the latest dial request only after prior completion.
+
+        This is a deferred explicit user tune, never an automatic retry.
+        Stop, receiver replacement and shutdown invalidate the queued request.
+        """
+        pending,self._pending_tune=self._pending_tune,None
+        if (pending is None or self._closed or not self.receiver_connected
+                or self.receiver_view is None or pending[1]!=self.receiver_host):
+            return False
+        return bool(self._load_receiver_url(pending[0],pending[1]))
+
     def _sdr_load_finished(self, ok):
         if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
             return
@@ -951,6 +979,10 @@ class RadioPanel(QWidget):
         if sender is not None and sender is not self.receiver_view:
             return
         self.sdr_load_watch.stop()
+        # An older same-view navigation cannot defeat the newer requested
+        # frequency. Dispatch only once its own completion has arrived.
+        if self._flush_pending_tune():
+            return
         if not ok:
             reason = self._sdr_load_error
             self._destroy_receiver()
@@ -972,6 +1004,8 @@ class RadioPanel(QWidget):
 
     def _sdr_load_timed_out(self):
         if self.sdr_state == "CONNECTING":
+            if self._flush_pending_tune():
+                return
             self._destroy_receiver()
             self._sdr_state_change(
                 "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
@@ -1133,7 +1167,12 @@ class RadioPanel(QWidget):
                     # Route it through the same pending/error/timeout lifecycle as
                     # initial Connect, rather than leaving ON while a fresh
                     # receiver navigation may fail silently.
-                    if not self._load_receiver_url(url, host):
+                    if self.sdr_state == "CONNECTING":
+                        # Coalesce fast Lower/Higher/Tune clicks. Replacing a
+                        # Chromium load in flight reports a spurious failure
+                        # from the canceled prior navigation on the same view.
+                        self._pending_tune=(url,host)
+                    elif not self._load_receiver_url(url, host):
                         return False
             value=self._frequency_value(self.frequency.text() if frequency is None else frequency)
             self.frequency.setText(self._format_khz(value))
@@ -1313,6 +1352,7 @@ class RadioPanel(QWidget):
 
     def _destroy_receiver(self):
         self.stop_scan()
+        self._pending_tune=None
         self.sdr_load_watch.stop()
         self.sdr_volume_apply.stop()
         self.receiver_connected=False
