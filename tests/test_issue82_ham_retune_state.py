@@ -69,7 +69,14 @@ def test_pending_same_origin_retune_must_not_appear_on_before_completion(monkeyp
             return True
         monkeypatch.setattr(panel, "_load_receiver_url", pending)
         assert panel.tune_receiver(14255)
-        assert len(calls) == 1
+        # R20 must not overlap an already-CONNECTING same-view navigation.
+        # The newest user-requested tune is queued for the earlier load's
+        # completion; it is not loaded early or reported as playable.
+        assert calls == [], "No overlapping receiver navigation"
+        assert panel._pending_tune is not None
+        url, host = panel._pending_tune
+        assert url.startswith("http://na5b.com:8901/?tune=14255")
+        assert host == "na5b.com"
         assert panel.sdr_state == "CONNECTING"
         assert "loaded" not in panel.sdr_status.text().lower()
     finally:
