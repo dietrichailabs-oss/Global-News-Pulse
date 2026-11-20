@@ -293,10 +293,19 @@ def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
     collected = []
 
     def draw(events, **kwargs):
-        map_pages.append([str(row) for row in events])
+        # WorldMap receives point events separately from country-level evidence.
+        # This synthetic fixture has no incident coordinates: it must reach
+        # country_events, never be invented as a point on the map.
+        map_pages.append({
+            "points": list(events),
+            "country": list(kwargs.get("country_events", [])),
+        })
         if len(map_pages) == 1:
             c._on_reports([newest], allow_synthetic=True, now=now)
-            collected.append(bool(c.events()))
+            collected.append(any(
+                row.get("event_key") == "r20-qa-new-revision"
+                for row in c.events()
+            ))
 
     monkeypatch.setattr(w.world_map, "set_events", draw)
     c.evidence_changed.emit()
@@ -311,8 +320,16 @@ def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
     w._evidence_refresh_timer.stop()
     w._refresh_evidence_when_idle()
     assert len(map_pages) == 2
-    assert any("Offline report 9801" in row for row in map_pages[1]), (
-        "Actual newly ingested Store revision must reach map projection"
+    assert not any(row.get("event_key") == "r20-qa-new-revision"
+                   for row in map_pages[0]["country"])
+    assert any(row.get("event_key") == "r20-qa-new-revision"
+               for row in map_pages[1]["country"]), (
+        "Newly ingested unlocated evidence must reach the map's country "
+        "evidence projection on the queued second pass"
+    )
+    assert not any(row.get("event_key") == "r20-qa-new-revision"
+                   for row in map_pages[1]["points"]), (
+        "Unlocated report must not acquire fabricated point coordinates"
     )
 
 
