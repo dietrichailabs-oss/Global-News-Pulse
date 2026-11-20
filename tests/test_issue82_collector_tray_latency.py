@@ -291,6 +291,20 @@ def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
     now = datetime.now(timezone.utc).isoformat()
     newest = {**report(9801, at=now), "event_key": "r20-qa-new-revision"}
     collected = []
+    stored_target_ids = []
+
+    def contains_new_report(event):
+        # event_key belongs to normalized reports, not the canonical event's
+        # display schema. Match the immutable report identity in real Store
+        # output, then bind the next country projection to its canonical ID.
+        return any(
+            row.get("source_id") == newest["source_id"]
+            and row.get("id") == newest["id"]
+            for row in event.get("reports", [])
+        )
+
+    assert not any(contains_new_report(event) for event in c.events())
+    revision_before = c.store.content_revision()
 
     def draw(events, **kwargs):
         # WorldMap receives point events separately from country-level evidence.
@@ -302,10 +316,9 @@ def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
         })
         if len(map_pages) == 1:
             c._on_reports([newest], allow_synthetic=True, now=now)
-            collected.append(any(
-                row.get("event_key") == "r20-qa-new-revision"
-                for row in c.events()
-            ))
+            matches = [event for event in c.events() if contains_new_report(event)]
+            collected.append(len(matches) == 1)
+            stored_target_ids.extend(event["id"] for event in matches)
 
     monkeypatch.setattr(w.world_map, "set_events", draw)
     c.evidence_changed.emit()
@@ -314,21 +327,25 @@ def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
     w._refresh_evidence_when_idle()
     assert len(map_pages) == 1
     assert collected == [True]
+    assert len(stored_target_ids) == 1
+    assert c.store.content_revision() != revision_before
+    assert not any(contains_new_report(event) for event in map_pages[0]["country"])
     assert w._evidence_refresh_timer.isActive(), (
         "Store mutation during map composition must queue a follow-up"
     )
     w._evidence_refresh_timer.stop()
     w._refresh_evidence_when_idle()
     assert len(map_pages) == 2
-    assert not any(row.get("event_key") == "r20-qa-new-revision"
-                   for row in map_pages[0]["country"])
-    assert any(row.get("event_key") == "r20-qa-new-revision"
-               for row in map_pages[1]["country"]), (
+    projected = [event for event in map_pages[1]["country"]
+                 if contains_new_report(event)]
+    assert [event["id"] for event in projected] == stored_target_ids, (
         "Newly ingested unlocated evidence must reach the map's country "
         "evidence projection on the queued second pass"
     )
-    assert not any(row.get("event_key") == "r20-qa-new-revision"
-                   for row in map_pages[1]["points"]), (
+    assert projected[0]["latitude"] is None
+    assert projected[0]["longitude"] is None
+    assert not any(event["id"] in stored_target_ids
+                   for page in map_pages for event in page["points"]), (
         "Unlocated report must not acquire fabricated point coordinates"
     )
 
@@ -537,3 +554,4 @@ def test_worker_origin_native_toast_and_storage_pause_are_gui_queued(app, tmp_pa
         c.close()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
