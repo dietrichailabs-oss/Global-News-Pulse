@@ -948,3 +948,146 @@ def test_external_quit_keeps_qt_recovery_alive_until_critical_commit_finishes(ap
         window.close()
         c.close()
 
+
+def test_reentrant_followup_waits_for_outer_refresh_and_restores_normal_batch(
+    desktop, monkeypatch, app
+):
+    """Deterministic nested-loop scheduling; does not replace the 420ms gate."""
+    from PySide6.QtCore import QEventLoop
+
+    w, c = desktop
+    redraws, entries, nested_state = [], [], []
+    original_refresh = w.refresh_data
+
+    def traced_refresh(*args, **kwargs):
+        entries.append(w._refreshing)
+        return original_refresh(*args, **kwargs)
+
+    def redraw(*args, **kwargs):
+        redraws.append(True)
+        if len(redraws) != 1:
+            return
+        for _ in range(100):
+            c.evidence_changed.emit()
+        nested_state.append((w._refreshing, w._evidence_refresh_timer.interval(),
+                             w._evidence_refresh_timer.isActive(), len(redraws)))
+        nested = QEventLoop()
+
+        def expire_inside_nested_loop():
+            # Model one expiry inside an actual nested Qt loop without a
+            # timing-sensitive sleep. The real timeout/production callback
+            # must defer its reentrant attempt with the ordinary batch delay.
+            w._evidence_refresh_timer.stop()
+            w._evidence_refresh_timer.timeout.emit()
+            nested_state.append((w._refreshing, w._evidence_refresh_timer.interval(),
+                                 w._evidence_refresh_timer.isActive(), len(redraws)))
+            nested.quit()
+
+        QTimer.singleShot(0, expire_inside_nested_loop)
+        nested.exec()
+
+    monkeypatch.setattr(w, "refresh_data", traced_refresh)
+    monkeypatch.setattr(w.world_map, "set_events", redraw)
+    w.refresh_data()
+    assert nested_state == [(True, 160, True, 1), (True, 160, True, 1)]
+    assert entries == [False, True], "The nested callback must not compose recursively"
+    assert w._refreshing is False
+    assert w._evidence_refresh_timer.isActive()
+    assert w._evidence_refresh_timer.interval() == 0
+    app.processEvents()
+    app.processEvents()
+    assert redraws == [True, True], "100 reentrant signals need exactly one follow-up"
+    assert entries == [False, True, False]
+    assert not w._evidence_refresh_timer.isActive()
+
+    for _ in range(100):
+        c.evidence_changed.emit()
+    assert w._evidence_refresh_timer.isActive()
+    assert w._evidence_refresh_timer.interval() == 160, "Zero must not leak into later bursts"
+    assert len(redraws) == 2, "A new ordinary burst must remain asynchronous"
+    w._evidence_refresh_timer.stop()
+
+
+@pytest.mark.parametrize("closing_gate", ["window", "controller"])
+def test_reentrant_followup_is_not_expedited_after_close(desktop, monkeypatch, closing_gate):
+    w, c = desktop
+    redraws = []
+
+    def redraw(*args, **kwargs):
+        redraws.append(True)
+        c.evidence_changed.emit()
+        if closing_gate == "window":
+            monkeypatch.setattr(w, "_force_close", True)
+        else:
+            monkeypatch.setattr(c, "_closed", True)
+
+    monkeypatch.setattr(w.world_map, "set_events", redraw)
+    w.refresh_data()
+    assert not w._refreshing
+    assert w._evidence_refresh_timer.interval() == 160
+    w._evidence_refresh_timer.stop()
+    w._refresh_evidence_when_idle()
+    assert redraws == [True], "A pending callback cannot revive a closed window/controller"
+    assert not w._evidence_refresh_timer.isActive()
+
+
+def test_expedited_reentrant_followup_keeps_real_worker_and_navigation_guards(
+    desktop, monkeypatch, app
+):
+    from types import SimpleNamespace
+    import global_pulse.ui as ui_module
+
+    w, c = desktop
+    clock = [10.0]
+    monkeypatch.setattr(ui_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(w, "_background_warm_enabled", True)
+    starts, redraws = [], []
+    monkeypatch.setattr(w, "_start_idle_snapshot", lambda: starts.append(clock[0]))
+
+    def redraw(*args, **kwargs):
+        redraws.append(True)
+        if len(redraws) == 1:
+            c.evidence_changed.emit()
+
+    monkeypatch.setattr(w.world_map, "set_events", redraw)
+    w.refresh_data()
+    assert w._evidence_refresh_timer.interval() == 0
+    app.processEvents()
+    assert not starts
+    assert w._evidence_refresh_timer.isActive()
+    assert w._evidence_refresh_timer.interval() == 1000
+    clock[0] = 10.999
+    w._evidence_refresh_timer.stop()
+    w._refresh_evidence_when_idle()
+    assert not starts, "The expedited callback must not bypass the full one-second worker gate"
+    clock[0] = 11.0
+    w._evidence_refresh_timer.stop()
+    w._refresh_evidence_when_idle()
+    assert starts == [11.0]
+
+    # The separately queued worker result still cannot paint during navigation.
+    scheduled, applied, revision_reads = [], [], []
+    revision = c.store.content_revision()
+    snapshot = {
+        "generation": w._idle_snapshot_generation,
+        "scope": w._archive_scope_key(),
+        "revision_before": revision,
+        "revision_after": revision,
+    }
+    monkeypatch.setattr(w, "refresh_data", lambda **kwargs: applied.append(kwargs))
+    monkeypatch.setattr(c.store, "content_revision_if_available",
+                        lambda: revision_reads.append(True) or revision)
+    monkeypatch.setattr(ui_module, "QTimer", SimpleNamespace(
+        singleShot=lambda delay, callback: scheduled.append((delay, callback))))
+    w._last_navigation_at = 0.0
+    clock[0] = 1.799
+    w._apply_idle_snapshot(snapshot)
+    assert not applied and not revision_reads
+    assert w._idle_snapshot_inflight
+    assert len(scheduled) == 1 and scheduled[0][0] == 100
+    clock[0] = 1.8
+    scheduled[0][1]()
+    assert revision_reads == [True]
+    assert applied == [{"_idle_snapshot": snapshot}]
+    assert not w._idle_snapshot_inflight
+

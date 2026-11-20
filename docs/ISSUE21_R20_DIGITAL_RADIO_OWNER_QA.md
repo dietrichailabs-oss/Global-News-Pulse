@@ -91,6 +91,27 @@ assertion remain.
 
 ### Fresh acceptance required
 
+The `f113dfa8c3d0de10470893524b9320f66daa9c28` full local run passed
+2,027 tests, but a subsequent independent 151-test focused run recorded one
+failure in the unchanged 420ms/exactly-two reentrant-refresh gate. The first
+composition reached its redraw at 248.9ms and a second 160ms debounce was then
+armed; the 421.1ms observation still saw only one redraw. One separately
+recorded isolated invocation passed. That intermittent result does not erase
+the counterexample or grant acceptance.
+
+The bounded production correction keeps ordinary first-due batching at an
+explicit 160ms. Evidence arriving during composition is already coalesced and
+is queued for a follow-up after the current composition has unwound, without a
+second full debounce delay. The same callback still enforces the real one-second
+worker gate and the independent 1.8-second navigation/apply cooldown. Closing
+guards remain in force. The existing timing assertion, fixtures and exclusions
+must stay unchanged; added deterministic tests cover pending follow-up batching,
+non-recursion, ordinary interval restoration and the retained idle gates.
+
+This concrete independent finding adds only `global_pulse/ui.py` to the exact
+cumulative workflow source set, taking 30 paths to 31. It does not broaden the
+package workflow or waive any full-suite, native smoke or byte-verification gate.
+
 Independent review must cover real visible list geometry and selection,
 finite-origin HTTP/HTTPS behavior, new numeric endpoints and unknown bounds,
 prompt tray click handling, actual worker/process retirement, thread affinity,

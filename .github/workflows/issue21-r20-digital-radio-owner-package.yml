@@ -86,6 +86,7 @@ jobs:
             'global_pulse/sdr_directory.py',
             'global_pulse/sources.py',
             'global_pulse/translation_process.py',
+            'global_pulse/ui.py',
             'tests/test_issue21_sdr_owner_controls.py',
             'tests/test_issue22_idle_crisis_single_credit.py',
             'tests/test_issue22_owner_media_lineup.py',
