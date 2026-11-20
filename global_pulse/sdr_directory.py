@@ -1,7 +1,8 @@
-"""Bounded, untrusted public SDR directory parsing.
+"""Explicit receiver links plus bounded, untrusted public SDR directory parsing.
 
-Only extracts public receiver *candidates* from operator directories. It never
-contacts individual receivers, infers current availability, or grants rights.
+The small curated list records individual owner-supplied/operator-documented
+links. It is not an import or copy of WebSDR.org's maintained directory feed.
+Neither curated records nor parsed candidates imply live reception or rights.
 """
 from __future__ import annotations
 
@@ -26,9 +27,95 @@ DIRECTORY_URLS = {
 # Do not replace the broken HTML scrape with that restricted data endpoint.
 # The public browser directory and owner-supplied individual links still work.
 DIRECTORY_IMPORT_RESTRICTIONS = {
-    "websdr": "WebSDR requires prior operator permission to reuse its full directory in an app. "
-              "Use Open directory for the provider's complete list, or paste an individual receiver URL."
+    "websdr": "Automatic import of WebSDR.org's maintained directory needs its operator's permission. "
+              "The individually supplied links below are available without that import. "
+              "Use Open directory for the provider's full live list."
 }
+# Individual receiver facts supplied by the owner or checked on that receiver's
+# own operator page, November 20, 2026. Do not infer bounds from ham band names,
+# rounded public-directory thumbnails or a different receiver at the same site.
+# Numeric ranges are kHz. A listed range is not proof of current coverage/audio.
+CURATED_WEBDR_RECEIVERS = (
+    {
+        "id": "na5b", "name": "NA5B · owner-tested link",
+        "location": "Operator location not recorded",
+        "url": "http://na5b.com:8901/", "ranges_khz": (),
+        "bands": (),
+        "provenance": "Individual link and band labels supplied by owner; numeric bounds not recorded",
+        "documentation": "http://na5b.com:8901/",
+    },
+    {
+        "id": "twente", "name": "University of Twente",
+        "location": "Enschede, Netherlands",
+        "url": "http://websdr.ewi.utwente.nl:8901/",
+        "ranges_khz": ((0.0, 29160.0),), "bands": (),
+        "provenance": "Individual link, name and 0.000–29.160 MHz range supplied by owner; not live verified",
+        "documentation": "http://websdr.ewi.utwente.nl:8901/",
+    },
+    {
+        "id": "georgia", "name": "Odlisi–Kakheti HF WebSDR",
+        "location": "Odlisi, Kakheti, Georgia",
+        "url": "http://sdrgeorgia.sytes.net:8902/",
+        "ranges_khz": ((26976.0, 29024.0),), "bands": (),
+        "provenance": "Owner-supplied link; range and location listed by NARG, checked 2026-11-20; not live verified",
+        "documentation": "https://narg.ge/websdr-tbilisi/",
+    },
+    {
+        "id": "utah1", "name": "Northern Utah #1 · Yellow",
+        "location": "Corinne, Utah, USA",
+        "url": "http://websdr1.sdrutah.org:8901/index1a.html",
+        "ranges_khz": ((125.0,221.0),(389.0,485.0),(516.0,2564.0),
+                       (1708.0,2090.0),(3366.0,4134.0),(4816.0,5584.0),
+                       (6741.0,7509.0)),
+        "bands": (),
+        "provenance": "Individually checked Northern Utah operator table, 2026-11-20; listed windows, not live verified",
+        "documentation": "https://www.sdrutah.org/info/techinfo.html",
+    },
+    {
+        "id": "utah2", "name": "Northern Utah #2 · Green",
+        "location": "Corinne, Utah, USA",
+        "url": "http://websdr2.sdrutah.org:8902/index1a.html",
+        "ranges_khz": ((9994.0,10186.0),(13766.0,14354.0),(18022.0,18214.0),
+                       (20816.0,21584.0),(24844.0,25036.0),(27816.0,28584.0),
+                       (28232.0,29768.0),(49975.0,50625.0)),
+        "bands": (),
+        "provenance": "Northern Utah operator table, checked 2026-11-20; 20m upper bound is printed as 14.354 MHz despite an inconsistent center/bandwidth; not live verified",
+        "documentation": "https://www.sdrutah.org/info/techinfo.html",
+    },
+    {
+        "id": "utah4", "name": "Northern Utah #4 · Magenta",
+        "location": "Corinne, Utah, USA",
+        "url": "http://websdr4.sdrutah.org:8904/",
+        "ranges_khz": ((6741.0,7509.0),(9994.0,10186.0),(13766.0,14354.0),
+                       (18022.0,18214.0),(20816.0,21584.0),(24844.0,25036.0),
+                       (27816.0,28584.0),(28232.0,29768.0)),
+        "bands": (),
+        "provenance": "Northern Utah operator table, checked 2026-11-20; 20m upper bound is printed as 14.354 MHz despite an inconsistent center/bandwidth; not live verified",
+        "documentation": "https://www.sdrutah.org/info/techinfo.html",
+    },
+    {
+        "id": "utah5", "name": "Northern Utah #5 · Teal",
+        "location": "Corinne, Utah, USA",
+        "url": "http://websdr5.sdrutah.org:8905/",
+        "ranges_khz": ((9994.0,10186.0),(13766.0,14354.0),(18022.0,18214.0),
+                       (20816.0,21584.0),(24844.0,25036.0),(27816.0,28584.0),
+                       (28232.0,29768.0)),
+        "bands": (),
+        "provenance": "Northern Utah operator table, checked 2026-11-20; 20m upper bound is printed as 14.354 MHz despite an inconsistent center/bandwidth; not live verified",
+        "documentation": "https://www.sdrutah.org/info/techinfo.html",
+    },
+)
+# Curating an arbitrary discovery result never grants HTTP/WebEngine admission.
+# This immutable allowlist contains only the exact individually reviewed origins.
+CURATED_WEBDR_HTTP_ORIGINS = frozenset({
+    ("na5b.com", 8901),
+    ("websdr.ewi.utwente.nl", 8901),
+    ("sdrgeorgia.sytes.net", 8902),
+    ("websdr1.sdrutah.org", 8901),
+    ("websdr2.sdrutah.org", 8902),
+    ("websdr4.sdrutah.org", 8904),
+    ("websdr5.sdrutah.org", 8905),
+})
 _IGNORED_HOSTS = {
     "websdr.org", "www.websdr.org", "kiwisdr.com", "www.kiwisdr.com",
     "github.com", "www.github.com", "youtube.com", "www.youtube.com",
@@ -39,8 +126,9 @@ _IGNORED_HOSTS = {
 def public_receiver_url(value):
     """Validate public host URLs, even when an operator uses HTTP/custom ports.
 
-    The separate in-app browser policy remains HTTPS/443 only. Never fetch any
-    of these receiver URLs for discovery; browsing requires explicit user action.
+    The separate in-app policy is HTTPS/443 plus a finite exact-origin list for
+    consented legacy receivers. Validation alone never grants that exception.
+    Never fetch these URLs for discovery; browsing requires explicit action.
     """
     if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
         raise ValueError("Invalid receiver URL")
@@ -85,6 +173,42 @@ def public_receiver_url(value):
     return {"url": clean, "host": host, "embedded_candidate": embedded,
             "reason": ("HTTPS/443 candidate; embedded resources may still fail"
                        if embedded else "Browser only: receiver requires HTTP or custom port")}
+
+
+def curated_websdr_receivers():
+    """Fresh records; no network, persisted input, or directory-feed dependency."""
+    result = []
+    for source in CURATED_WEBDR_RECEIVERS:
+        row = dict(public_receiver_url(source["url"]))
+        row.update(source)
+        row["bands"] = list(source["bands"])
+        row["ranges_khz"] = tuple(tuple(pair) for pair in source["ranges_khz"])
+        row["provider"] = "websdr"
+        row["reason"] = (
+            f"Operator HTTP/{urlsplit(row['url']).port}; in-app only after specific "
+            "unencrypted transport consent; audio and availability unverified"
+        )
+        result.append(row)
+    return result
+
+
+def curated_receiver_for_url(value):
+    """Return only built-in individual facts matching this exact public origin."""
+    try:
+        parsed = urlsplit(public_receiver_url(value)["url"])
+    except (ValueError, TypeError):
+        return None
+    origin = (parsed.scheme, parsed.hostname, parsed.port)
+    for row in curated_websdr_receivers():
+        target = urlsplit(row["url"])
+        if origin == (target.scheme, target.hostname, target.port):
+            return row
+    return None
+
+
+def receiver_range_label(ranges):
+    """Format already curated numeric bounds without claiming a station is on air."""
+    return " · ".join(f"{start/1000:.3f}–{end/1000:.3f} MHz" for start, end in ranges)
 
 
 class _Links(HTMLParser):

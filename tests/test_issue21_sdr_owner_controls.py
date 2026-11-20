@@ -77,17 +77,21 @@ def test_receiver_picker_populates_url_and_flags_browser_only(app):
                  name="In-app candidate", provider="websdr"),
         ]
         panel._change_receiver_directory()
-        # The owner-tested NA5B receiver remains selectable even without
-        # a successful live directory request; two dynamic rows follow it.
-        assert panel.receiver_picker.count() == 4
+        # Individually supplied receiver links remain selectable offline;
+        # the original two dynamic rows are still retained after that list.
+        assert panel.receiver_picker.count() == 10
         panel.receiver_picker.setCurrentIndex(1)
         assert panel.receiver_url.text() == "http://na5b.com:8901/"
         assert panel.receiver_connect.isEnabled()
-        panel.receiver_picker.setCurrentIndex(2)
+        outside=next(i for i in range(panel.receiver_picker.count())
+                     if (panel.receiver_picker.itemData(i) or {}).get("name")=="Outside receiver")
+        panel.receiver_picker.setCurrentIndex(outside)
         assert panel.receiver_url.text().startswith("http://")
         assert panel.receiver_external.isEnabled()
         assert not panel.receiver_connect.isEnabled()
-        panel.receiver_picker.setCurrentIndex(3)
+        online=next(i for i in range(panel.receiver_picker.count())
+                    if (panel.receiver_picker.itemData(i) or {}).get("name")=="In-app candidate")
+        panel.receiver_picker.setCurrentIndex(online)
         assert panel.receiver_url.text().startswith("https://")
         assert panel.receiver_connect.isEnabled()
         assert panel.receiver_type.currentData() == "websdr"

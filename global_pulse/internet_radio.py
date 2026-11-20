@@ -2,7 +2,8 @@
 
 Only publisher-documented MP3 addresses can be passed to the native audio backend.
 A user may explicitly connect one specific public HTTPS WebSDR/KiwiSDR receiver
-inside an isolated memory-only WebEngine session. Feed/event content and saved
+or a separately consented, finite reviewed HTTP WebSDR origin inside an isolated
+memory-only WebEngine session. Feed/event content and saved
 settings cannot silently supply playback or receiver URLs. No recording: decoded
 audio buffers are counted for liveness, never retained.
 """
@@ -11,6 +12,7 @@ import os
 import sqlite3
 import time
 from datetime import datetime, timezone
+from html import escape
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt
 from PySide6.QtGui import QDesktopServices
@@ -23,7 +25,8 @@ from .security import safe_url
 from .local_radio import LocalRadioPanel
 from .sdr_directory import (
     DIRECTORY_URLS, DIRECTORY_IMPORT_RESTRICTIONS, MAX_DIRECTORY_BYTES, MAX_RECEIVERS,
-    parse_directory, public_receiver_url,
+    CURATED_WEBDR_HTTP_ORIGINS, curated_websdr_receivers, curated_receiver_for_url,
+    receiver_range_label, parse_directory, public_receiver_url,
 )
 
 STATIONS = (
@@ -53,9 +56,9 @@ STATIONS = (
 BROADCAST_CATEGORIES = ("All stations", "News & Talk", "Music", "Classical", "Culture")
 
 # The owner tested this public WebSDR on its operator's original HTTP/8901
-# endpoint. It is a legacy *unencrypted* service; only this exact origin is
-# admitted for private in-app testing after a separate consent prompt. No
-# general-purpose HTTP/any-port WebEngine access is enabled.
+# endpoint. Additional individually supplied receiver origins live in the finite
+# curated allowlist; each requires its own explicit unencrypted-transport consent.
+# No general-purpose HTTP/any-port WebEngine access is enabled.
 OWNER_TEST_WEBDR_ORIGIN = "http://na5b.com:8901/"
 
 def _owner_legacy_websdr(info, kind):
@@ -63,8 +66,9 @@ def _owner_legacy_websdr(info, kind):
         return False
     from urllib.parse import urlsplit
     url=urlsplit(str((info or {}).get("url") or ""))
-    return (url.scheme == "http" and url.hostname == "na5b.com"
-            and url.port == 8901 and not url.username and not url.password)
+    return (url.scheme == "http"
+            and (url.hostname, url.port) in CURATED_WEBDR_HTTP_ORIGINS
+            and not url.username and not url.password)
 
 def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
     """Compare actual URL scheme/host/effective port, not QUrl's caller default.
@@ -449,7 +453,7 @@ class RadioPanel(QWidget):
 
         discovery_row=QHBoxLayout()
         self.receiver_picker=QComboBox()
-        self.receiver_picker.setAccessibleName("Discovered public SDR receiver")
+        self.receiver_picker.setAccessibleName("Choose public SDR receiver and listed coverage")
         self.receiver_picker.setMinimumWidth(0)
         self.receiver_picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.receiver_picker.setEditable(True)
@@ -472,6 +476,7 @@ class RadioPanel(QWidget):
         self.receiver_list_note=QLabel(
             "No list loaded. Refresh retrieves public directory links on request; receiver status is unverified."
         )
+        self.receiver_list_note.setTextFormat(Qt.TextFormat.PlainText)
         self.receiver_list_note.setWordWrap(True)
         self.receiver_list_note.setObjectName("Muted")
         layout.addWidget(self.receiver_list_note)
@@ -564,11 +569,21 @@ class RadioPanel(QWidget):
         for step in (1,5,10,25,100):
             self.ham_step.addItem(f"{step} kHz step",step)
         self.ham_step.setCurrentIndex(1)
+        self.ham_band=QComboBox()
+        self.ham_band.setAccessibleName("Selected receiver listed frequency range in megahertz")
+        self.ham_band.setMinimumWidth(0)
+        self.ham_band.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.ham_band.setMinimumContentsLength(8)
+        self.ham_band.setPlaceholderText("Outside listed ranges")
+        self.ham_band.addItem("Range not listed",None)
+        self.ham_band.setEnabled(False)
+        self.ham_band.activated.connect(self._choose_receiver_band)
         self.ham_forward=QPushButton("HIGHER ▶")
         self.ham_forward.setAccessibleName("Tune higher by selected kilohertz step")
         self.ham_forward.clicked.connect(lambda:self.step_receiver(1))
         stepping.addWidget(self.ham_back)
-        stepping.addWidget(self.ham_step,1)
+        stepping.addWidget(self.ham_step)
+        stepping.addWidget(self.ham_band,1)
         stepping.addWidget(self.ham_forward)
         layout.addLayout(stepping)
 
@@ -741,6 +756,7 @@ class RadioPanel(QWidget):
                 f"{self._format_khz(khz)} kHz · {self.mode.currentText()} · "
                 "Pulse requested setting; receiver audio unverified"
             )
+            self._sync_receiver_band(khz)
         except (ValueError,TypeError):
             self.ham_frequency_display.setText("— MHz")
             self.ham_frequency_detail.setText(
@@ -763,13 +779,44 @@ class RadioPanel(QWidget):
 
     def _selected_receiver_bands(self, receiver=None):
         info=receiver if isinstance(receiver,dict) else {}
+        # Only the individually sourced built-in numeric bounds constrain tune
+        # requests. A remote directory label cannot inject ranges or authority.
+        curated=(curated_receiver_for_url(self.receiver_url.text())
+                 if self.receiver_type.currentData()=="websdr" else None)
+        ranges=curated["ranges_khz"] if curated else ()
+        self.ham_band.blockSignals(True)
+        try:
+            self.ham_band.clear()
+            if ranges:
+                for bounds in ranges:
+                    self.ham_band.addItem(receiver_range_label((bounds,)),tuple(bounds))
+                try:
+                    frequency=self._frequency_value(self.frequency.text())
+                except ValueError:
+                    frequency=-1
+                for index,(start,end) in enumerate(ranges):
+                    if start<=frequency<=end:
+                        self.ham_band.setCurrentIndex(index)
+                        break
+                else:
+                    self.ham_band.setCurrentIndex(-1)
+            else:
+                self.ham_band.addItem("Range not listed",None)
+            self.ham_band.setEnabled(bool(ranges))
+        finally:
+            self.ham_band.blockSignals(False)
         bands=info.get("bands")
         if isinstance(bands,list):
             labels=[str(item)[:30] for item in bands[:24]
                     if isinstance(item,str) and item.strip()]
         else:
             labels=[]
-        if labels:
+        if ranges:
+            self.ham_bands.setText(
+                "Listed coverage: "+receiver_range_label(ranges)+". "
+                +curated["provenance"]+". Reference: "+curated["documentation"]
+            )
+        elif labels:
             self.ham_bands.setText(
                 "Operator-listed bands: "+" · ".join(labels)
                 +". Exact bounds/availability are not live verified."
@@ -787,6 +834,57 @@ class RadioPanel(QWidget):
                 "Receiver band list unavailable from this directory entry. "
                 "Use the operator's receiver page to see actual coverage."
             )
+
+    def _known_receiver_ranges(self):
+        if self.receiver_type.currentData()!="websdr":
+            return ()
+        row=curated_receiver_for_url(self.receiver_url.text())
+        return row["ranges_khz"] if row else ()
+
+    def _sync_receiver_band(self,frequency):
+        if not hasattr(self,"ham_band"):
+            return
+        ranges=self._known_receiver_ranges()
+        if not ranges:
+            return
+        index=self.ham_band.currentIndex()
+        if 0<=index<len(ranges) and ranges[index][0]<=frequency<=ranges[index][1]:
+            return  # Keep an explicitly chosen overlapping operator window.
+        index=next((i for i,(low,high) in enumerate(ranges) if low<=frequency<=high),-1)
+        self.ham_band.blockSignals(True)
+        try:
+            self.ham_band.setCurrentIndex(index)
+        finally:
+            self.ham_band.blockSignals(False)
+
+    def _check_receiver_frequency(self,frequency):
+        ranges=self._known_receiver_ranges()
+        if ranges and not any(start<=frequency<=end for start,end in ranges):
+            raise ValueError("Outside this receiver's listed coverage: "+receiver_range_label(ranges))
+        return frequency
+
+    def _choose_receiver_band(self,index):
+        """Pick a listed range locally; only Connect/Tune/step requests the page."""
+        if self._closed:
+            return False
+        ranges=self._known_receiver_ranges()
+        if not isinstance(index,int) or not 0<=index<len(ranges):
+            return False
+        start,end=ranges[index]
+        try:
+            current=self._frequency_value(self.frequency.text())
+        except ValueError:
+            current=-1
+        # The existing dial lower limit is 0.1 kHz; a 0 MHz coverage label is
+        # retained as supplied, but does not silently weaken the dial contract.
+        selected=current if start<=current<=end else max(0.1,start)
+        self.stop_scan()
+        self.ham_band.setCurrentIndex(index)
+        self.frequency.setText(self._format_khz(selected))
+        self.scan_start.setText(self._format_khz(max(0.1,start)))
+        self.scan_end_edit.setText(self._format_khz(end))
+        self.ham_note.setText("Listed receiver range selected. Click Tune or Connect to request it; audio remains unverified.")
+        return True
 
     def _preset_labels(self):
         for i,control in enumerate(self.preset_buttons):
@@ -935,8 +1033,9 @@ class RadioPanel(QWidget):
             self.ham_receiver_name.setText("Enter a public receiver URL")
             self._selected_receiver_bands()
             return
-        if item["url"].startswith(OWNER_TEST_WEBDR_ORIGIN):
-            self.ham_receiver_name.setText("NA5B · WebSDR public receiver")
+        curated=curated_receiver_for_url(item["url"])
+        if curated:
+            self.ham_receiver_name.setText(curated["name"])
         else:
             self.ham_receiver_name.setText("Selected receiver · "+item["host"])
         self._selected_receiver_bands()
@@ -947,15 +1046,16 @@ class RadioPanel(QWidget):
         self.receiver_browser_quick.setVisible(not in_app)
         self.receiver_external.setEnabled(True)
         if legacy:
+            parsed=urlsplit(item["url"])
             self.receiver_list_note.setText(
-                "NA5B operator HTTP/8901 test: an unencrypted in-app "
+                f"{item['host']} operator HTTP/{parsed.port} test: an unencrypted in-app "
                 "connection is available after explicit consent. "
                 "Use the receiver's own Audio start control."
             )
         elif not item["embedded_candidate"]:
             self.receiver_list_note.setText(
                 "Browser-only receiver (HTTP/custom port). "
-                "Only the explicitly reviewed NA5B legacy origin is admitted "
+                "Only the individually reviewed legacy origins are admitted "
                 "for in-app HTTP tests. Open other receivers in your browser."
             )
 
@@ -964,30 +1064,39 @@ class RadioPanel(QWidget):
         provider = item.get("id", "")
         cached = list(self.sdr_directory_cache.get(provider, []))
         if provider == "websdr":
-            # The owner-tested fallback is known by exact identity, not a
-            # claim that the official directory fetched or that audio is live.
-            matched=next((dict(row) for row in cached
-                          if row.get("url")==OWNER_TEST_WEBDR_ORIGIN),None)
-            pinned=matched or dict(public_receiver_url(OWNER_TEST_WEBDR_ORIGIN))
-            pinned.setdefault("name","NA5B · owner-tested link")
-            pinned["provider"]="websdr"
-            pinned["reason"]=(
-                "Operator HTTP/8901; in-app only after specific unencrypted "
-                "transport consent; audio and availability unverified"
-            )
-            cached=[pinned]+[r for r in cached if r.get("url")!=pinned["url"]]
+            pinned=[]
+            for row in curated_websdr_receivers():
+                # Keep exact operator-supplied names/band labels from an
+                # already held entry, but numeric ranges stay curated facts.
+                matched=next((r for r in cached if r.get("url")==row["url"]),None)
+                if matched:
+                    row["name"]=matched.get("name") or row["name"]
+                    row["bands"]=matched.get("bands") or row["bands"]
+                pinned.append(row)
+            pinned_urls={row["url"] for row in pinned}
+            cached=pinned+[r for r in cached if r.get("url") not in pinned_urls]
         self.receiver_picker.blockSignals(True)
         self.receiver_picker.clear()
         self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
         for row in cached:
-            self.receiver_picker.addItem(row["name"] + " — " + row["host"], dict(row))
+            ranges=row.get("ranges_khz",())
+            coverage=receiver_range_label(ranges) or "Range not listed"
+            compact_coverage=(f"{len(ranges)} listed ranges" if len(ranges)>1 else coverage)
+            # The editable selector otherwise scrolls long labels to the URL
+            # tail and hides the receiver's name. Full facts remain in its
+            # escaped tooltip and the existing details/manual-URL controls.
+            self.receiver_picker.addItem(row["name"]+" — "+compact_coverage,dict(row))
+            tooltip="\n".join((row["name"],row.get("location",""),row["url"],coverage,
+                               row.get("provenance","Directory label; not live verified")))
+            self.receiver_picker.setItemData(self.receiver_picker.count()-1,
+                "<qt>"+escape(tooltip).replace("\n","<br>")+"</qt>",Qt.ItemDataRole.ToolTipRole)
         self.receiver_picker.blockSignals(False)
         restriction=DIRECTORY_IMPORT_RESTRICTIONS.get(provider)
         self.receiver_refresh.setText("Directory info" if restriction else "Refresh list")
         if restriction and not self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(restriction)
             self.directory_summary.setText(
-                "NA5B's owner-supplied link is selectable. Open directory shows the full WebSDR list; in-app import needs permission."
+                f"{len(cached)} individually supplied receivers. Select a name/range, then Connect. Full live list: Open directory."
             )
         elif self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(
@@ -1008,6 +1117,12 @@ class RadioPanel(QWidget):
         item = self.receiver_picker.currentData()
         if not isinstance(item, dict):
             return
+        parts=urlsplit(item["url"])
+        target_origin=(parts.scheme,parts.port or 443,parts.hostname)
+        if self.receiver_connected and target_origin!=self.receiver_origin:
+            # Selection does not connect. Do not leave an old receiver audible
+            # while the name and requested frequency show a different operator.
+            self._destroy_receiver()
         self.receiver_url.setText(item["url"])
         index = self.receiver_type.findData(
             "websdr" if item["provider"] == "websdr" else "kiwi"
@@ -1015,7 +1130,13 @@ class RadioPanel(QWidget):
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
         self.ham_receiver_name.setText(item["name"])
+        self.receiver_picker.setToolTip(str(self.receiver_picker.currentData(Qt.ItemDataRole.ToolTipRole) or ""))
+        self.receiver_picker.lineEdit().setCursorPosition(0)
+        self.receiver_url.setCursorPosition(0)
         self._selected_receiver_bands(item)
+        ranges=self._known_receiver_ranges()
+        if ranges:
+            self._choose_receiver_band(max(0,self.ham_band.currentIndex()))
         self.receiver_list_note.setText(
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
@@ -1310,7 +1431,7 @@ class RadioPanel(QWidget):
         if not item["embedded_candidate"] and not legacy:
             raise ValueError(
                 "In-app SDR requires public HTTPS/443, except explicit "
-                "owner-test NA5B HTTP/8901 with WebSDR selected"
+                "individually reviewed HTTP origins with WebSDR selected"
             )
         return value,host
 
@@ -1332,6 +1453,7 @@ class RadioPanel(QWidget):
     def _tuned_receiver_url(self,frequency=None,mode=None):
         base,host=self._receiver_target()
         frequency=self._frequency_value(self.frequency.text() if frequency is None else frequency)
+        self._check_receiver_frequency(frequency)
         mode=str(mode or self.mode.currentData() or "usb").lower()
         if mode not in {"usb","lsb","am","cw"}:
             raise ValueError("Unsupported SDR mode")
@@ -1350,8 +1472,9 @@ class RadioPanel(QWidget):
         if require_consent:
             info=public_receiver_url(url)
             legacy=_owner_legacy_websdr(info,self.receiver_type.currentData())
+            parsed=urlsplit(info["url"])
             warning=(
-                " WARNING: NA5B uses unencrypted HTTP on port 8901; "
+                f" WARNING: {info['host']} uses unencrypted HTTP on port {parsed.port}; "
                 "other network parties can observe and alter the receiver page. "
                 "Use only this public operator origin, not sensitive credentials."
                 if legacy else ""
@@ -1362,6 +1485,7 @@ class RadioPanel(QWidget):
                 "The operator receives your IP address and browser requests. "
                 "Pulse uses an ephemeral browser profile and denies downloads, "
                 "popups, permissions and cross-host navigation. "
+                f"Selected origin: {parsed.scheme}://{parsed.netloc}. "
                 "Provider audio must be started manually." + warning +
                 " Continue?",
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
@@ -1426,6 +1550,9 @@ class RadioPanel(QWidget):
         try:
             start=self._frequency_value(self.scan_start.text())
             end=self._frequency_value(self.scan_end_edit.text())
+            ranges=self._known_receiver_ranges()
+            if ranges and not any(low<=min(start,end) and max(start,end)<=high for low,high in ranges):
+                raise ValueError("Scan must stay inside one listed receiver range; choose that range first")
             step=self._frequency_value(self.scan_step_edit.text())
             dwell=float(self.scan_dwell.text().strip())
             if not 1 <= dwell <= 60:
@@ -1519,7 +1646,8 @@ class RadioPanel(QWidget):
         from PySide6.QtWebEngineCore import QWebEngineProfile,QWebEnginePage,QWebEngineUrlRequestInterceptor,QWebEngineSettings
 
         # Bind the embedded session to exactly one reviewed scheme+host+port.
-        # HTTP custom ports are NOT generally admitted: only NA5B:8901,
+        # HTTP custom ports are NOT generally admitted: only the finite
+        # individually reviewed receiver origins,
         # prevalidated above by _receiver_target.
         target, _ = self._receiver_target()
         parsed=urlsplit(target)

@@ -10,7 +10,10 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from global_pulse.brief_selection import BRIEF_DOMAINS, balanced_brief_sections
+from global_pulse.brief_selection import (
+    BRIEF_DOMAINS, balanced_brief_sections, brief_domain,
+    overview_evidence_candidates, overview_html,
+)
 from global_pulse.core import Store, build_brief
 
 
@@ -175,6 +178,229 @@ class DailyBriefDepthTests(unittest.TestCase):
         self.assertIn("rolling last 7 days", page)
         self.assertIn("## General news", page)
         self.assertIn("coverage gap, not evidence that no events occurred", page)
+
+
+class WorldOverviewFeedbackTests(unittest.TestCase):
+    """The Monitor overview has its own shortlist, not Daily Brief's renderer."""
+
+    @staticmethod
+    def regulatory(number, title="Orphan designation: SYNTHETIC medicine application"):
+        event = item(number, "Health", title=title)
+        event["reports"][0]["title"] = title
+        event["recap"] = "Synthetic regulator reports application paperwork, not a health incident."
+        return event
+
+    def test_recent_routine_notices_do_not_evict_older_health_situations(self):
+        paperwork = [self.regulatory(i) for i in range(6)]
+        situations = [item(20 + i, "Health", updated_at="2026-11-20T12:00:00Z",
+                           title=f"SYNTHETIC health advisory {i}") for i in range(2)]
+        original = deepcopy(paperwork + situations)
+        selected = overview_evidence_candidates(paperwork, paperwork + situations)
+        self.assertEqual({e["id"] for e in selected}, {e["id"] for e in situations})
+        self.assertEqual(paperwork + situations, original)
+        self.assertIn("health advisory 0", overview_html(paperwork + situations))
+        self.assertNotIn("SYNTHETIC medicine application", overview_html(paperwork + situations))
+
+    def test_only_routine_health_is_separate_background_not_outbreak_coverage(self):
+        events = [self.regulatory(1), self.regulatory(2,
+            "Opinion/decision on a Paediatric investigation plan (PIP): SYNTHETIC")]
+        original = deepcopy(events)
+        page = overview_html(events)
+        before_background, background = page.split("<b style='color:#bec6dc'>Routine medicines/regulatory notices", 1)
+        self.assertNotIn("SYNTHETIC medicine application", before_background)
+        self.assertIn("Only routine medicines/regulatory notices", before_background)
+        self.assertIn("SYNTHETIC medicine application", background)
+        self.assertIn("pulse-event://open/synthetic-brief-1", background)
+        self.assertIn("not presented as outbreak or incident coverage", before_background)
+        self.assertIn("Coverage gap", page)
+        self.assertEqual(events, original)
+        self.assertEqual(events[0]["category"], "Health")
+        self.assertEqual(events[0]["verification"], "unverified")
+
+    def test_background_notices_share_the_original_sixteen_card_total(self):
+        categories = ("Conflict", "Unrest", "Health", "Government", "Economy",
+                      "Humanitarian", "Infrastructure", "News", "Weather")
+        events = []
+        for index, category in enumerate(categories):
+            events.extend(self.regulatory(index * 2 + offset) if category == "Health"
+                          else item(index * 2 + offset, category) for offset in range(2))
+        original = deepcopy(events)
+        selected = overview_evidence_candidates(events, [])
+        self.assertEqual(len(selected), 18)
+        self.assertEqual({e["id"] for e in selected}, {e["id"] for e in events})
+        page = overview_html(selected)
+        self.assertEqual(page.count("href='pulse-event://open/"), 16)
+        background = page.split("<b style='color:#bec6dc'>Routine medicines/regulatory notices", 1)[1]
+        for number in (4, 5):
+            self.assertIn(f"pulse-event://open/synthetic-brief-{number}", background)
+        for category in categories:
+            if category == "Health":
+                continue
+            identities = [e["id"] for e in events if e["category"] == category]
+            self.assertTrue(any(f"pulse-event://open/{identity}" in page for identity in identities),
+                            f"The background budget hid the represented {category} topic")
+        self.assertEqual(events, original)
+
+    def test_safety_alerts_and_mixed_reporting_are_not_hidden_as_paperwork(self):
+        alert = self.regulatory(1, "SYNTHETIC urgent recall following an orphan designation")
+        mixed = self.regulatory(2)
+        mixed["reports"].append(dict(mixed["reports"][0],
+                                    title="SYNTHETIC new safety warning", id="new-warning"))
+        page = overview_html([alert, mixed])
+        self.assertIn("SYNTHETIC urgent recall", page)
+        self.assertIn("SYNTHETIC medicine application", page)
+        self.assertNotIn("Routine medicines/regulatory notices</b>", page)
+        self.assertEqual(len(overview_evidence_candidates([alert, mixed], [])), 2)
+
+    def test_detail_attribution_dates_and_importance_do_not_upgrade_claims(self):
+        event = item(1, "Government", official_attribution=True,
+                     updated_at="2026-11-20T15:00:00Z",
+                     recap="Fictional government reports an unconfirmed policy proposal.")
+        event["reports"][0]["published_at"] = "2026-11-20T09:00:00+00:00"
+        page = overview_html([event])
+        self.assertIn("Fictional government reports an unconfirmed policy proposal", page)
+        self.assertIn("Importance: unassessed", page)
+        self.assertIn("Evidence: unverified; independent corroboration not established", page)
+        self.assertIn("Official publication present", page)
+        self.assertIn("source published 2026-11-20T09:00:00+00:00", page)
+        self.assertNotIn("source published 2026-11-20T15:00", page)
+        self.assertEqual(event["verification"], "unverified")
+
+    def test_unknown_publication_time_remains_unknown_and_future_context_labeled(self):
+        event = item(1, "Health", future_dated=True)
+        event["reports"][0].update(publication_time_known=False,
+                                   published_at="2026-12-10T00:00:00Z", future_dated=True)
+        page = overview_html([event])
+        self.assertIn("first retrieved " + AT, page)
+        self.assertIn("publication unknown", page)
+        self.assertIn("Future-dated source context", page)
+        self.assertNotIn("source published 2026-12-10", page)
+
+    def test_existing_categories_not_headline_keywords_determine_topic(self):
+        event = item(1, "News", title="SYNTHETIC war and protest headline")
+        page = overview_html([event])
+        self.assertEqual(brief_domain(event), "General news")
+        general = page.index("General news</b>")
+        self.assertGreater(page.index("SYNTHETIC war and protest headline"), general)
+        self.assertIn("local coverage gap is not a worldwide all-clear", page)
+
+    @staticmethod
+    def peace_topic(number=90):
+        event = item(number, "News", title="SYNTHETIC peace talks source statement")
+        event["reports"][0].update(source_id="un_peace_security", origin_id="un_news",
+                                   publisher="United Nations News — Peace and Security",
+                                   official=True, official_scope="statement",
+                                   url="https://news.un.org/en/story/synthetic-test")
+        return event
+
+    def test_exact_publisher_topic_groups_only_overview_without_new_claims(self):
+        event = self.peace_topic()
+        original = deepcopy(event)
+        page = overview_html([event])
+        before_unrest = page.split("Unrest &amp; civil affairs</b>", 1)[0]
+        self.assertIn("SYNTHETIC peace talks source statement", before_unrest)
+        self.assertIn("Grouped by source topic", before_unrest)
+        self.assertIn("does not establish an active conflict", before_unrest)
+        self.assertIn("pulse-event://open/synthetic-brief-90", before_unrest)
+        self.assertIn("Importance: unassessed", before_unrest)
+        self.assertIn("Evidence: unverified", before_unrest)
+        self.assertEqual(event, original)
+        self.assertEqual(brief_domain(event), "General news")
+        self.assertEqual(dict(balanced_brief_sections([event])), {"General news": [event]})
+
+    def test_generic_or_spoofed_source_topic_is_not_a_conflict_category(self):
+        changes = [
+            {"source_id": "un_news"}, {"source_id": "crisisgroup_global"},
+            {"source_id": "user-un_peace_security"}, {"origin_id": "different-origin"},
+            {"official": False}, {"official_scope": "measurement"},
+            {"url": "https://news.un.org.attacker.test/en/story/test"},
+            {"url": "https://user@news.un.org/en/story/test"},
+            {"url": "https://news.un.org:444/en/story/test"},
+            {"url": "http://news.un.org/en/story/test"},
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                event = self.peace_topic()
+                event["reports"][0].update(change)
+                page = overview_html([event])
+                self.assertNotIn("Grouped by source topic", page)
+                self.assertGreater(page.index("SYNTHETIC peace talks source statement"),
+                                   page.index("General news</b>"))
+
+    def test_publisher_topic_applies_before_the_general_news_candidate_cap(self):
+        event = self.peace_topic()
+        event["updated_at"] = "2026-11-19T12:00:00Z"
+        general = [item(i, "News") for i in range(6)]
+        selected = overview_evidence_candidates(general, general + [event])
+        self.assertEqual(len(selected), 3)
+        self.assertIn(event["id"], {e["id"] for e in selected})
+        self.assertTrue(all(e["category"] == "News" for e in selected))
+
+    def test_existing_configured_topic_feed_to_store_to_overview_preserves_news(self):
+        from global_pulse.sources import load_catalog, parse_feed
+        source = next(s for s in load_catalog() if s["id"] == "un_peace_security")
+        original_source = deepcopy(source)
+        report = parse_feed(b'''<rss><channel><item>
+            <guid>offline-synthetic-un-topic</guid>
+            <title>SYNTHETIC peace talks announcement</title>
+            <link>https://news.un.org/en/story/offline-synthetic-un-topic</link>
+            <pubDate>Fri, 20 Nov 2026 13:00:00 GMT</pubDate>
+            <description>Unused source body remains excluded by metadata-only policy.</description>
+            </item></channel></rss>''', source, AT)[0]
+        report["synthetic"] = True
+        with TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve() / "topic.sqlite3", mode="synthetic") as store:
+                store.ingest([report], now=AT)
+                feed = store.list_events()
+                original_events = deepcopy(feed)
+                page = overview_html(overview_evidence_candidates(feed, []))
+                self.assertIn("Grouped by source topic", page)
+                self.assertIn("SYNTHETIC peace talks announcement", page)
+                self.assertNotIn("Unused source body", page)
+                self.assertEqual(feed, original_events)
+                self.assertEqual(feed[0]["category"], "News")
+                self.assertEqual(feed[0]["severity"], "unassessed")
+                self.assertEqual(feed[0]["verification"], "unverified")
+                self.assertEqual(store.list_events()[0]["category"], "News")
+                self.assertEqual(source, original_source)
+
+    def test_details_are_bounded_escaped_and_only_link_local_record_ids(self):
+        event = item(1, "Health", recap="<img src=https://example.org/image> " + "x" * 9000,
+                     title='<script>unsafe</script>', id='unsafe/<id>"')
+        page = overview_html([event], label="<b>local</b>")
+        self.assertNotIn("<img", page)
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;img", page)
+        self.assertIn("&lt;b&gt;local&lt;/b&gt;", page)
+        self.assertIn("pulse-event://open/unsafe%2F%3Cid%3E%22", page)
+        self.assertLess(len(page), 9000)
+
+    def test_actual_store_health_projection_keeps_metadata_and_better_record(self):
+        with TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve() / "overview.sqlite3", mode="synthetic") as store:
+                reports = []
+                for number in range(4):
+                    title = (f"Orphan designation: SYNTHETIC application {number}"
+                             if number < 3 else "SYNTHETIC public health advisory")
+                    reports.append({"id": str(number), "source_id": f"overview-{number}",
+                        "publisher": "Synthetic regulator", "title": title,
+                        "summary": "Synthetic provider detail; no real-world health claim.",
+                        "url": f"https://example.org/overview/{number}", "language": "en",
+                        "published_at": AT, "retrieved_at": AT, "category": "Health",
+                        "severity": "unassessed", "synthetic": True,
+                        "event_key": f"overview-event-{number}", "official": True,
+                        "official_scope": "statement"})
+                store.ingest(reports, now=AT)
+                feed = store.list_events()
+                selected = overview_evidence_candidates(feed, [])
+                page = overview_html(selected)
+                self.assertIn("SYNTHETIC public health advisory", page)
+                self.assertIn("Synthetic regulator reports", page)
+                self.assertIn("Official publication present", page)
+                self.assertEqual(len(selected), 2)
+                self.assertTrue(all(e["category"] == "Health" for e in selected))
+                self.assertTrue(all(e["verification"] == "unverified" for e in selected))
+                self.assertEqual(len(store.list_events()), 4)
 
 
 class DailyBriefRenderingTests(unittest.TestCase):

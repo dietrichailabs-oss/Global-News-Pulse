@@ -4,6 +4,80 @@ Status: **DRAFT / owner physical feedback FAIL / corrective QA pending**. Based 
 R19 integration parent `76b8164308dd2c8ca6da465e0df729c102715124`.
 Do not merge, publish or reuse streams commercially from this draft.
 
+## November 20 follow-up: curated receivers and World overview
+
+This bounded successor responds to the owner's supplied receiver links and
+directory screenshots, and the separate **World intelligence overview**
+screenshot. The prior `b4ecd0442f65651a68aec882ebed12435abba028` package remains
+conditionally accepted only for its own frozen bytes; its QA decision does not
+approve this successor. Exact new source/native/package evidence and a distinct
+review are required before a replacement owner-test handoff.
+
+### Individual receiver directory
+
+The local selector contains seven attributed receiver choices: the existing
+NA5B link, the two explicitly pasted links, and four Northern Utah receivers
+individually checked against their operator's documentation. Loading this list
+does not request a central feed or connect any receiver. Selecting a name sets
+the URL, lists its documented frequency windows and enables a range selector;
+Connect, Lower/Higher and manual Tune still require an explicit user action.
+
+| Receiver | Exact supplied/documented URL | Frequency provenance |
+| --- | --- | --- |
+| NA5B | `http://na5b.com:8901/` | Existing owner-observed band labels; no invented numeric limits. |
+| University of Twente, Enschede, Netherlands | `http://websdr.ewi.utwente.nl:8901/` | Owner supplied 0.000–29.160 MHz; live coverage is not verified. |
+| Odlisi–Kakheti HF WebSDR, Georgia | `http://sdrgeorgia.sytes.net:8902/` | NARG lists 26.976–29.024 MHz. |
+| Northern Utah #1, Yellow | `http://websdr1.sdrutah.org:8901/index1a.html` | Operator's separate LF/MF/HF windows, not one continuous range. |
+| Northern Utah #2, Green | `http://websdr2.sdrutah.org:8902/index1a.html` | Operator's separate 30 m through 6 m windows. |
+| Northern Utah #4, Magenta | `http://websdr4.sdrutah.org:8904/` | Operator's separate HF windows, east-facing antenna. |
+| Northern Utah #5, Teal | `http://websdr5.sdrutah.org:8905/` | Operator's separate HF windows, northwest-facing antenna. |
+
+Primary references checked November 20:
+[WebSDR linking/tuning FAQ](https://websdr.org/faq.html),
+[NARG receiver information](https://narg.ge/websdr-tbilisi/),
+[Northern Utah exact URLs and tune parameters](https://www.sdrutah.org/info/urlparam.html),
+and [Northern Utah receiver windows](https://www.sdrutah.org/info/techinfo.html).
+The Utah table prints a 20 m upper bound of **14.354 MHz** while its quoted
+center/bandwidth are inconsistent with that number. The app preserves the
+published value with a provenance warning; it does not silently infer 14.534.
+Ranges are advertised/owner-supplied metadata, not proof of receiver lock,
+waterfall, audible reception or current server availability.
+
+The five supplied overview-sized screenshots have only a few pixels per URL
+character. Other addresses/ranges cannot be reliably recovered from them and
+are **not** claimed as added. Clear text or closer screenshots are needed for
+the remaining entries. No restricted central dataset was downloaded to fill
+those gaps. The official FAQ permits independently maintained receiver links;
+that is distinct from automated reuse of its complete maintained dataset.
+
+Each newly admitted legacy receiver has an explicit reviewed HTTP host/port
+pair. Consent names the exact unencrypted origin, and the ephemeral embedded
+session remains confined to that origin. No general HTTP/custom-port wildcard,
+automatic connection, native decoder admission, recording or retransmission is
+added. Known frequency windows constrain requested tuning; unknown bounds do
+not become fabricated coverage. The existing geometry/font-stress, late-load,
+Stop/cleanup and no-autoplay contracts remain mandatory.
+
+### Separate World overview correction
+
+The World overview was still a two-headline-per-topic renderer, separate from
+the richer Daily Brief. Routine EMA PIP/orphan-designation paperwork could fill
+its health shortlist before any meaningful health situation reached rendering.
+The successor prioritizes non-administrative health records before truncation,
+separates narrowly recognized paperwork into a labeled background section, and
+shows bounded existing recaps, source dates, importance and evidence separately.
+Canonical source categories, report verification and original event IDs remain
+unchanged. No outbreak/conflict summary is generated to fill missing evidence.
+
+The registered catalog also gives the explicit UN **Peace and Security** feed a
+generic News category. Only that exact documented topic feed may supply an
+overview-only security-topic grouping, visibly attributed as such; it does not
+assert an active conflict or change the stored category. Generic UN/Crisis Group
+items and headline-keyword guesses are not reclassified. Missing categories
+remain honest local coverage gaps, not a worldwide all-clear. The owner's actual
+Store is unavailable here, and the existing bounded feed/map reads can omit
+older records; this correction does not claim exhaustive world coverage.
+
 ## November 20 owner feedback and corrected scope
 
 Mark's physical test of the supplied R20 candidate reported missing active
@@ -50,17 +124,19 @@ alone does not independently establish the installed binary hash.
   **Ordinary PCs need tuner/SDR hardware for over-air AM/FM**; this feature
   discovers Internet stations and does not add an RF receiver.
 
-### WebSDR permission blocker — full built-in directory NOT delivered
+### Automatic central WebSDR dataset import remains permission-blocked
 
 The official WebSDR landing page is a frameset; its actual receiver metadata
 loads separately and explicitly prohibits reuse in another website or
 automated system without prior permission. No such permission is recorded.
 No restricted list was saved, copied into tests, scraped into the application
 or fetched through an alternate path. No provider-contact request was sent.
-Automatic WebSDR list import therefore remains blocked. The interface explains
-this and retains the explicit official-directory browser action, known NA5B,
-and validated manual receiver URLs. This is not a complete built-in WebSDR
-directory. Kiwi's separate existing import must retain honest unavailable/empty
+Automatic WebSDR list import therefore remains blocked. This does not prohibit
+the individually supplied/operator-documented receiver links described above.
+The interface distinguishes those local choices from central import and retains
+the explicit official-directory browser action and validated manual receiver
+URLs. This is not a complete built-in WebSDR directory. Kiwi's separate existing
+import must retain honest unavailable/empty
 status; a directory entry never verifies reception, audio or reuse rights.
 
 Fresh exact-source full Windows packaging and a distinct independent QA
