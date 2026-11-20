@@ -229,16 +229,91 @@ def test_continuous_collector_burst_cannot_starve_first_due_timer(
 def test_reentrant_new_evidence_queues_exactly_one_followup(
     desktop, monkeypatch
 ):
+    # Preserve the original strict 420ms / exactly-two acceptance gate.
+    # Record WHY an intermittent hosted runner failed: timer arm, callback,
+    # refresh duration/status and the reentrant signal. Do not extend wait.
+    import time
     w, c = desktop
-    redraws = []
+    redraws, trace = [], []
+    start = time.monotonic()
+
+    def stamp(stage):
+        trace.append((
+            round((time.monotonic() - start) * 1000, 1),
+            stage,
+            w._evidence_refresh_timer.remainingTime(),
+        ))
+
+    original_refresh = w.refresh_data
+
+    def traced_refresh(*args, **kwargs):
+        stamp("refresh-enter")
+        try:
+            return original_refresh(*args, **kwargs)
+        except Exception as error:
+            stamp("refresh-exception:" + type(error).__name__)
+            raise
+        finally:
+            stamp("refresh-exit")
+
+    monkeypatch.setattr(w, "refresh_data", traced_refresh)
+    w._evidence_refresh_timer.timeout.connect(lambda: stamp("timer-timeout-return"))
     def redraw(*args, **kwargs):
+        stamp("set-events-" + str(len(redraws) + 1))
         redraws.append(True)
         if len(redraws) == 1:
+            stamp("reentrant-emit")
             c.evidence_changed.emit()
+            stamp("reentrant-armed")
     monkeypatch.setattr(w.world_map, "set_events", redraw)
+    stamp("initial-emit")
     c.evidence_changed.emit()
+    stamp("initial-armed")
     QTest.qWait(420)
-    assert len(redraws) == 2, "A revision during UI composition must not be lost"
+    stamp("deadline")
+    assert len(redraws) == 2, (
+        "A revision during UI composition must not be lost; "
+        f"trace_ms={trace}, redraws={len(redraws)}, "
+        f"background_warm={w._background_warm_enabled}"
+    )
+
+
+def test_reentrant_pending_timer_delivers_new_store_revision_synchronously(
+    desktop, monkeypatch
+):
+    """Deterministic two-tick observer of real Store evidence without deadline slack.
+
+    This supplements, never replaces or relaxes, the unchanged 420ms test.
+    """
+    w, c = desktop
+    monkeypatch.setattr(w, "_background_warm_enabled", False)
+    map_pages = []
+    now = datetime.now(timezone.utc).isoformat()
+    newest = {**report(9801, at=now), "event_key": "r20-qa-new-revision"}
+    collected = []
+
+    def draw(events, **kwargs):
+        map_pages.append([str(row) for row in events])
+        if len(map_pages) == 1:
+            c._on_reports([newest], allow_synthetic=True, now=now)
+            collected.append(bool(c.events()))
+
+    monkeypatch.setattr(w.world_map, "set_events", draw)
+    c.evidence_changed.emit()
+    assert w._evidence_refresh_timer.isActive()
+    w._evidence_refresh_timer.stop()
+    w._refresh_evidence_when_idle()
+    assert len(map_pages) == 1
+    assert collected == [True]
+    assert w._evidence_refresh_timer.isActive(), (
+        "Store mutation during map composition must queue a follow-up"
+    )
+    w._evidence_refresh_timer.stop()
+    w._refresh_evidence_when_idle()
+    assert len(map_pages) == 2
+    assert any("Offline report 9801" in row for row in map_pages[1]), (
+        "Actual newly ingested Store revision must reach map projection"
+    )
 
 
 def test_worker_thread_signal_starts_gui_timer_safely(desktop, monkeypatch, app):
