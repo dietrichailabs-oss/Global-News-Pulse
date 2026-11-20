@@ -1,7 +1,8 @@
 """R20 owner feedback: richer bounded briefs, never stronger invented claims.
 
-Pure production Store/formatting tests run without Qt or network. All evidence
-is synthetic. Native renderer/worker regressions remain separate requirements.
+Production Store/formatting tests run without Qt or network. The renderer
+regression additionally requires Qt; all evidence is synthetic. Physical
+Windows and live-source verification remain separate requirements.
 """
 from copy import deepcopy
 from pathlib import Path
@@ -151,7 +152,7 @@ class DailyBriefDepthTests(unittest.TestCase):
 
     def test_actual_store_distinguishes_statement_measurement_and_independence(self):
         with TemporaryDirectory() as directory:
-            with Store(Path(directory) / "brief.sqlite3", mode="synthetic") as store:
+            with Store(Path(directory).resolve() / "brief.sqlite3", mode="synthetic") as store:
                 def raw(number, **kw):
                     return {"id": str(number), "source_id": f"synthetic-{number}", "publisher": "Fictional publisher",
                             "title": f"SYNTHETIC record {number}", "summary": f"Fictional provider metadata {number}.",
@@ -174,6 +175,56 @@ class DailyBriefDepthTests(unittest.TestCase):
         self.assertIn("rolling last 7 days", page)
         self.assertIn("## General news", page)
         self.assertIn("coverage gap, not evidence that no events occurred", page)
+
+
+class DailyBriefRenderingTests(unittest.TestCase):
+    def test_dark_preview_and_standalone_html_keep_readable_safe_source_links(self):
+        from PySide6.QtGui import QColor, QTextDocument
+        from PySide6.QtWidgets import QApplication
+        from global_pulse.brief_rendering import brief_html
+        from global_pulse.theme import PANEL, PURPLE, SEVERITY, TEXT
+        app = QApplication.instance() or QApplication([])
+        event = item(1, severity="high", title="SYNTHETIC &amp;lt;img src=x&amp;gt; source")
+        event["reports"][0]["summary"] = "Synthetic excerpt <img src=https://example.org/not-an-image> **not markup**"
+        event["reports"].append(dict(event["reports"][0], id="unsafe", url="javascript:alert(1)"))
+        with patch("global_pulse.core.utcnow", return_value=NOW):
+            html = brief_html([event])
+        document = QTextDocument()
+        document.setHtml(html)
+        self.assertEqual(document.rootFrame().frameFormat().background().color(), QColor(PANEL))
+        self.assertIn(f'bgcolor="{PANEL}"', html)
+        self.assertNotIn("javascript:", html)
+        anchors = []
+        severity_colors = []
+        block = document.begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid():
+                    form = fragment.charFormat()
+                    self.assertFalse(form.isImageFormat(), "Source markup became a remote resource")
+                    if form.isAnchor():
+                        anchors.append(form.anchorHref())
+                        self.assertEqual(form.foreground().color(), QColor(PURPLE))
+                        self.assertTrue(form.fontUnderline())
+                    if fragment.text() == "HIGH":
+                        severity_colors.append(form.foreground().color())
+                iterator += 1
+            block = block.next()
+        self.assertTrue(anchors)
+        self.assertEqual(set(anchors), {"https://example.org/report/1"})
+        self.assertEqual(severity_colors, [QColor(SEVERITY["high"])])
+
+        def luminance(color):
+            rgb = QColor(color).getRgbF()[:3]
+            linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
+            return sum(v * weight for v, weight in zip(linear, (.2126, .7152, .0722)))
+
+        for foreground in (PURPLE, TEXT):
+            contrast = (luminance(foreground) + .05) / (luminance(PANEL) + .05)
+            self.assertGreaterEqual(contrast, 4.5)
+        app.processEvents()
 
 
 if __name__ == "__main__":

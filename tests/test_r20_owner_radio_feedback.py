@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.core import Store
@@ -36,10 +36,12 @@ def test_core_ham_tuner_and_connect_are_above_small_viewport_fold(panel,app,size
     panel.resize(*size)
     panel.show()
     app.processEvents()
+    assert panel.width()<=size[0] and panel.height()<=size[1]
     assert panel.ham_details_scroll.isHidden()
-    for control in (panel.ham_frequency_display,panel.ham_back,panel.ham_step,
+    controls=(panel.ham_frequency_display,panel.ham_back,panel.ham_step,
                     panel.ham_forward,panel.frequency,panel.tune_button,
-                    panel.receiver_picker,panel.receiver_connect,panel.receiver_off):
+                    panel.receiver_picker,panel.receiver_connect,panel.receiver_off)
+    for control in controls:
         assert control.isVisible(),control.accessibleName()
         point=control.mapTo(panel,QPoint(0,0))
         assert point.y()>=0
@@ -49,11 +51,46 @@ def test_core_ham_tuner_and_connect_are_above_small_viewport_fold(panel,app,size
 
     panel.ham_details_toggle.setChecked(True)
     panel.advanced_scan.setChecked(True)
-    app.processEvents()
+    # Drain the follow-up LayoutRequest events too: one offscreen event pass
+    # could miss a minimum-size resize that the native Windows backend sees.
+    for _ in range(3):
+        app.processEvents()
     assert panel.height()<=size[1],"Opening details must not force the window off-screen"
-    for control in (panel.ham_back,panel.ham_forward,panel.tune_button,panel.receiver_connect):
+    assert panel.ham_details_scroll.viewport().height()>0
+    assert panel.ham_details_scroll.verticalScrollBar().maximum()>0
+    for control in controls:
+        assert control.isVisible(),control.accessibleName()
         point=control.mapTo(panel,QPoint(0,0))
+        assert point.y()>=0 and point.x()>=0
         assert point.y()+control.height()<=size[1]
+        assert point.x()+control.width()<=size[0]
+        surface=panel.radio_tabs.widget(1)
+        assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
+
+
+def test_ham_expanded_details_keep_viewport_with_taller_font_metrics(panel,app):
+    # A +1px body-font stress reproduces the former native-style minimum-size
+    # growth on Linux too, without substituting any Qt platform backend.
+    panel.setStyleSheet(STYLE.replace("font-size: 12px;","font-size: 13px;"))
+    panel.radio_tabs.setCurrentIndex(1)
+    panel.resize(600,480)
+    panel.show()
+    app.processEvents()
+    panel.ham_details_toggle.setChecked(True)
+    panel.advanced_scan.setChecked(True)
+    for _ in range(3):
+        app.processEvents()
+    assert panel.width()<=600 and panel.height()<=480
+    assert panel.ham_details_scroll.viewport().height()>0
+    for control in (panel.ham_back,panel.ham_step,panel.ham_forward,panel.frequency,
+                    panel.tune_button,panel.receiver_picker,panel.receiver_connect,
+                    panel.receiver_off):
+        assert control.isVisible()
+        point=control.mapTo(panel,QPoint(0,0))
+        assert 0<=point.y() and point.y()+control.height()<=480
+        assert 0<=point.x() and point.x()+control.width()<=600
+        surface=panel.radio_tabs.widget(1)
+        assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
 
 
 def test_preset_save_is_explicit_and_survives_actual_sqlite_close_reopen(panel,app,tmp_path):

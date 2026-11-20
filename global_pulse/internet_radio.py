@@ -404,8 +404,11 @@ class RadioPanel(QWidget):
 
         layout=QVBoxLayout(ham_tab)
         self.ham_layout=layout
-        layout.setContentsMargins(8,8,8,8)
-        layout.setSpacing(6)
+        # Windows font metrics made the stacked control rows request 495px
+        # when details opened in a 480px panel. Recover real usable room from
+        # the repeated gaps, not by clipping controls or overriding minimums.
+        layout.setContentsMargins(6,6,6,6)
+        layout.setSpacing(4)
         ham_title=QLabel("HAM / SDR RECEIVERS")
         ham_title.setObjectName("Eyebrow")
         layout.addWidget(ham_title)

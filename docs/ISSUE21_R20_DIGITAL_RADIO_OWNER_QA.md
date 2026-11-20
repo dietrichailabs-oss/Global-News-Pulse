@@ -89,6 +89,33 @@ These are test-input isolation corrections, not new exclusions or threshold
 relaxations. The exact workflow guard additionally names both changed tests.
 They do not claim a repair of physical Windows performance or audio.
 
+### Native 9ae gate failure and corrective follow-up
+
+The first full Windows package run for exact `9ae3eddef089da755452e0e6d32e699ecaedf32b`
+failed with 1,950 passes, three failures and the unchanged 14 deselections.
+Qt teardown returned 1,487 objects to zero. Installer smoke and all artifact
+uploads were skipped; **there is no 9ae installer or package approval**.
+
+- The 600x480 HAM layout test exposed a genuine Windows font/layout difference:
+  expanding details and scan grew the panel to 495 pixels. The follow-up reduces
+  unnecessary margins/gaps while keeping the exact 600x480 assertion and all
+  primary controls; it must pass the native backend again.
+- The HTML-export test incorrectly read the UTF-8 output with Windows cp1252.
+  The test now reads UTF-8 and checks the declared charset. Product export
+  encoding remains UTF-8; no content is removed to hide the issue.
+- The new Store brief fixture used a Windows short-name temporary path. It now
+  resolves that fixture path before Store construction. The production
+  canonical-path/storage safety guard is unchanged.
+- Read-only visual QA also found hard-to-read default-blue source links on
+  the dark Brief. The corrective renderer uses the existing theme's readable
+  underlined link foreground and matching body colors for both preview and
+  standalone HTML export; source URLs, severity and evidence are preserved.
+
+These follow-up changes require a fresh immutable source identity, full native
+gate, installer smoke and distinct downloaded-byte review. No prior green
+Linux run or older package substitutes for them. The exact cumulative workflow
+allowlist includes the renderer and UTF-8 test; test exclusions are unchanged.
+
 ## Intent and limits
 
 - Broadcast and HAM/SDR are separate tabs. The broadcast dial shows the

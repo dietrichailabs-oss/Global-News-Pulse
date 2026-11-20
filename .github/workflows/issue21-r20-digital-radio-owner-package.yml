@@ -73,6 +73,7 @@ jobs:
           $expected = @(
             '.github/workflows/issue21-r20-digital-radio-owner-package.yml',
             'docs/ISSUE21_R20_DIGITAL_RADIO_OWNER_QA.md',
+            'global_pulse/brief_rendering.py',
             'global_pulse/brief_selection.py',
             'global_pulse/controller.py',
             'global_pulse/core.py',
@@ -87,6 +88,7 @@ jobs:
             'tests/test_issue64_daily_weekly_archive.py',
             'tests/test_issue82_collector_tray_latency.py',
             'tests/test_issue82_ham_retune_state.py',
+            'tests/test_owner_feedback.py',
             'tests/test_r20_daily_brief_depth.py',
             'tests/test_r20_digital_radio.py',
             'tests/test_r20_local_radio.py',
