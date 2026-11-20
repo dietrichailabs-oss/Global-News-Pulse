@@ -952,6 +952,10 @@ class RadioPanel(QWidget):
         """
         if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
             return
+        sender = self.sender()
+        if sender is not None and (
+                self.receiver_view is None or sender is not self.receiver_view.page()):
+            return
         from PySide6.QtWebEngineCore import QWebEngineLoadingInfo
         if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
             return
@@ -1003,13 +1007,42 @@ class RadioPanel(QWidget):
             self.receiver_view.page().setAudioMuted(self.sdr_mute.isChecked())
 
     def _sdr_load_timed_out(self):
-        if self.sdr_state == "CONNECTING":
-            if self._flush_pending_tune():
-                return
+        if self._closed or self.sdr_state != "CONNECTING":
+            return
+        pending, self._pending_tune = self._pending_tune, None
+        continue_requested_tune = False
+        if (pending is not None and self.receiver_connected
+                and self.receiver_view is not None):
+            try:
+                target, target_host = self._receiver_target()
+                current = urlsplit(target)
+                queued = urlsplit(pending[0])
+                queued_info = public_receiver_url(pending[0])
+                continue_requested_tune = (
+                    pending[1] == target_host == self.receiver_host
+                    and queued_info["host"] == pending[1] == queued.hostname
+                    and queued_info["url"] == pending[0]
+                    and (queued.scheme, queued.port or 443, pending[1])
+                    == self.receiver_origin
+                    and (current.scheme, current.port or 443, target_host)
+                    == self.receiver_origin
+                )
+            except (ValueError, TypeError):
+                pass
+        # A timeout is NOT a navigation completion. Retire the old view before
+        # a queued explicit tune: its late signals cannot own the new load.
+        # No queued user request means no retry; changed origins need consent.
+        self._destroy_receiver()
+        if continue_requested_tune:
+            try:
+                if self._load_receiver_url(pending[0], pending[1]):
+                    return
+            except (ImportError, RuntimeError, ValueError, OSError):
+                pass
             self._destroy_receiver()
-            self._sdr_state_change(
-                "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
-            )
+        self._sdr_state_change(
+            "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
+        )
 
     def _sdr_mute_changed(self, muted):
         self.sdr_mute.setText("Unmute SDR" if muted else "Mute SDR")
@@ -1247,6 +1280,11 @@ class RadioPanel(QWidget):
     def connect_receiver(self):
         if self._closed:
             return False
+        if self.receiver_connected and self.sdr_state == "CONNECTING":
+            # Repeated Connect is the same explicit tune intent. Reuse the
+            # same-origin queue or the changed-origin consent path, never
+            # replace an in-flight navigation on the same view.
+            return self.tune_receiver()
         try:
             url,host=self._tuned_receiver_url()
             if not self._load_receiver_url(url,host,require_consent=True):
@@ -1444,3 +1482,4 @@ class RadioPanel(QWidget):
         if self.sdr_directory_reply is not None:
             self.sdr_directory_reply.abort()
         self.off()
+

@@ -406,3 +406,175 @@ def test_directory_malformed_link_deep_json_and_kiwi_proxy_are_isolated():
     assert parsed[0]["embedded_candidate"] is True
     assert parsed[1]["embedded_candidate"] is False
     assert "Browser only" in parsed[1]["reason"]
+
+
+@pytest.fixture
+def asynchronous_sdr(panel, monkeypatch):
+    """Real QObject signals around inert navigation; no WebEngine/network."""
+    from PySide6.QtCore import QObject, Signal
+    from urllib.parse import urlsplit
+
+    class FakePage(QObject):
+        loadingChanged = Signal(object)
+
+        def setAudioMuted(self, value):
+            self.muted = bool(value)
+
+    class FakeView(QObject):
+        loadFinished = Signal(bool)
+
+        def __init__(self):
+            super().__init__(panel)
+            self.loaded = []
+            self.stopped = self.deleted = False
+            self._page = FakePage(self)
+            self.loadFinished.connect(panel._sdr_load_finished)
+            self._page.loadingChanged.connect(panel._sdr_loading_changed)
+
+        def page(self):
+            return self._page
+
+        def load(self, url):
+            self.loaded.append(url.toString())
+
+        def show(self):
+            pass
+
+        def stop(self):
+            self.stopped = True
+
+        def setUrl(self, url):
+            self.last_url = url.toString()
+
+        def hide(self):
+            pass
+
+        def deleteLater(self):
+            # Retain an inert QObject so a late signal has a real old sender.
+            self.deleted = True
+
+    views, prompts = [], []
+
+    def ensure(host):
+        if panel.receiver_view is None:
+            panel.receiver_view = FakeView()
+            views.append(panel.receiver_view)
+        target, target_host = panel._receiver_target()
+        assert target_host == host
+        parts = urlsplit(target)
+        panel.receiver_host = host
+        panel.receiver_origin = (parts.scheme, parts.port or 443, host)
+
+    def consent(*args, **kwargs):
+        prompts.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(panel, "_ensure_receiver_view", ensure)
+    monkeypatch.setattr(QMessageBox, "question", consent)
+    panel._select_na5b_test()
+    assert panel.connect_receiver()
+    assert len(views) == 1 and len(views[0].loaded) == 1
+    return panel, views, prompts
+
+
+def test_timeout_dispatches_queued_tune_on_new_view_and_ignores_old_signals(asynchronous_sdr):
+    panel, views, prompts = asynchronous_sdr
+    old = views[0]
+    for _ in range(10):
+        panel.ham_forward.click()
+    assert panel.frequency.text() == "7150"
+    assert len(old.loaded) == 1
+    assert panel._pending_tune[0].endswith("?tune=7150usb")
+
+    # The timed-out navigation has NOT completed. It must be retired before
+    # another explicit user request is loaded; this is not an automatic retry.
+    panel._sdr_load_timed_out()
+    assert old.stopped and old.deleted
+    assert len(views) == 2 and views[1] is not old
+    current = views[1]
+    assert len(current.loaded) == 1
+    assert current.loaded[0].endswith("?tune=7150usb")
+    assert panel._pending_tune is None
+    assert panel.receiver_view is current
+    assert panel.sdr_state == "CONNECTING" and panel.receiver_connected
+    assert len(prompts) == 1, "Only the previously consented exact origin is reused"
+
+    old.loadFinished.emit(False)
+    assert panel.receiver_view is current and not current.deleted
+    assert panel.sdr_state == "CONNECTING" and panel.receiver_connected
+
+    inspected = []
+
+    class OldFailure:
+        def status(self):
+            inspected.append(True)
+            return object()
+
+    old.page().loadingChanged.emit(OldFailure())
+    assert inspected == [], "Old page must be rejected before its error is inspected"
+    assert panel._sdr_load_error == ""
+    current.loadFinished.emit(True)
+    assert panel.sdr_state == "ON"
+    assert panel.receiver_view is current and not current.deleted
+
+
+def test_timeout_without_explicit_queued_tune_does_not_retry(asynchronous_sdr):
+    panel, views, prompts = asynchronous_sdr
+    assert panel._pending_tune is None
+    panel._sdr_load_timed_out()
+    assert len(views) == 1 and views[0].deleted
+    assert panel.sdr_state == "ERROR"
+    assert not panel.receiver_connected
+    assert len(prompts) == 1
+
+
+def test_timeout_does_not_reuse_consent_after_receiver_origin_changes(asynchronous_sdr):
+    panel, views, prompts = asynchronous_sdr
+    panel.ham_forward.click()
+    assert panel._pending_tune is not None
+    # An edit alone is not consent to connect to the new receiver.
+    panel.receiver_url.setText("https://different.example.org/")
+    panel._sdr_load_timed_out()
+    assert len(views) == 1 and views[0].deleted
+    assert panel._pending_tune is None and not panel.receiver_connected
+    assert panel.sdr_state == "ERROR"
+    assert len(prompts) == 1
+
+
+def test_repeated_connect_coalesces_without_overlapping_navigation(asynchronous_sdr):
+    panel, views, prompts = asynchronous_sdr
+    old = views[0]
+    assert panel.connect_receiver()
+    panel.frequency.setText("7107.125")
+    assert panel.connect_receiver()
+    assert len(views) == 1 and len(old.loaded) == 1
+    assert panel._pending_tune[0].endswith("?tune=7107.125usb")
+    assert len(prompts) == 1
+    old.loadFinished.emit(False)
+    assert panel.sdr_state == "CONNECTING" and panel.receiver_connected
+    assert not old.deleted
+    assert len(old.loaded) == 2 and old.loaded[-1].endswith("?tune=7107.125usb")
+    assert panel._pending_tune is None
+    old.loadFinished.emit(True)
+    assert panel.sdr_state == "ON"
+
+
+@pytest.mark.parametrize("unapproved_url", [
+    "http://different.example.org:8901/?tune=7105usb",
+    "http://user:password@na5b.com:8901/?tune=7105usb",
+    "https://na5b.com:8901/?tune=7105usb",
+    "http://na5b.com:8902/?tune=7105usb",
+])
+def test_timeout_rejects_queued_url_outside_consented_origin(asynchronous_sdr, unapproved_url):
+    panel, views, prompts = asynchronous_sdr
+    panel.ham_forward.click()
+    # A defensive corrupted-queue probe; no fixture address is contacted.
+    panel._pending_tune = (unapproved_url, "na5b.com")
+    panel._sdr_load_timed_out()
+    assert len(views) == 1 and views[0].deleted
+    assert panel._pending_tune is None and not panel.receiver_connected
+    assert panel.sdr_state == "ERROR"
+    assert len(prompts) == 1
+
+
+
