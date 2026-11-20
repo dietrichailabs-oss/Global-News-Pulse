@@ -40,8 +40,8 @@ CURATED_WEBDR_RECEIVERS = (
         "id": "na5b", "name": "NA5B · owner-tested link",
         "location": "Operator location not recorded",
         "url": "http://na5b.com:8901/", "ranges_khz": (),
-        "bands": (),
-        "provenance": "Individual link and band labels supplied by owner; numeric bounds not recorded",
+        "bands": ("MW–160", "80m", "40m", "30m", "25m", "20m", "15m", "10m"),
+        "provenance": "Individual link and band labels observed in the owner's receiver screenshot; numeric bounds and live reception not verified",
         "documentation": "http://na5b.com:8901/",
     },
     {
@@ -104,6 +104,101 @@ CURATED_WEBDR_RECEIVERS = (
         "provenance": "Northern Utah operator table, checked 2026-11-20; 20m upper bound is printed as 14.354 MHz despite an inconsistent center/bandwidth; not live verified",
         "documentation": "https://www.sdrutah.org/info/techinfo.html",
     },
+    {
+        "id": "maasbree_low", "name": "Maasbree · HF low",
+        "location": "Maasbree, Netherlands",
+        "url": "http://sdr.websdrmaasbree.nl:8901/", "ranges_khz": (),
+        "bands": ("160m–15m (separate bands)",),
+        "provenance": "Direct endpoint and HF band-family label from the operator manual, checked 2026-11-20; separate windows, not continuous coverage; exact HF edges and live reception unverified",
+        "documentation": "https://www.pa0sim.nl/Manual_WebSDR_Maasbree.pdf",
+    },
+    {
+        "id": "maasbree_high", "name": "Maasbree · HF high",
+        "location": "Maasbree, Netherlands",
+        "url": "http://sdr.websdrmaasbree.nl:8902/", "ranges_khz": (),
+        "bands": ("40m–10m (separate bands)",),
+        "provenance": "Direct endpoint and HF band-family label from the operator manual, checked 2026-11-20; separate windows, not continuous coverage; exact HF edges and live reception unverified",
+        "documentation": "https://www.pa0sim.nl/Manual_WebSDR_Maasbree.pdf",
+    },
+    {
+        "id": "maasbree_2m", "name": "Maasbree · 2m",
+        "location": "Maasbree, Netherlands",
+        "url": "http://sdr.websdrmaasbree.nl:8905/",
+        "ranges_khz": ((144000.0, 145000.0), (145000.0, 146000.0)),
+        "bands": ("2m",),
+        "provenance": "Direct endpoint and two 2m windows from the operator manual, checked 2026-11-20; 144–145 and 145–146 MHz use different antennas; live reception unverified",
+        "documentation": "https://www.pa0sim.nl/Manual_WebSDR_Maasbree.pdf",
+    },
+    {
+        "id": "kfs1", "name": "KFS #1 · Omnidirectional",
+        "location": "Half Moon Bay, California, USA",
+        "url": "http://websdr1.kfsdr.com:8901/", "ranges_khz": (),
+        "bands": ("80/75m", "60m", "40m", "30m", "20m", "17m", "15m", "10m"),
+        "provenance": "Individual receiver link and band labels from the KFS operator page, checked 2026-11-20; exact edges and live reception unverified",
+        "documentation": "https://www.kfsdr.org/",
+    },
+    {
+        "id": "kfs2", "name": "KFS #2 · Omnidirectional",
+        "location": "Half Moon Bay, California, USA",
+        "url": "http://websdr2.kfsdr.com:8902/", "ranges_khz": (),
+        "bands": ("160m", "12m", "10m-FM"),
+        "provenance": "Individual receiver link and band labels from the KFS operator page, checked 2026-11-20; exact edges and live reception unverified",
+        "documentation": "https://www.kfsdr.org/",
+    },
+    {
+        "id": "g0xbu1", "name": "G0XBU · Jodrell #1",
+        "location": "Near Jodrell Bank, United Kingdom; independently operated",
+        "url": "http://g0xbuwebsdr.ddns.net:8901/", "ranges_khz": (),
+        "bands": ("20m", "80m", "60m", "4m", "CB", "Airband", "Marine"),
+        "provenance": "Individual G0XBU operator link and band labels, checked 2026-11-20; not affiliated with Jodrell Bank; example configuration snippets are not current coverage proof",
+        "documentation": "https://www.g0xbu.co.uk/websdr",
+    },
+    {
+        "id": "g0xbu2", "name": "G0XBU · Jodrell #2",
+        "location": "Near Jodrell Bank, United Kingdom; independently operated",
+        "url": "http://g0xbuwebsdr.ddns.net:8902/", "ranges_khz": (),
+        "bands": ("2m", "70cm", "PMR446", "6m", "Airband"),
+        "provenance": "Individual G0XBU operator link and band labels, checked 2026-11-20; not affiliated with Jodrell Bank; exact edges and live reception unverified",
+        "documentation": "https://www.g0xbu.co.uk/websdr",
+    },
+    {
+        "id": "df0hte", "name": "DF0HTE · Esslingen University",
+        "location": "Esslingen, Germany",
+        "url": "https://websdr.afunk.hs-esslingen.de/",
+        "ranges_khz": ((1416.0, 2184.0), (3468.0, 3852.0),
+                       (6908.0, 7292.0), (10004.0, 10196.0),
+                       (13791.0, 14559.0), (18004.0, 18196.0),
+                       (26431.0, 27199.0), (28936.0, 29704.0)),
+        "bands": ("160m", "80m", "40m", "30m", "20m", "17m", "11m", "10m"),
+        "provenance": "Numeric windows from the indexed operator mobile page, checked 2026-11-20; not a live receiver-state or audio observation",
+        "documentation": "https://websdr.afunk.hs-esslingen.de/m.html",
+    },
+    {
+        "id": "goonhilly", "name": "AMSAT-UK / BATC · Goonhilly",
+        "location": "Goonhilly Earth Station, Cornwall, United Kingdom",
+        "url": "https://vhf-goonhilly.batc.org.uk/",
+        "ranges_khz": ((144000.0, 146000.0), (435000.0, 437000.0),
+                       (1296000.0, 1298000.0), (2320000.0, 2321000.0)),
+        "bands": ("2m", "70cm", "23cm", "13cm"),
+        "provenance": "Four separate windows explicitly listed by the Goonhilly operator, checked 2026-11-20; no continuous coverage between windows or live reception claimed",
+        "documentation": "https://vhf-goonhilly.batc.org.uk/",
+    },
+    {
+        "id": "pardinho", "name": "Pardinho WebSDR",
+        "location": "Pardinho, São Paulo, Brazil · GG56TV",
+        "url": "https://pardinho.websdr.com.br/", "ranges_khz": (),
+        "bands": ("160m", "80m", "40m", "20m", "15m", "10/11m"),
+        "provenance": "Band labels from the indexed operator receiver page, checked 2026-11-20; presets are not coverage boundaries; exact edges and live reception unverified",
+        "documentation": "https://pardinho.websdr.com.br/",
+    },
+    {
+        "id": "oa6dxv", "name": "OA6DXV · RepublicaOA6",
+        "location": "Arequipa, Peru",
+        "url": "https://websdr2.republicaoa6.com/", "ranges_khz": (),
+        "bands": ("40m",),
+        "provenance": "Operator lists 40m with center 7100 kHz, checked 2026-11-20; a center frequency does not establish lower/upper limits or live reception",
+        "documentation": "https://websdr2.republicaoa6.com/",
+    },
 )
 # Curating an arbitrary discovery result never grants HTTP/WebEngine admission.
 # This immutable allowlist contains only the exact individually reviewed origins.
@@ -115,6 +210,13 @@ CURATED_WEBDR_HTTP_ORIGINS = frozenset({
     ("websdr2.sdrutah.org", 8902),
     ("websdr4.sdrutah.org", 8904),
     ("websdr5.sdrutah.org", 8905),
+    ("sdr.websdrmaasbree.nl", 8901),
+    ("sdr.websdrmaasbree.nl", 8902),
+    ("sdr.websdrmaasbree.nl", 8905),
+    ("websdr1.kfsdr.com", 8901),
+    ("websdr2.kfsdr.com", 8902),
+    ("g0xbuwebsdr.ddns.net", 8901),
+    ("g0xbuwebsdr.ddns.net", 8902),
 })
 _IGNORED_HOSTS = {
     "websdr.org", "www.websdr.org", "kiwisdr.com", "www.kiwisdr.com",
@@ -184,10 +286,23 @@ def curated_websdr_receivers():
         row["bands"] = list(source["bands"])
         row["ranges_khz"] = tuple(tuple(pair) for pair in source["ranges_khz"])
         row["provider"] = "websdr"
-        row["reason"] = (
-            f"Operator HTTP/{urlsplit(row['url']).port}; in-app only after specific "
-            "unencrypted transport consent; audio and availability unverified"
-        )
+        parsed = urlsplit(row["url"])
+        if row["embedded_candidate"]:
+            row["reason"] = (
+                "Operator HTTPS/443 candidate; embedded resources may still fail; "
+                "audio and availability unverified"
+            )
+        elif (parsed.scheme == "http"
+              and (parsed.hostname, parsed.port) in CURATED_WEBDR_HTTP_ORIGINS):
+            row["reason"] = (
+                f"Operator HTTP/{parsed.port}; in-app only after specific "
+                "unencrypted transport consent; audio and availability unverified"
+            )
+        else:
+            row["reason"] = (
+                "Browser only: operator HTTP/custom port is not admitted in-app; "
+                "audio and availability unverified"
+            )
         result.append(row)
     return result
 
@@ -198,10 +313,13 @@ def curated_receiver_for_url(value):
         parsed = urlsplit(public_receiver_url(value)["url"])
     except (ValueError, TypeError):
         return None
-    origin = (parsed.scheme, parsed.hostname, parsed.port)
+    origin = (parsed.scheme, parsed.hostname,
+              parsed.port or (443 if parsed.scheme == "https" else 80))
     for row in curated_websdr_receivers():
         target = urlsplit(row["url"])
-        if origin == (target.scheme, target.hostname, target.port):
+        target_origin = (target.scheme, target.hostname,
+                         target.port or (443 if target.scheme == "https" else 80))
+        if origin == target_origin:
             return row
     return None
 

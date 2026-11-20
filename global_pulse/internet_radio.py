@@ -14,12 +14,13 @@ import time
 from datetime import datetime, timezone
 from html import escape
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt, QItemSelectionModel
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QSlider, QMessageBox, QLineEdit, QTabWidget, QScrollArea, QSizePolicy,
+    QTableView, QHeaderView, QAbstractItemView,
 )
 from .security import safe_url
 from .local_radio import LocalRadioPanel
@@ -416,15 +417,15 @@ class RadioPanel(QWidget):
         self.ham_receiver_name=QLabel("Choose a public receiver")
         self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_receiver_name.setWordWrap(True)
-        self.ham_receiver_name.setStyleSheet("font-size:17px;font-weight:700;color:#b9e8ee;")
+        self.ham_receiver_name.setStyleSheet("font-size:15px;font-weight:700;color:#b9e8ee;")
         layout.addWidget(self.ham_receiver_name)
         self.ham_frequency_display=QLabel("7.100 MHz")
         self.ham_frequency_display.setAccessibleName("Pulse requested HAM frequency and mode, not verified on operator")
         self.ham_frequency_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ham_frequency_display.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_frequency_display.setStyleSheet(
-            "font-family:Consolas,monospace;font-size:34px;font-weight:800;color:#86f5c7;background:#101818;"
-            "padding:8px;border:1px solid #407b67;border-radius:8px;"
+            "font-family:Consolas,monospace;font-size:28px;font-weight:800;color:#86f5c7;background:#101818;"
+            "padding:4px;border:1px solid #407b67;border-radius:8px;"
         )
         layout.addWidget(self.ham_frequency_display)
         self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
@@ -452,7 +453,10 @@ class RadioPanel(QWidget):
         layout.addLayout(ham_row)
 
         discovery_row=QHBoxLayout()
-        self.receiver_picker=QComboBox()
+        # Keep one selection model for the catalog and existing URL/tuning
+        # machinery. The old editable combo looked like an empty URL field;
+        # expose its actual records in a permanent two-column list instead.
+        self.receiver_picker=QComboBox(ham_tab)
         self.receiver_picker.setAccessibleName("Choose public SDR receiver and listed coverage")
         self.receiver_picker.setMinimumWidth(0)
         self.receiver_picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -464,15 +468,50 @@ class RadioPanel(QWidget):
         self.receiver_picker.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         self.receiver_picker.addItem("Select a receiver — Refresh list",None)
         self.receiver_picker.currentIndexChanged.connect(self._select_discovered_receiver)
+        self.receiver_picker.hide()
+        self.receiver_search=QLineEdit()
+        self.receiver_search.setPlaceholderText("Search receiver names, location or bands")
+        self.receiver_search.setAccessibleName("Search the visible public receiver list")
+        self.receiver_search.setClearButtonEnabled(True)
+        self.receiver_search.setMinimumWidth(0)
+        self.receiver_search.textChanged.connect(self._filter_receiver_list)
+        self.receiver_list=QTableView(ham_tab)
+        self.receiver_list.setAccessibleName("Public receivers: name and operator-listed coverage")
+        self.receiver_list.setModel(self.receiver_picker.model())
+        self.receiver_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.receiver_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.receiver_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.receiver_list.setWordWrap(False)
+        self.receiver_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.receiver_list.setShowGrid(False)
+        self.receiver_list.setAlternatingRowColors(True)
+        self.receiver_list.setMinimumWidth(0)
+        self.receiver_list.setMinimumHeight(50)
+        self.receiver_list.setMaximumHeight(144)
+        self.receiver_list.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+        self.receiver_list.verticalHeader().hide()
+        self.receiver_list.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.receiver_list.verticalHeader().setDefaultSectionSize(23)
+        self.receiver_list.horizontalHeader().hide()
+        self.receiver_list.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.receiver_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.receiver_list.setStyleSheet(
+            "QTableView { background:#101318; alternate-background-color:#171b23; border:1px solid #46516a; }"
+            "QTableView::item { padding:2px 5px; }"
+            "QTableView::item:selected { background:#42345f; color:#ffffff; }"
+        )
+        self.receiver_list.selectionModel().currentRowChanged.connect(self._receiver_list_selected)
+        self._receiver_selections={}
         self.receiver_refresh=QPushButton("Refresh list")
         self.receiver_refresh.clicked.connect(self.refresh_receiver_directory)
         self.receiver_external=QPushButton("Open receiver in browser")
         self.receiver_external.clicked.connect(self.open_selected_receiver)
         self.receiver_external.setEnabled(False)
-        discovery_row.addWidget(self.receiver_picker,1)
+        discovery_row.addWidget(self.receiver_search,1)
         discovery_row.addWidget(self.receiver_refresh)
         discovery_row.addWidget(self.receiver_external)
         layout.addLayout(discovery_row)
+        layout.insertWidget(layout.count()-1,self.receiver_list,1)
         self.receiver_list_note=QLabel(
             "No list loaded. Refresh retrieves public directory links on request; receiver status is unverified."
         )
@@ -672,9 +711,9 @@ class RadioPanel(QWidget):
         layout.addWidget(self.ham_details_scroll,1)
         self.directory_summary=QLabel("Load the receiver directory, choose a receiver, then Connect.")
         self.directory_summary.setTextFormat(Qt.TextFormat.PlainText)
-        self.directory_summary.setWordWrap(True)
+        self.directory_summary.setWordWrap(False)
         self.directory_summary.setAccessibleName("Receiver directory load result")
-        layout.insertWidget(7,self.directory_summary)
+        layout.insertWidget(layout.indexOf(self.sdr_status),self.directory_summary)
         for core_label in (self.ham_receiver_name,self.ham_frequency_display,
                            self.ham_frequency_detail,self.sdr_status,self.directory_summary):
             core_label.setMinimumWidth(0)
@@ -747,7 +786,7 @@ class RadioPanel(QWidget):
     def _update_ham_dial(self):
         """Display the exact requested frequency, never assert RF/audio lock."""
         try:
-            khz=self._frequency_value(self.frequency.text())
+            khz=self._requested_frequency_value(self.frequency.text())
             display=f"{khz / 1000:.9f}"
             integral,fraction=display.split(".")
             fraction=fraction.rstrip("0").ljust(3,"0")
@@ -768,9 +807,9 @@ class RadioPanel(QWidget):
         if direction not in (-1,1) or self._closed:
             return False
         try:
-            previous=self._frequency_value(self.frequency.text())
+            previous=self._requested_frequency_value(self.frequency.text())
             delta=int(self.ham_step.currentData())*direction
-            target=self._frequency_value(round(previous+delta,6))
+            target=self._requested_frequency_value(round(previous+delta,6))
         except (ValueError,TypeError,OverflowError):
             self.ham_note.setText("Frequency step is outside the supported dial range.")
             return False
@@ -791,7 +830,7 @@ class RadioPanel(QWidget):
                 for bounds in ranges:
                     self.ham_band.addItem(receiver_range_label((bounds,)),tuple(bounds))
                 try:
-                    frequency=self._frequency_value(self.frequency.text())
+                    frequency=self._requested_frequency_value(self.frequency.text())
                 except ValueError:
                     frequency=-1
                 for index,(start,end) in enumerate(ranges):
@@ -872,7 +911,7 @@ class RadioPanel(QWidget):
             return False
         start,end=ranges[index]
         try:
-            current=self._frequency_value(self.frequency.text())
+            current=self._requested_frequency_value(self.frequency.text())
         except ValueError:
             current=-1
         # The existing dial lower limit is 0.1 kHz; a 0 MHz coverage label is
@@ -1075,48 +1114,121 @@ class RadioPanel(QWidget):
                 pinned.append(row)
             pinned_urls={row["url"] for row in pinned}
             cached=pinned+[r for r in cached if r.get("url") not in pinned_urls]
+        selected_url=self._receiver_selections.get(provider)
+        self._rebuilding_receiver_list=True
         self.receiver_picker.blockSignals(True)
-        self.receiver_picker.clear()
-        self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
-        for row in cached:
-            ranges=row.get("ranges_khz",())
-            coverage=receiver_range_label(ranges) or "Range not listed"
-            compact_coverage=(f"{len(ranges)} listed ranges" if len(ranges)>1 else coverage)
-            # The editable selector otherwise scrolls long labels to the URL
-            # tail and hides the receiver's name. Full facts remain in its
-            # escaped tooltip and the existing details/manual-URL controls.
-            self.receiver_picker.addItem(row["name"]+" — "+compact_coverage,dict(row))
-            tooltip="\n".join((row["name"],row.get("location",""),row["url"],coverage,
-                               row.get("provenance","Directory label; not live verified")))
-            self.receiver_picker.setItemData(self.receiver_picker.count()-1,
-                "<qt>"+escape(tooltip).replace("\n","<br>")+"</qt>",Qt.ItemDataRole.ToolTipRole)
-        self.receiver_picker.blockSignals(False)
+        try:
+            self.receiver_picker.clear()
+            # Row zero is an internal no-selection sentinel, never an empty
+            # entry displayed instead of actual receiver names.
+            self.receiver_picker.addItem("Choose a receiver", None)
+            model=self.receiver_picker.model()
+            if model.columnCount()<2:
+                model.insertColumn(1)
+            for row in cached:
+                ranges=row.get("ranges_khz",())
+                bands=" · ".join(str(band) for band in row.get("bands",()))
+                coverage=receiver_range_label(ranges) or bands or "Range not listed"
+                compact_coverage=(f"{len(ranges)} ranges · "+receiver_range_label(ranges[:1])
+                                  if len(ranges)>1 else coverage)
+                self.receiver_picker.addItem(row["name"],dict(row))
+                index=self.receiver_picker.count()-1
+                model.setData(model.index(index,1),compact_coverage)
+                tooltip="\n".join((row["name"],row.get("location",""),row["url"],coverage,
+                                   row.get("provenance","Directory label; not live verified")))
+                tooltip="<qt>"+escape(tooltip).replace("\n","<br>")+"</qt>"
+                for column in (0,1):
+                    model.setData(model.index(index,column),tooltip,Qt.ItemDataRole.ToolTipRole)
+            self.receiver_picker.setCurrentIndex(0)
+            self.receiver_list.clearSelection()
+            self.receiver_list.setCurrentIndex(model.index(-1,-1))
+            self.receiver_search.clear()
+        finally:
+            self.receiver_picker.blockSignals(False)
+            self._rebuilding_receiver_list=False
         restriction=DIRECTORY_IMPORT_RESTRICTIONS.get(provider)
         self.receiver_refresh.setText("Directory info" if restriction else "Refresh list")
         if restriction and not self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(restriction)
-            self.directory_summary.setText(
-                f"{len(cached)} individually supplied receivers. Select a name/range, then Connect. Full live list: Open directory."
-            )
         elif self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(
                 f"{len(cached)} public receiver choices, including any pinned owner-test link. "
                 "Directory labels are unverified until the operator is opened."
-            )
-            self.directory_summary.setText(
-                f"{len(cached)} receiver choices. Search the list, select one and click Connect."
             )
         else:
             self.receiver_list_note.setText(
                 "No live directory loaded. Refresh retrieves the selected provider's "
                 "public links on request; it does not verify receiver availability."
             )
-            self.directory_summary.setText("No directory loaded. Click Refresh list; no receiver connects automatically.")
+        self._filter_receiver_list()
+        selected=next((i for i in range(1,self.receiver_picker.count())
+                       if (self.receiver_picker.itemData(i) or {}).get("url")==selected_url),0)
+        if selected:
+            self.receiver_picker.setCurrentIndex(selected)
+        else:
+            if self.receiver_connected:
+                self._destroy_receiver()
+            self.receiver_url.clear()
+            self.receiver_connect.setEnabled(False)
+            self.receiver_external.setEnabled(False)
+            self.receiver_browser_quick.hide()
+            self.ham_receiver_name.setText("Choose a public receiver below")
+
+    def _filter_receiver_list(self, *_):
+        if getattr(self,"_rebuilding_receiver_list",False):
+            return
+        needle=self.receiver_search.text().strip().casefold()
+        model=self.receiver_picker.model()
+        self.receiver_list.setRowHidden(0,True)
+        matches=0
+        for index in range(1,self.receiver_picker.count()):
+            row=self.receiver_picker.itemData(index) or {}
+            searchable=" ".join((str(row.get("name","")),str(row.get("location","")),
+                str(row.get("url",""))," ".join(row.get("bands",())),
+                receiver_range_label(row.get("ranges_khz",())))).casefold()
+            visible=not needle or needle in searchable
+            self.receiver_list.setRowHidden(index,not visible)
+            matches+=int(visible)
+        selected=self.receiver_picker.currentIndex()
+        if selected>0 and self.receiver_list.isRowHidden(selected):
+            # Filtering never starts/stops media. It does remove a hidden
+            # catalog target from Connect, so a search cannot connect the
+            # previous invisible row by mistake. Choose a visible row next.
+            self.receiver_picker.setCurrentIndex(0)
+            self.receiver_list.clearSelection()
+            self.receiver_list.setCurrentIndex(model.index(-1,-1))
+            self.receiver_connect.setEnabled(False)
+            self.receiver_browser_quick.hide()
+        total=max(0,self.receiver_picker.count()-1)
+        if not total:
+            text="No receivers loaded · Refresh list or use the manual URL in Details."
+        elif not matches:
+            text="No matching receivers · Clear the search to show the list."
+        else:
+            text=f"{matches} of {total} receivers · Select a row, then Connect."
+        self.directory_summary.setText(text)
+        self.directory_summary.setToolTip(text+" Listed coverage is not verified live reception.")
+
+    def _receiver_list_selected(self, current, _previous):
+        if getattr(self,"_rebuilding_receiver_list",False) or not current.isValid():
+            return
+        row=current.row()
+        if row>0 and not self.receiver_list.isRowHidden(row):
+            self.receiver_picker.setCurrentIndex(row)
 
     def _select_discovered_receiver(self, *_):
         item = self.receiver_picker.currentData()
         if not isinstance(item, dict):
             return
+        if self.receiver_list.isRowHidden(self.receiver_picker.currentIndex()):
+            self.receiver_search.clear()
+        self.receiver_list.selectionModel().setCurrentIndex(
+            self.receiver_picker.model().index(self.receiver_picker.currentIndex(),0),
+            QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows,
+        )
+        self.receiver_list.scrollTo(self.receiver_list.currentIndex())
+        provider=(self.ham_selector.currentData() or {}).get("id","")
+        self._receiver_selections[provider]=item["url"]
         parts=urlsplit(item["url"])
         target_origin=(parts.scheme,parts.port or 443,parts.hostname)
         if self.receiver_connected and target_origin!=self.receiver_origin:
@@ -1141,9 +1253,9 @@ class RadioPanel(QWidget):
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
         self.directory_summary.setText(
-            "Selected receiver: click Connect; operator availability and audio are unverified."
+            "Receiver selected · Connect to listen; availability and audio unverified."
             if self.receiver_connect.isEnabled() else
-            "Selected receiver is browser-only. Click Open in browser to use the operator's tuner."
+            "Browser-only receiver · Open in browser to use the operator's tuner."
         )
 
     def refresh_receiver_directory(self):
@@ -1445,6 +1557,25 @@ class RadioPanel(QWidget):
             raise ValueError("Frequency must be between 0.1 and 500000 kHz")
         return number
 
+    def _requested_frequency_value(self,value):
+        """Retain the generic dial cap, except exact reviewed higher windows.
+
+        Only the selected built-in WebSDR origin can supply these bounds.
+        Cached directory metadata, a nearby hostname, or a different receiver
+        protocol cannot expand the generic frequency/scan-step contract.
+        """
+        try:
+            return self._frequency_value(value)
+        except ValueError as original_error:
+            try:
+                number=float(str(value).strip())
+            except (TypeError,ValueError):
+                raise ValueError("Frequency must be a number in kHz")
+            if (number>500000 and any(low<=number<=high
+                                     for low,high in self._known_receiver_ranges())):
+                return number
+            raise original_error
+
     @staticmethod
     def _format_khz(value):
         """Preserve fine manual tuning instead of the six-significant-digit g default."""
@@ -1452,7 +1583,7 @@ class RadioPanel(QWidget):
 
     def _tuned_receiver_url(self,frequency=None,mode=None):
         base,host=self._receiver_target()
-        frequency=self._frequency_value(self.frequency.text() if frequency is None else frequency)
+        frequency=self._requested_frequency_value(self.frequency.text() if frequency is None else frequency)
         self._check_receiver_frequency(frequency)
         mode=str(mode or self.mode.currentData() or "usb").lower()
         if mode not in {"usb","lsb","am","cw"}:
@@ -1534,7 +1665,7 @@ class RadioPanel(QWidget):
                         self._pending_tune=(url,host)
                     elif not self._load_receiver_url(url, host):
                         return False
-            value=self._frequency_value(self.frequency.text() if frequency is None else frequency)
+            value=self._requested_frequency_value(self.frequency.text() if frequency is None else frequency)
             self.frequency.setText(self._format_khz(value))
             self.ham_note.setText(
                 f"SDR TUNING · {self._format_khz(value)} kHz {str(self.mode.currentText())} · "
@@ -1548,8 +1679,8 @@ class RadioPanel(QWidget):
 
     def start_scan(self):
         try:
-            start=self._frequency_value(self.scan_start.text())
-            end=self._frequency_value(self.scan_end_edit.text())
+            start=self._requested_frequency_value(self.scan_start.text())
+            end=self._requested_frequency_value(self.scan_end_edit.text())
             ranges=self._known_receiver_ranges()
             if ranges and not any(low<=min(start,end) and max(start,end)<=high for low,high in ranges):
                 raise ValueError("Scan must stay inside one listed receiver range; choose that range first")

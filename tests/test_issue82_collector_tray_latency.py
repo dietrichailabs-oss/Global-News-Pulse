@@ -7,16 +7,21 @@ from __future__ import annotations
 
 import os
 import threading
+import time
+import sys
+import sqlite3
+import ast
+from pathlib import Path
 from datetime import datetime, timezone
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QThread, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QProcess, QThread, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
-from global_pulse.__main__ import _TrayRefreshBridge, _tray_health_state
+from global_pulse.__main__ import _ExitCoordinator, _TrayRefreshBridge, _tray_health_state
 from global_pulse.controller import Controller
 from global_pulse.source_availability import capability
 from global_pulse.core import Store
@@ -554,4 +559,392 @@ def test_worker_origin_native_toast_and_storage_pause_are_gui_queued(app, tmp_pa
         c.close()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+def _exit_spin(app, condition, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        app.processEvents()
+        QTest.qWait(5)
+    assert condition(), "Shutdown did not reach its expected bounded state"
+
+
+def test_exit_request_does_not_wait_for_admitted_collector_commit(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    notifier = NativeNotifications(enabled=False)
+    shutdown = _ExitCoordinator(c, notifier)
+    entered, release = threading.Event(), threading.Event()
+    errors, finished, beats = [], [], []
+    shutdown.finished.connect(lambda: finished.append(c._store_closed))
+    shutdown.blocked.connect(errors.append)
+    heartbeat = QTimer()
+    heartbeat.setInterval(10)
+    heartbeat.timeout.connect(lambda: beats.append(True))
+
+    def pending_commit():
+        # Model Scheduler._collect's admitted callback, including its real
+        # transaction. Exit may invalidate future work, not discard this write.
+        with c.scheduler._lock, c._ingest_lock, c.store._lock, c.store._conn:
+            c.store._conn.execute("INSERT INTO settings VALUES('critical_write','true')")
+            entered.set()
+            assert release.wait(3)
+
+    worker = threading.Thread(target=pending_commit, daemon=True)
+    worker.start()
+    assert entered.wait(1)
+    try:
+        heartbeat.start()
+        start = time.monotonic()
+        shutdown.begin({"window_geometry": "saved-layout", "map_layers_visible": True})
+        assert time.monotonic() - start < .15
+        assert c._closed and c.scheduler._stop.is_set() and not c.monitoring
+        assert not c._retention_timer.isActive()
+        assert not c._headlines.deferred_timer.isActive()
+        # Repeated Close cannot snapshot a different layout or begin more work.
+        shutdown.begin({"window_geometry": "must-not-replace"})
+        c.start()
+        c.resume()
+        c.set_setting("late_write", True)
+        notifier.start()
+        assert c.scheduler._thread is None and notifier.process is None
+        QTest.qWait(100)
+        assert len(beats) >= 3 and not finished and not errors
+        release.set()
+        _exit_spin(app, lambda: shutdown.completed)
+        assert finished == [True] and not errors
+        with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as saved:
+            assert saved.get_setting("critical_write") is True
+            assert saved.get_setting("window_geometry") == "saved-layout"
+            assert saved.get_setting("map_layers_visible") is True
+            assert saved.get_setting("late_write") is None
+            assert saved._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        release.set()
+        worker.join(2)
+        heartbeat.stop()
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+
+
+def test_exit_archive_timeout_is_visible_and_retry_retains_history(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    event = c.store.ingest([report()], now=NOW)[0]
+    alert = c.store.add_alert(event, "Synthetic shutdown history")
+    notifier = NativeNotifications(enabled=False)
+    notifier._pending.append((dict(event, _alert_id=alert["id"]), "pending", time.monotonic()))
+    shutdown = _ExitCoordinator(c, notifier)
+    blocked, finished = [], []
+    shutdown.blocked.connect(blocked.append)
+    shutdown.finished.connect(lambda: finished.append(True))
+    entered, release = threading.Event(), threading.Event()
+
+    def hold_store():
+        with c.store._lock:
+            entered.set()
+            assert release.wait(4)
+
+    worker = threading.Thread(target=hold_store, daemon=True)
+    worker.start()
+    assert entered.wait(1)
+    try:
+        shutdown.begin({"window_geometry": "retry-layout"})
+        _exit_spin(app, lambda: bool(blocked), timeout=2.0)
+        assert not c._store_closed and not shutdown.completed and not finished
+        assert shutdown._finalized.is_set(), "Bounded lock failure must finish its disk thread"
+        assert "archive" in blocked[0].lower()
+        original_outcomes = list(shutdown.outcomes)
+        assert len(original_outcomes) == 1
+        release.set()
+        worker.join(1)
+        shutdown.retry()
+        _exit_spin(app, lambda: shutdown.completed)
+        assert finished == [True] and shutdown.outcomes == original_outcomes
+        with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as saved:
+            assert saved.get_setting("window_geometry") == "retry-layout"
+            assert saved.list_alerts()[0]["delivery_status"] == original_outcomes[0][1]
+    finally:
+        release.set()
+        worker.join(2)
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+
+
+@pytest.mark.parametrize("fails_after_deadline", [False, True])
+def test_exit_deadline_never_starts_two_archive_finalizers(app, tmp_path, monkeypatch, fails_after_deadline):
+    c = Controller(tmp_path, demo=True)
+    shutdown = _ExitCoordinator(c, NativeNotifications(enabled=False), deadline_ms=70)
+    entered, release = threading.Event(), threading.Event()
+    original = c.finish_close
+    calls, warnings, finished = [], [], []
+
+    def slow_commit(*args):
+        calls.append(threading.current_thread().name)
+        entered.set()
+        assert release.wait(3)
+        if fails_after_deadline:
+            raise RuntimeError("Critical archive finalizer failed after deadline")
+        original(*args)
+
+    monkeypatch.setattr(c, "finish_close", slow_commit)
+    shutdown.blocked.connect(warnings.append)
+    shutdown.finished.connect(lambda: finished.append(True))
+    try:
+        shutdown.begin({"window_geometry": "one-finalizer"})
+        _exit_spin(app, lambda: bool(warnings), timeout=1.0)
+        assert entered.is_set() and not c._store_closed and not finished
+        current = shutdown._finalizer
+        for _ in range(3):
+            assert shutdown.retry() is False, "Retry must retain the visible waiting state"
+            shutdown.begin({"window_geometry": "wrong"})
+        assert shutdown._finalizer is current and len(calls) == 1
+        release.set()
+        if fails_after_deadline:
+            _exit_spin(app, lambda: len(warnings) == 2)
+            assert "failed after deadline" in warnings[-1]
+            assert not c._store_closed and not finished
+            monkeypatch.setattr(c, "finish_close", original)
+            assert shutdown.retry() is True
+        _exit_spin(app, lambda: shutdown.completed)
+        assert finished == [True] and len(calls) == 1
+    finally:
+        release.set()
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+
+
+def test_exit_cancels_owned_children_in_parallel_without_native_waits(app, tmp_path, monkeypatch):
+    c = Controller(tmp_path, demo=True)
+    notifier = NativeNotifications(enabled=True)
+    shutdown = _ExitCoordinator(c, notifier)
+    sleepy = lambda: (sys.executable, ["-c", "import time; time.sleep(30)"])
+    monkeypatch.setattr(c._workers, "command", sleepy)
+    monkeypatch.setattr(c._gdelt, "command", sleepy)
+    assert c._workers.submit("owned-job", "de", "synthetic", True)
+    token = c._gdelt.schedule.claim()
+    assert token
+    c._gdelt._launch(token)
+    notifier.process = QProcess(notifier)
+    notifier.process.finished.connect(notifier._finished)
+    notifier.process.start(*sleepy())
+    children = [c._workers.process, c._gdelt.process, notifier.process]
+    exits = []
+    for index, process in enumerate(children):
+        process.finished.connect(lambda *_, index=index: exits.append(index))
+    try:
+        _exit_spin(app, lambda: all(p.state() == QProcess.ProcessState.Running for p in children))
+        for process in children:
+            monkeypatch.setattr(process, "waitForFinished",
+                                lambda *_: pytest.fail("Qt exit path must not wait for a native child"))
+        started = time.monotonic()
+        shutdown.begin({"window_geometry": "native-cancel"})
+        assert time.monotonic() - started < .15
+        _exit_spin(app, lambda: shutdown.completed, timeout=2.0)
+        assert time.monotonic() - started < 2.0
+        assert sorted(exits) == [0, 1, 2]
+        assert c._workers.process is None and c._gdelt.process is None and notifier.process is None
+        assert not c._workers.submit("late", "de", "text", False)
+        c._gdelt.set_active(True)
+        notifier.start()
+        assert not c._gdelt.active and notifier.process is None
+        assert not list((tmp_path / "translation-jobs").iterdir())
+        assert c._gdelt.schedule.status()["state"] == "cancelled"
+    finally:
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+        notifier.stop()
+
+
+def test_exit_keeps_committed_wal_when_external_reader_prevents_truncate(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    c.store.set_setting("before_reader", True)
+    reader = sqlite3.connect(c.store.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM settings").fetchall()
+    c.store.set_setting("after_reader", True)
+    shutdown = _ExitCoordinator(c, NativeNotifications(enabled=False))
+    try:
+        started = time.monotonic()
+        shutdown.begin({"window_geometry": "wal-layout"})
+        _exit_spin(app, lambda: shutdown.completed, timeout=1.0)
+        assert time.monotonic() - started < 1.0, "Exit must not wait 15 seconds for WAL TRUNCATE"
+        with sqlite3.connect(c.store.path) as check:
+            assert check.execute("SELECT value FROM settings WHERE key='window_geometry'").fetchone()[0] == '"wal-layout"'
+            assert check.execute("SELECT value FROM settings WHERE key='after_reader'").fetchone()[0] == "true"
+            assert check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        reader.close()
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+
+
+def test_stop_during_scheduler_store_scan_cannot_admit_new_collector(app, tmp_path, monkeypatch):
+    c = Controller(tmp_path, demo=True)
+    source = next(s for s in c.catalog if s.get("enabled") and s.get("adapter") != "manual")
+    c.scheduler.set_sources([source])
+    c.scheduler.resume()
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def blocked_state(_):
+        entered.set()
+        assert release.wait(2)
+        return {}
+
+    monkeypatch.setattr(c.store, "get_source_state", blocked_state)
+    monkeypatch.setattr(c.scheduler, "collector_factory", lambda _: calls.append(True))
+    tick = threading.Thread(target=c.scheduler._tick, daemon=True)
+    tick.start()
+    assert entered.wait(1)
+    shutdown = _ExitCoordinator(c, NativeNotifications(enabled=False))
+    try:
+        started = time.monotonic()
+        shutdown.begin({})
+        assert time.monotonic() - started < .15
+        release.set()
+        tick.join(1)
+        assert not tick.is_alive() and not calls and not c.scheduler._workers
+        _exit_spin(app, lambda: shutdown.completed)
+    finally:
+        release.set()
+        tick.join(2)
+        shutdown.timer.stop()
+        if shutdown._finalizer:
+            shutdown._finalizer.join(3)
+        c.close()
+
+
+def test_late_bootstrap_and_native_callbacks_are_noops_after_exit(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    notifier = NativeNotifications(enabled=True, predicate=lambda: pytest.fail("Late native admission"))
+    shutdown = _ExitCoordinator(c, notifier)
+    shutdown.begin({})
+    _exit_spin(app, lambda: shutdown.completed)
+    # Execute the actual nested production callbacks, not a duplicated guard.
+    from global_pulse import __main__ as entrypoint
+    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    env = {"controller": c}
+    for name, args in (("begin", ()), ("apply_native_preference", (True,)),
+                       ("activate", ("late-event",)), ("notification_status_only", ("late status",)),
+                       ("delivered", ("late-alert", "late status"))):
+        node = next(n for n in ast.walk(main) if isinstance(n, ast.FunctionDef) and n.name == name)
+        exec(compile(ast.Module(body=[node], type_ignores=[]), entrypoint.__file__, "exec"), env)
+        env[name](*args)
+    assert not notifier.notify({"id": "late-event", "_alert_id": "late-alert"}, "late alert")
+    notifier.start()
+    assert notifier.process is None and c._store_closed
+
+
+def _bind_production_exit_warning(window, coordinator):
+    from global_pulse import __main__ as entrypoint
+    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    show = next(n for n in main.body if isinstance(n, ast.FunctionDef) and n.name == "show_exit_problem")
+    wrapper = ast.parse(
+        "def bind():\n"
+        "    exit_warning = None\n"
+        "    def warning(): return exit_warning\n"
+        "    return show_exit_problem, warning\n")
+    wrapper.body[0].body.insert(1, show)
+    ast.fix_missing_locations(wrapper)
+    env = {"window": window, "QMessageBox": QMessageBox,
+           "exit_coordinator": coordinator, "QTimer": QTimer}
+    exec(compile(wrapper, entrypoint.__file__, "exec"), env)
+    return env["bind"]()
+
+
+def test_actual_retry_dialog_survives_running_commit_then_late_error(app, tmp_path, monkeypatch):
+    c = Controller(tmp_path, demo=True)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False), deadline_ms=30)
+    window = QWidget()
+    show_problem, warning = _bind_production_exit_warning(window, q)
+    q.blocked.connect(show_problem)
+    q.finished.connect(lambda: warning().close() if warning() else None)
+    blocked = []
+    q.blocked.connect(blocked.append)
+    entered, release = threading.Event(), threading.Event()
+    original = c.finish_close
+    calls = []
+
+    def delayed_failure(*_):
+        calls.append(True)
+        entered.set()
+        assert release.wait(2)
+        raise RuntimeError("Forced archive failure after Retry")
+
+    monkeypatch.setattr(c, "finish_close", delayed_failure)
+    try:
+        q.begin({"window_geometry": "dialog-retry"})
+        _exit_spin(app, lambda: warning() is not None and warning().isVisible(), timeout=1)
+        assert entered.is_set() and q._finalizer.is_alive()
+        warning().button(QMessageBox.StandardButton.Retry).click()
+        app.processEvents()
+        assert warning().isVisible(), "QMessageBox auto-close must not strand the disabled window"
+        assert len(calls) == 1 and not window.isEnabled()
+        release.set()
+        _exit_spin(app, lambda: len(blocked) == 2, timeout=1)
+        assert warning().isVisible() and "Forced archive failure" in warning().text()
+        assert q.failed and not q.timer.isActive() and not c._store_closed
+        monkeypatch.setattr(c, "finish_close", original)
+        warning().button(QMessageBox.StandardButton.Retry).click()
+        _exit_spin(app, lambda: q.completed)
+        assert c._store_closed and not warning().isVisible()
+    finally:
+        release.set()
+        q.timer.stop()
+        if q._finalizer:
+            q._finalizer.join(3)
+        if warning():
+            warning().close()
+        window.close()
+        c.close()
+
+
+def test_external_quit_keeps_qt_recovery_alive_until_critical_commit_finishes(app, tmp_path, monkeypatch):
+    c = Controller(tmp_path, demo=True)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False), deadline_ms=30)
+    window = QWidget()
+    show_problem, warning = _bind_production_exit_warning(window, q)
+    q.blocked.connect(show_problem)
+    q.finished.connect(lambda: warning().close() if warning() else None)
+    release = threading.Event()
+    original = c.finish_close
+    observed = []
+
+    def delayed_commit(*args):
+        assert release.wait(2)
+        original(*args)
+
+    def permit_commit():
+        observed.append(bool(warning() and warning().isVisible() and not c._store_closed))
+        release.set()
+
+    monkeypatch.setattr(c, "finish_close", delayed_commit)
+    try:
+        q.begin({"window_geometry": "external-quit"})
+        QTimer.singleShot(90, permit_commit)
+        started = time.monotonic()
+        q.drain_after_event_loop()
+        assert time.monotonic() - started < 1.0
+        assert observed == [True], "The deadline must expose recovery, not abandon the daemon commit"
+        assert q.completed and c._store_closed and not warning().isVisible()
+    finally:
+        release.set()
+        q.timer.stop()
+        if q._finalizer:
+            q._finalizer.join(3)
+        if warning():
+            warning().close()
+        window.close()
+        c.close()
 

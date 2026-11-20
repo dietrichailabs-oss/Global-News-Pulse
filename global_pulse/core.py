@@ -1971,6 +1971,47 @@ class Store:
                 self._conn.close()
                 self._closed = True
 
+    def close_after_shutdown(self, settings: dict, delivery_outcomes=(), *, lock_timeout=1.0) -> None:
+        """Commit final UI/history state without a blocking WAL truncate.
+
+        Called only by the shutdown finalizer after collection is gated and
+        owned database children have actually exited. The existing Store lock
+        protects an in-progress transaction; failure leaves the connection and
+        singleton alive for an explicit retry. A busy reader may retain a WAL,
+        which is durable SQLite state, not a reason to delay application exit.
+        """
+        encoded = [(str(key)[:200], _json(value)) for key, value in settings.items()]
+        if any(len(value.encode("utf-8")) > 250_000 for _, value in encoded):
+            raise ValueError("Shutdown setting is too large")
+        if not self._lock.acquire(timeout=max(0.0, lock_timeout)):
+            raise RuntimeError("An archive operation is still finishing; exit can be retried safely")
+        try:
+            if self._closed:
+                return
+            previous_timeout = self._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self._conn.execute("PRAGMA busy_timeout=250")
+            try:
+                # One transaction: do not lose half the layout or acknowledge
+                # native submissions before their history outcome is durable.
+                with self._conn:
+                    self._conn.executemany(
+                        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        encoded)
+                    for alert_id, status in delivery_outcomes:
+                        row = self._conn.execute("SELECT body FROM alerts WHERE id=?", (alert_id,)).fetchone()
+                        if row:
+                            body = json.loads(row[0])
+                            body["delivery_status"] = plain_text(status, 500)
+                            self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
+                self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                self._conn.close()
+                self._closed = True
+            finally:
+                if not self._closed:
+                    self._conn.execute(f"PRAGMA busy_timeout={int(previous_timeout)}")
+        finally:
+            self._lock.release()
+
     def __enter__(self):
         return self
 

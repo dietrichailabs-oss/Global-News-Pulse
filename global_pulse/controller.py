@@ -703,6 +703,46 @@ class Controller(QObject):
     def quit(self):
         self.quit_requested.emit()
 
+    def begin_close(self):
+        """GUI-affine, nonwaiting cancellation phase for explicit tray exit."""
+        self.monitoring = False
+        self._closed = True
+        self._retention_timer.stop()
+        self.translator.cancelled.set()
+        # Invalidate network callbacks immediately, without joining their
+        # provider timeouts on Qt. Scheduler workers are already daemonized;
+        # their stop/generation checks forbid writes after this request.
+        self.scheduler.request_stop()
+        self._headlines.close()
+        self._workers.begin_close()
+        self._gdelt.begin_close()
+        self._translation_pending.clear()
+        self._translation_keys.clear()
+        self._model_jobs.clear()
+
+    def close_ready(self):
+        # Always inspect both children; do not serialize cancellation or
+        # postpone releasing the second QProcess while the first exits.
+        translation_ready = self._workers.close_ready()
+        gdelt_ready = self._gdelt.close_ready()
+        return translation_ready and gdelt_ready
+
+    def finish_close(self, settings, delivery_outcomes=()):
+        """Disk-only phase, run off Qt after close_ready has confirmed exit."""
+        if self._store_closed:
+            return
+        if not self.scheduler.settle_callbacks(timeout=1.0):
+            raise RuntimeError("A source archive callback is still finishing; exit can be retried safely")
+        if not self._ingest_lock.acquire(timeout=1.0):
+            raise RuntimeError("An archive update is still finishing; exit can be retried safely")
+        try:
+            self._gdelt.finish_close()
+            self._workers.finish_close()
+            self.store.close_after_shutdown(settings, delivery_outcomes)
+            self._store_closed = True
+        finally:
+            self._ingest_lock.release()
+
     def close(self):
         if self._store_closed:
             return

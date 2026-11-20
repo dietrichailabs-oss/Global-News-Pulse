@@ -5,7 +5,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QPoint, QRect, QUrl
+from PySide6.QtCore import QPoint, QRect, QUrl, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from global_pulse.core import Store
@@ -43,7 +44,7 @@ def test_core_ham_tuner_and_connect_are_above_small_viewport_fold(panel,app,size
     assert panel.ham_details_scroll.isHidden()
     controls=(panel.ham_frequency_display,panel.ham_back,panel.ham_step,panel.ham_band,
                     panel.ham_forward,panel.frequency,panel.tune_button,
-                    panel.receiver_picker,panel.receiver_connect,panel.receiver_off)
+                    panel.receiver_list,panel.receiver_search,panel.receiver_connect,panel.receiver_off)
     for control in controls:
         assert control.isVisible(),control.accessibleName()
         point=control.mapTo(panel,QPoint(0,0))
@@ -88,7 +89,7 @@ def test_ham_expanded_details_keep_viewport_with_taller_font_metrics(panel,app):
     assert panel.ham_details_scroll.viewport().height()>=24,"Details must show a usable scrolling row"
     for control in (panel.ham_receiver_name,panel.ham_frequency_display,
                     panel.ham_frequency_detail,panel.ham_back,panel.ham_step,panel.ham_band,panel.ham_forward,panel.frequency,
-                    panel.tune_button,panel.receiver_picker,panel.receiver_connect,
+                    panel.tune_button,panel.receiver_list,panel.receiver_search,panel.receiver_connect,
                     panel.receiver_off,panel.sdr_status,panel.ham_details_toggle):
         assert control.isVisible()
         point=control.mapTo(panel,QPoint(0,0))
@@ -221,7 +222,7 @@ def test_directory_search_keeps_all_valid_returned_choices_including_browser_onl
     assert not panel.receiver_connect.isEnabled()
     assert panel.receiver_external.isEnabled()
     assert not panel.receiver_browser_quick.isHidden()
-    assert "browser-only" in panel.directory_summary.text()
+    assert "browser-only" in panel.directory_summary.text().lower()
     assert not panel.receiver_connected
 
 
@@ -232,9 +233,131 @@ def _select_curated(panel, identifier):
     return panel.receiver_picker.currentData()
 
 
+def test_visible_receiver_names_load_without_network_or_popup(app,monkeypatch):
+    from PySide6.QtNetwork import QNetworkAccessManager
+    network=[]
+    loads=[]
+    monkeypatch.setattr(QNetworkAccessManager,"get",lambda *args:network.append(args))
+    monkeypatch.setattr(RadioPanel,"_load_receiver_url",lambda *args,**kwargs:loads.append(args))
+    widget=RadioPanel(confirm=lambda:False)
+    try:
+        widget.setStyleSheet(STYLE)
+        widget.radio_tabs.setCurrentIndex(1)
+        widget.resize(600,480)
+        widget.show()
+        app.processEvents()
+        view=widget.receiver_list
+        assert view.isVisible() and widget.receiver_search.isVisible()
+        assert widget.receiver_picker.isHidden(),"The empty-looking combo is no longer the primary selector"
+        assert view.isRowHidden(0),"Never display the placeholder instead of names"
+        assert view.model().rowCount()==len(curated_websdr_receivers())+1
+        assert view.model().index(1,0).data().startswith("NA5B")
+        assert view.model().index(2,0).data()=="University of Twente"
+        assert view.model().index(2,1).data()=="0.000–29.160 MHz"
+        assert view.visualRect(view.model().index(1,0)).intersects(view.viewport().rect())
+        assert view.visualRect(view.model().index(2,0)).intersects(view.viewport().rect())
+        assert not widget.receiver_connect.isEnabled() and not widget.receiver_connected
+        assert network==[] and loads==[]
+        assert view.mapTo(widget,QPoint(0,0)).y()>widget.ham_selector.mapTo(widget,QPoint(0,0)).y()
+    finally:
+        widget.shutdown();widget.close();widget.deleteLater();app.processEvents()
+
+
+def test_visible_row_click_selects_and_connect_button_owns_request(panel,app,monkeypatch):
+    loads=[]
+    monkeypatch.setattr(panel,"_load_receiver_url",lambda url,host,**kwargs:loads.append((url,host,kwargs)) or True)
+    panel.radio_tabs.setCurrentIndex(1)
+    panel.resize(600,480);panel.show();app.processEvents()
+    model=panel.receiver_list.model()
+    row=next(i for i in range(1,model.rowCount())
+             if (model.index(i,0).data(Qt.ItemDataRole.UserRole) or {}).get("id")=="georgia")
+    index=model.index(row,0)
+    panel.receiver_list.scrollTo(index);app.processEvents()
+    QTest.mouseClick(panel.receiver_list.viewport(),Qt.MouseButton.LeftButton,
+                     pos=panel.receiver_list.visualRect(index).center())
+    assert panel.receiver_picker.currentIndex()==row
+    assert panel.receiver_list.selectionModel().isRowSelected(row)
+    assert panel.receiver_url.text()=="http://sdrgeorgia.sytes.net:8902/"
+    assert panel.frequency.text()=="26976"
+    assert panel.receiver_connect.isEnabled() and not panel.receiver_connected
+    assert loads==[],"A row click selects, it must not auto-connect"
+    panel.receiver_connect.click()
+    assert loads==[("http://sdrgeorgia.sytes.net:8902/?tune=26976usb",
+                    "sdrgeorgia.sytes.net",{"require_consent":True})]
+
+
+def test_visible_receiver_filter_and_provider_return_keep_truthful_selection(panel,monkeypatch):
+    loads=[]
+    monkeypatch.setattr(panel,"_load_receiver_url",lambda *args,**kwargs:loads.append(args) or True)
+    _select_curated(panel,"twente")
+    panel.receiver_search.setText("Enschede")
+    visible=[i for i in range(1,panel.receiver_picker.count()) if not panel.receiver_list.isRowHidden(i)]
+    assert len(visible)==1
+    assert panel.receiver_picker.itemData(visible[0])["id"]=="twente"
+    assert panel.receiver_connect.isEnabled()
+    panel.receiver_search.setText("No such receiver 93b1")
+    assert "No matching receivers" in panel.directory_summary.text()
+    assert all(panel.receiver_list.isRowHidden(i) for i in range(panel.receiver_picker.count()))
+    assert not panel.receiver_connect.isEnabled()
+    panel.receiver_search.clear()
+    assert not panel.receiver_list.isRowHidden(1)
+    panel.ham_selector.setCurrentIndex(1)
+    assert panel.receiver_picker.count()==1
+    assert "No receivers loaded" in panel.directory_summary.text()
+    assert not panel.receiver_connect.isEnabled() and panel.receiver_url.text()==""
+    panel.ham_selector.setCurrentIndex(0)
+    assert panel.receiver_picker.currentData()["id"]=="twente"
+    assert panel.receiver_url.text()=="http://websdr.ewi.utwente.nl:8901/"
+    assert panel.receiver_connect.isEnabled()
+    assert panel.receiver_list.selectionModel().isRowSelected(panel.receiver_picker.currentIndex())
+    assert loads==[] and not panel.receiver_connected
+
+
+def test_reviewed_high_windows_do_not_expand_generic_receiver_or_scan_step_limits(panel,monkeypatch):
+    for raw in ("500001","1296000","2321000","nan","inf","-1"):
+        with pytest.raises(ValueError):
+            RadioPanel._frequency_value(raw)
+    loads=[]
+    monkeypatch.setattr(panel,"_load_receiver_url",lambda *args,**kwargs:loads.append(args) or True)
+    _select_curated(panel,"goonhilly")
+    assert panel._choose_receiver_band(2)
+    assert panel.frequency.text()=="1296000"
+    assert panel.ham_frequency_display.text().startswith("1296.000 MHz")
+    assert not loads and not panel.receiver_connected
+    assert panel.tune_receiver(1298000)
+    assert loads[-1][0].startswith("https://vhf-goonhilly.batc.org.uk/?tune=1298000usb")
+    count=len(loads)
+    assert not panel.step_receiver(1),"Cannot cross a reviewed upper edge"
+    for frequency in (500001,1000000,1295999,1298001,2319999,2321001,float("nan"),float("inf")):
+        assert not panel.tune_receiver(frequency)
+    assert len(loads)==count
+    assert panel._choose_receiver_band(3)
+    assert panel.frequency.text()=="2320000"
+    panel.scan_start.setText("2320000");panel.scan_end_edit.setText("2321000")
+    panel.scan_step_edit.setText("100");panel.scan_dwell.setText("3")
+    assert panel.start_scan()
+    panel.stop_scan()
+    panel.scan_step_edit.setText("600000")
+    assert not panel.start_scan(),"The generic scan-step contract remains capped"
+    panel.receiver_url.setText("https://unreviewed.example.org/")
+    panel._selected_receiver_bands({"ranges_khz":((0,3000000),)})
+    with pytest.raises(ValueError):
+        panel._tuned_receiver_url(1296000)
+    panel.receiver_url.setText("https://prefix.vhf-goonhilly.batc.org.uk/")
+    with pytest.raises(ValueError):
+        panel._tuned_receiver_url(1296000)
+    panel.receiver_url.setText("https://vhf-goonhilly.batc.org.uk:443/")
+    assert panel._tuned_receiver_url(2321000)[0].endswith("?tune=2321000usb")
+    panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("kiwi"))
+    with pytest.raises(ValueError):
+        panel._tuned_receiver_url(2321000)
+
+
 def test_curated_receiver_facts_are_individual_links_not_a_central_feed_copy():
     rows={row["id"]:row for row in curated_websdr_receivers()}
-    assert set(rows)=={"na5b","twente","georgia","utah1","utah2","utah4","utah5"}
+    assert set(rows)=={"na5b","twente","georgia","utah1","utah2","utah4","utah5",
+                      "maasbree_low","maasbree_high","maasbree_2m","kfs1","kfs2",
+                      "g0xbu1","g0xbu2","df0hte","goonhilly","pardinho","oa6dxv"}
     assert rows["twente"]["url"]=="http://websdr.ewi.utwente.nl:8901/"
     assert rows["twente"]["name"]=="University of Twente"
     assert rows["twente"]["ranges_khz"]==((0.0,29160.0),)
@@ -251,9 +374,9 @@ def test_curated_receiver_facts_are_individual_links_not_a_central_feed_copy():
         assert row["name"] and row["location"] and row["provenance"]
         assert row["documentation"] and row["provider"]=="websdr"
         assert "availability unverified" in row["reason"]
-        assert not row["embedded_candidate"],"Curated HTTP is not blanket HTTPS admission"
+        assert row["embedded_candidate"]==row["url"].startswith("https://"),"Curating HTTP is not blanket HTTPS admission"
         for start,end in row["ranges_khz"]:
-            assert 0<=start<end<=500000
+            assert 0<=start<end<=(2321000 if row["id"]=="goonhilly" else 500000)
     # Source table's internally inconsistent 20m end is retained as printed,
     # not silently 'corrected' from a center/bandwidth calculation.
     assert (13766.0,14354.0) in rows["utah2"]["ranges_khz"]
@@ -263,7 +386,7 @@ def test_curated_receiver_facts_are_individual_links_not_a_central_feed_copy():
 def test_all_curated_receivers_are_offline_searchable_with_ranges_and_no_autoconnect(panel,monkeypatch):
     requested=[]
     monkeypatch.setattr(panel.sdr_network,"get",lambda request:requested.append(request))
-    assert panel.receiver_picker.count()==8
+    assert panel.receiver_picker.count()==len(curated_websdr_receivers())+1
     for source in curated_websdr_receivers():
         item=_select_curated(panel,source["id"])
         text=panel.receiver_picker.currentText()
@@ -281,9 +404,13 @@ def test_all_curated_receivers_are_offline_searchable_with_ranges_and_no_autocon
             current=float(panel.frequency.text())
             assert any(low<=current<=high for low,high in source["ranges_khz"])
             if len(source["ranges_khz"])>1:
-                assert f"{len(source['ranges_khz'])} listed ranges" in text
+                assert f"{len(source['ranges_khz'])} ranges" in panel.receiver_picker.model().index(panel.receiver_picker.currentIndex(),1).data()
         else:
-            assert "Range not listed" in text
+            coverage=panel.receiver_picker.model().index(panel.receiver_picker.currentIndex(),1).data()
+            if source["bands"]:
+                assert all(band in coverage for band in source["bands"])
+            else:
+                assert "Range not listed" in coverage
     assert not panel.refresh_receiver_directory()
     assert requested==[]
 
@@ -306,14 +433,15 @@ def test_curated_names_ranges_and_core_controls_fit_small_window(panel,app,large
         assert panel.ham_details_scroll.viewport().height()>=24
         for control in (panel.ham_receiver_name,panel.ham_frequency_display,
                         panel.ham_back,panel.ham_step,panel.ham_band,panel.ham_forward,
-                        panel.frequency,panel.tune_button,panel.receiver_picker,
+                        panel.frequency,panel.tune_button,panel.receiver_list,panel.receiver_search,
                         panel.receiver_connect,panel.receiver_off):
             assert control.isVisible(),source["id"]
             surface=panel.radio_tabs.widget(1)
             assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
 
 
-@pytest.mark.parametrize("identifier",[row["id"] for row in curated_websdr_receivers()])
+@pytest.mark.parametrize("identifier",[row["id"] for row in curated_websdr_receivers()
+                                       if row["url"].startswith("http://")])
 def test_every_curated_http_origin_requires_specific_consent_before_a_request(panel,monkeypatch,identifier):
     source=_select_curated(panel,identifier)
     attempted=[]

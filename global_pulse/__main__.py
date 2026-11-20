@@ -5,10 +5,12 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, Slot
+from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
@@ -57,6 +59,140 @@ class _TrayRefreshBridge(QObject):
             return
         if not self.timer.isActive():
             self.timer.start()
+
+
+class _ExitCoordinator(QObject):
+    """Nonblocking, finite explicit-exit lifecycle; all Qt stays on Qt.
+
+    The one background thread only finishes already-admitted archive work and
+    persists final local state. Failure never releases the singleton or claims
+    success. Its visible retry signal prevents a hidden, unbounded shutdown.
+    """
+    finished = Signal()
+    blocked = Signal(str)
+
+    def __init__(self, controller, notifier, parent=None, *, deadline_ms=3000):
+        super().__init__(parent)
+        self.controller = controller
+        self.notifier = notifier
+        self.deadline_ms = deadline_ms
+        self.started = False
+        self.completed = False
+        self.failed = False
+        self._last_blocked_message = None
+        self.settings = {}
+        self.outcomes = []
+        self._finalizer = None
+        self._finalized = threading.Event()
+        self._error = None
+        self.timer = QTimer(self)
+        self.timer.setInterval(10)
+        self.timer.timeout.connect(self._tick)
+
+    def begin(self, settings):
+        if self.started:
+            self.retry()
+            return
+        self.started = True
+        self.settings = dict(settings)
+        self.controller.begin_close()
+        self.outcomes = self.notifier.begin_close()
+        self._deadline = time.monotonic() + self.deadline_ms / 1000
+        self.timer.start()
+
+    def retry(self):
+        if self.completed or not self.failed:
+            return True
+        # Never launch a second disk finalizer over a still-running commit.
+        if self._finalizer is not None and self._finalizer.is_alive():
+            return False
+        if self._finalized.is_set() and self._error is None:
+            self._tick()
+            return True
+        if self._finalized.is_set():
+            self._finalizer = None
+            self._finalized.clear()
+            self._error = None
+        self.failed = False
+        self.controller.begin_close()
+        self.outcomes.extend(self.notifier.begin_close())
+        self._deadline = time.monotonic() + self.deadline_ms / 1000
+        self.timer.setInterval(10)
+        self.timer.start()
+        return True
+
+    def _fail(self, message):
+        if not self.failed or message != self._last_blocked_message:
+            self.failed = True
+            self._last_blocked_message = message
+            self.timer.setInterval(100)
+            self.blocked.emit(message)
+
+    @Slot()
+    def _tick(self):
+        if self.completed:
+            self.timer.stop()
+            return
+        if self._finalized.is_set():
+            if self._error is not None:
+                self.timer.stop()
+                self._fail(str(self._error))
+            else:
+                self.timer.stop()
+                self.completed = True
+                self.finished.emit()
+            return
+        if self._finalizer is None:
+            try:
+                children_ready = self.controller.close_ready()
+                notifier_ready = self.notifier.close_ready()
+            except (RuntimeError, OSError, ValueError) as error:
+                self.timer.stop()
+                self._fail(str(error))
+                return
+            if children_ready and notifier_ready:
+                def finish_archive():
+                    try:
+                        self.controller.finish_close(self.settings, self.outcomes)
+                    except Exception as error:
+                        self._error = error
+                    finally:
+                        self._finalized.set()
+                self._finalizer = threading.Thread(
+                    target=finish_archive, name="pulse-exit-archive", daemon=True)
+                self._finalizer.start()
+        if time.monotonic() >= self._deadline:
+            self._fail("Exit is waiting for an owned worker or a critical archive write. "
+                       "The archive and single-instance lock are preserved; retry Exit Completely.")
+
+    def drain_after_event_loop(self):
+        """External app.quit cannot discard an in-flight critical commit.
+
+        The normal path is already complete. If an external quit ended the
+        application loop early, keep Qt responsive through the same deadline
+        and visible recovery UI, rather than raising out of main while a
+        daemon finalizer still owns the archive.
+        """
+        if self.completed:
+            return
+        loop = QEventLoop()
+        self.finished.connect(loop.quit)
+        limit = QTimer()
+        limit.setSingleShot(True)
+        limit.timeout.connect(lambda: self._fail(
+            "Safe shutdown is still pending. Archive cleanup has not completed; "
+            "the application remains available for recovery and retry."))
+        limit.start(self.deadline_ms + 100)
+        try:
+            while not self.completed:
+                loop.exec()
+                if not self.completed:
+                    # A second external quit must not tear down a still-live
+                    # commit either. Its recovery window remains visible.
+                    self._fail("An external quit was deferred while critical archive cleanup finishes.")
+        finally:
+            limit.stop()
+            self.finished.disconnect(loop.quit)
 
 
 def pulse_icon(state="active", size=64):
@@ -336,6 +472,8 @@ def main(argv=None):
     notifier.delivery_changed.connect(delivered)
 
     def activate(identifier=""):
+        if controller._closed:
+            return
         window.showNormal() if window.isMinimized() else window.show()
         window.raise_()
         window.activateWindow()
@@ -356,6 +494,8 @@ def main(argv=None):
     mute.setChecked(not controller.get_setting("notifications_enabled", False))
     mute.toggled.connect(lambda value: controller.set_setting("notifications_enabled", not value))
     def apply_native_preference(enabled):
+        if controller._closed:
+            return
         # Sync the Settings checkbox and tray independently of which UI action
         # the user chose. No cross-thread blocking helper stop on the UI path.
         was_blocked = mute.blockSignals(True)
@@ -448,29 +588,76 @@ def main(argv=None):
     controller.notification_changed.connect(tray_refresh_bridge.schedule)
     controller.alert_received.connect(tray_refresh_bridge.schedule)
 
-    def shutdown():
-        nonlocal shutting_down
-        if shutting_down:
-            return
-        shutting_down = True
-        window.save_layout()
-        for widget in window.findChildren(QWidget):
-            if widget.__class__.__name__ == "MediaPanel":
-                widget.shutdown()
-        notifier.stop()
-        try:
-            controller.close()
-        except RuntimeError as error:
-            shutting_down = False
-            window.show()
-            QMessageBox.critical(window, "Full exit not completed", str(error) + ". The window remains available; retry Exit Completely.")
-            return
+    exit_coordinator = _ExitCoordinator(controller, notifier, app)
+    exit_warning = None
+
+    def finish_exit():
+        # Release the singleton only after child exits and the final commit.
+        if exit_warning is not None:
+            exit_warning.close()
         instance.close()
         window.set_close_handler(None)
         window._force_close = True
         window.close()
         tray.hide()
         app.quit()
+
+    def show_exit_problem(message):
+        nonlocal exit_warning
+        if exit_coordinator.completed:
+            return
+        window.setEnabled(False)
+        window.show()
+        if exit_warning is None:
+            exit_warning = QMessageBox(
+                QMessageBox.Icon.Warning, "Full exit not completed", "",
+                QMessageBox.StandardButton.Retry)
+            def retry_exit(_):
+                if not exit_coordinator.retry():
+                    # QMessageBox closes itself after buttonClicked. Reopen
+                    # after that turn if a critical commit is still running.
+                    # A later failure is a new blocked message, not suppressed
+                    # by the earlier deadline warning.
+                    QTimer.singleShot(0, lambda: show_exit_problem(
+                        str(exit_coordinator._error) if exit_coordinator._error else
+                        "Archive cleanup is still running. The archive and single-instance "
+                        "lock remain protected; please wait for completion."))
+            exit_warning.buttonClicked.connect(retry_exit)
+        exit_warning.setText(str(message))
+        exit_warning.setInformativeText(
+            "Monitoring and media are stopped; archive cleanup may still be completing. "
+            "No data was force-discarded. The application will close after successful "
+            "cleanup, or you can retry once the blocking archive operation finishes.")
+        exit_warning.show()
+        exit_warning.raise_()
+
+    exit_coordinator.finished.connect(finish_exit)
+    exit_coordinator.blocked.connect(show_exit_problem)
+
+    def shutdown():
+        nonlocal shutting_down
+        if shutting_down:
+            exit_coordinator.retry()
+            return
+        shutting_down = True
+        # Snapshot UI values only; persist one transaction off the Qt thread.
+        settings = {
+            "window_geometry": bytes(window.saveGeometry().toBase64()).decode("ascii"),
+            "vertical_split": window.vertical_split.sizes(),
+            "lower_split": window.lower_split.sizes(),
+            "map_view": window.world_map.view_state(),
+            "intel_split": window.intel_stack.sizes(),
+            "map_layers_visible": window.layer_button.isChecked(),
+        }
+        for timer in window.findChildren(QTimer):
+            timer.stop()
+        window._force_close = True
+        window.hide()
+        tray.hide()
+        for widget in window.findChildren(QWidget):
+            if widget.__class__.__name__ == "MediaPanel":
+                widget.shutdown()
+        exit_coordinator.begin(settings)
 
     # Imported here to avoid including a GUI object in the pure helper functions.
     from PySide6.QtWidgets import QWidget
@@ -577,6 +764,8 @@ def main(argv=None):
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
     else:
         def begin():
+            if controller._closed:
+                return
             # A legacy profile may contain notifications_enabled=True from an
             # earlier default. Without a fresh v2 opt-in this does not even
             # launch the Windows helper or prompt for Microsoft component terms.
@@ -600,6 +789,7 @@ def main(argv=None):
     finally:
         if not shutting_down:
             controller.quit()
+        exit_coordinator.drain_after_event_loop()
         handler.close()
         log.removeHandler(handler)
     return result

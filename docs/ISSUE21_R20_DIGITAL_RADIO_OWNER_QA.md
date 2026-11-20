@@ -4,7 +4,103 @@ Status: **DRAFT / owner physical feedback FAIL / corrective QA pending**. Based 
 R19 integration parent `76b8164308dd2c8ca6da465e0df729c102715124`.
 Do not merge, publish or reuse streams commercially from this draft.
 
-## November 20 follow-up: curated receivers and World overview
+## Latest November 20 follow-up: visible receiver list and tray exit
+
+The owner reported that the area below **WebSDR public receivers** still looked
+like an empty manual-URL box. The same follow-up reports that tray **Exit
+Completely / Close app** takes too long. These are new acceptance findings
+against the prior `b420d956890ae28245d93012895520e48e8487b6` candidate; its
+successful run and conditional owner-test approval remain historical evidence
+for its exact bytes, not approval of this successor.
+
+### Visible receiver selection contract
+
+Show a selectable, scrollable receiver list directly below the provider row,
+with receiver names and published frequency windows or operator band labels.
+Keep the selected receiver, manual URL, requested frequency/range and Connect
+action synchronized. Cold start and returning from the other directory must
+show the built-in entries without a network refresh. A search with no matches
+must say so rather than leave a misleading stale selection. Selection and
+filtering do not connect or start audio; the explicit Connect action retains
+origin-specific HTTP consent and all existing browser-only routing.
+
+The core list and tuner must remain usable at 600x480, including the existing
+one-pixel font stress and minimum-height headroom. The receiver details can
+scroll independently; adding a list must not bury Lower/Step/Higher or Tune.
+
+### Additional individually verified receiver entries
+
+A second pass recognized more names in the supplied screenshots. Exact links
+and coverage were then checked against each operator, not guessed from tiny
+URL characters and not imported from the restricted central directory feed.
+The built-in list now has **18 entries**, including these 11 additions:
+
+| Receiver | Operator-documented endpoint | Stored coverage |
+| --- | --- | --- |
+| Maasbree HF low | `http://sdr.websdrmaasbree.nl:8901/` | 160m-15m band-family label; separate windows, exact HF edges unknown. |
+| Maasbree HF high | `http://sdr.websdrmaasbree.nl:8902/` | 40m-10m band-family label; separate windows, exact HF edges unknown. |
+| Maasbree 2m | `http://sdr.websdrmaasbree.nl:8905/` | Separate 144-145 and 145-146 MHz antenna windows. |
+| KFS #1 | `http://websdr1.kfsdr.com:8901/` | 80/75, 60, 40, 30, 20, 17, 15 and 10m labels; exact edges unknown. |
+| KFS #2 | `http://websdr2.kfsdr.com:8902/` | 160m, 12m and 10m-FM labels; exact edges unknown. |
+| G0XBU Jodrell #1 | `http://g0xbuwebsdr.ddns.net:8901/` | 20m, 80m, 60m, 4m, CB, Airband and Marine labels; independent of Jodrell Bank. |
+| G0XBU Jodrell #2 | `http://g0xbuwebsdr.ddns.net:8902/` | 2m, 70cm, PMR446, 6m and Airband labels. |
+| DF0HTE, Esslingen | `https://websdr.afunk.hs-esslingen.de/` | Eight numeric windows from the indexed operator mobile page. |
+| AMSAT-UK/BATC, Goonhilly | `https://vhf-goonhilly.batc.org.uk/` | 144-146, 435-437, 1296-1298 and 2320-2321 MHz, four separate windows. |
+| Pardinho | `https://pardinho.websdr.com.br/` | 160m, 80m, 40m, 20m, 15m and 10/11m labels. |
+| OA6DXV / RepublicaOA6 | `https://websdr2.republicaoa6.com/` | 40m; the published 7100 kHz center is not a coverage boundary. |
+
+Primary evidence: [Maasbree operator manual link](https://websdr-maasbree.jouwweb.nl/operation/user-manual),
+[Maasbree manual, July 29 2026](https://www.pa0sim.nl/Manual_WebSDR_Maasbree.pdf),
+[KFS](https://www.kfsdr.org/), [G0XBU](https://www.g0xbu.co.uk/websdr),
+[DF0HTE mobile range list](https://websdr.afunk.hs-esslingen.de/m.html),
+[Goonhilly](https://vhf-goonhilly.batc.org.uk/),
+[Pardinho](https://pardinho.websdr.com.br/), and
+[RepublicaOA6](https://websdr2.republicaoa6.com/).
+Indexed operator metadata is identified as such in the records; it is not a
+personal observation of live tuning or audio. The complete screenshot directory
+has not been transcribed, and other uncertain receiver identities remain absent.
+
+The HTTP allowlist adds exactly seven reviewed host/port pairs (three Maasbree,
+two KFS and two G0XBU). Four new receivers use HTTPS/443, with accurate transport
+wording rather than an HTTP/None warning. Explicit HTTPS port 443 is the same
+origin as implicit 443; other ports and schemes do not inherit curated facts.
+Higher Goonhilly tuning is permitted only within the exact reviewed receiver's
+documented windows. The generic unknown-receiver 0.1-500000 kHz limit and scan
+step bounds must not be expanded by untrusted cached metadata.
+
+### Responsive, safe full-exit contract
+
+The previous tray path performed layout persistence, serial notification-helper
+waits and controller/collector shutdown before removing the visible UI. The
+correction must respond to the click promptly, stop admitting new work, cancel
+owned worker processes and network work, preserve critical settings/Store writes,
+and finish actual shutdown without blocking the GUI event loop. Repeated exit
+requests are idempotent. Merely hiding an indefinitely running process, killing
+unrelated processes, or using `os._exit` to discard pending writes is not accepted.
+
+The workflow's exact cumulative source list expands from 24 to 30 paths only
+for this owner-reported exit defect: `global_pulse/__main__.py`,
+`global_pulse/native_notifications.py`, `global_pulse/gdelt_service.py`,
+`global_pulse/translation_process.py`, `global_pulse/sources.py`, and
+`tests/test_owner_feedback_qa_repairs.py`. The last file's production-shutdown
+binder follows asynchronous completion while retaining its camera-abort,
+consent and singleton-order assertions. This is an explicit source-scope
+expansion, not a new test exclusion or weaker threshold. The original 14
+deselections, two ignored historical modules and strict 420ms/exactly-two redraw
+assertion remain.
+
+### Fresh acceptance required
+
+Independent review must cover real visible list geometry and selection,
+finite-origin HTTP/HTTPS behavior, new numeric endpoints and unknown bounds,
+prompt tray click handling, actual worker/process retirement, thread affinity,
+safe persistence and repeated exit. A fresh full local/native suite, all eight
+offline Windows package checks, and distinct downloaded-byte QA are required
+before a replacement installer is described as owner-test ready. Live receiver
+audio, YouTube Error 153, physical owner-PC performance and public-release rights
+remain separate OPEN/HOLD items.
+
+## Earlier November 20 follow-up: seven receivers and World overview
 
 This bounded successor responds to the owner's supplied receiver links and
 directory screenshots, and the separate **World intelligence overview**
@@ -15,7 +111,7 @@ review are required before a replacement owner-test handoff.
 
 ### Individual receiver directory
 
-The local selector contains seven attributed receiver choices: the existing
+That earlier local selector contained seven attributed receiver choices: the existing
 NA5B link, the two explicitly pasted links, and four Northern Utah receivers
 individually checked against their operator's documentation. Loading this list
 does not request a central feed or connect any receiver. Selecting a name sets
@@ -43,12 +139,13 @@ published value with a provenance warning; it does not silently infer 14.534.
 Ranges are advertised/owner-supplied metadata, not proof of receiver lock,
 waterfall, audible reception or current server availability.
 
-The five supplied overview-sized screenshots have only a few pixels per URL
-character. Other addresses/ranges cannot be reliably recovered from them and
-are **not** claimed as added. Clear text or closer screenshots are needed for
-the remaining entries. No restricted central dataset was downloaded to fill
-those gaps. The official FAQ permits independently maintained receiver links;
-that is distinct from automated reuse of its complete maintained dataset.
+The initial pass recovered only these seven entries. A later sectional image
+review identified additional receiver names, which were checked against their
+own operator pages as recorded above. Exact tiny URL/frequency characters are
+not guessed, and the entire directory is not claimed as transcribed. No
+restricted central dataset was downloaded to fill the gaps. The official FAQ
+permits independently maintained receiver links; that is distinct from automated
+reuse of its complete maintained dataset.
 
 Each newly admitted legacy receiver has an explicit reviewed HTTP host/port
 pair. Consent names the exact unencrypted origin, and the ephemeral embedded

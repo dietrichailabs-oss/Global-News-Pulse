@@ -5,6 +5,7 @@ The shutdown case executes the unchanged nested production shutdown function,
 with only OS tray/notifier/single-instance and application-exit surfaces stubbed.
 """
 import ast
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import pytest
 from PySide6.QtCore import QBuffer, QByteArray, QCoreApplication, QEvent, QIODevice, QObject
 from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from global_pulse.camera_context import associated_cameras, camera_catalog
@@ -211,6 +213,9 @@ def test_consistent_reviewed_area_matches_preserved(event):
 
 
 def bind_production_shutdown(window, controller):
+    from PySide6.QtCore import QTimer
+    from global_pulse.__main__ import _ExitCoordinator
+    from global_pulse.native_notifications import NativeNotifications
     path = Path(__file__).resolve().parents[1] / "global_pulse" / "__main__.py"
     tree = ast.parse(path.read_text())
     main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
@@ -219,12 +224,16 @@ def bind_production_shutdown(window, controller):
     wrapper.body[0].body.insert(1, shutdown)
     ast.fix_missing_locations(wrapper)
     observations = []
+    coordinator = _ExitCoordinator(controller, NativeNotifications(enabled=False), controller)
     env = dict(window=window, controller=controller, QWidget=QWidget,
-               notifier=SimpleNamespace(stop=lambda: observations.append("notifier stopped")),
+               QTimer=QTimer, exit_coordinator=coordinator, exit_warning=None,
                instance=SimpleNamespace(close=lambda: observations.append("instance closed")),
                tray=SimpleNamespace(hide=lambda: observations.append("tray hidden")),
                app=SimpleNamespace(quit=lambda: observations.append("app quit")))
     exec(compile(wrapper, str(path), "exec"), env)
+    finish = next(node for node in main.body if isinstance(node, ast.FunctionDef) and node.name == "finish_exit")
+    exec(compile(ast.Module(body=[finish], type_ignores=[]), str(path), "exec"), env)
+    coordinator.finished.connect(env["finish_exit"])
     return env["bind"](), observations
 
 
@@ -251,10 +260,22 @@ def test_cam003_actual_exit_body_preserves_consent_and_aborts_requests(desktop, 
     camera.start()
     assert camera.reply is reply and camera.timer.isActive()
     callback, observed = bind_production_shutdown(window, controller)
+    window.show()
+    started = time.monotonic()
     callback()
+    assert time.monotonic() - started < .15
+    assert not window.isVisible() and "tray hidden" in observed
+    assert "instance closed" not in observed, "Singleton must outlive the pending archive commit"
     assert reply.aborted and camera.reply is None and not camera.timer.isActive()
     assert not camera.deadline.isActive()
+    # The actual exit body aborts cameras immediately; committed persistence
+    # and singleton release complete through Qt's nonblocking exit coordinator.
+    for _ in range(300):
+        if controller._store_closed and observed[-1:] == ["app quit"]:
+            break
+        QTest.qWait(10)
     assert controller._store_closed and observed[-1] == "app quit"
+    assert observed.index("instance closed") < observed.index("app quit")
     assert changes == []
     reopened = Controller(controller.data_dir, demo=True)
     try:
