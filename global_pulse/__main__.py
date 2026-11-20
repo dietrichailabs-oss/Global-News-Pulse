@@ -494,7 +494,7 @@ def main(argv=None):
     mute.setChecked(not controller.get_setting("notifications_enabled", False))
     mute.toggled.connect(lambda value: controller.set_setting("notifications_enabled", not value))
     def apply_native_preference(enabled):
-        if controller._closed:
+        if getattr(controller, "_closed", False):
             return
         # Sync the Settings checkbox and tray independently of which UI action
         # the user chose. No cross-thread blocking helper stop on the UI path.
@@ -764,7 +764,7 @@ def main(argv=None):
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
     else:
         def begin():
-            if controller._closed:
+            if getattr(controller, "_closed", False):
                 return
             # A legacy profile may contain notifications_enabled=True from an
             # earlier default. Without a fresh v2 opt-in this does not even
