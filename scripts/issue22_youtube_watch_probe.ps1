@@ -69,6 +69,22 @@ public static class PulseWatchInput {
         values[1].type=0;values[1].value.mouse.flags=4;
         return SendInput(2,values,Marshal.SizeOf(typeof(INPUT)))==2;
     }
+    public static bool Drag(int x0,int y0,int x1,int y1) {
+        if(!SetCursorPos(x0,y0)) return false;
+        INPUT[] down=new INPUT[1],up=new INPUT[1];
+        down[0].type=0;down[0].value.mouse.flags=2;
+        up[0].type=0;up[0].value.mouse.flags=4;
+        int size=Marshal.SizeOf(typeof(INPUT));
+        if(SendInput(1,down,size)!=1) return false;
+        bool moved=true,released=false;
+        try {
+            for(int step=1;step<=8;step++) {
+                if(!SetCursorPos(x0+(x1-x0)*step/8,y0+(y1-y0)*step/8)){moved=false;break;}
+                System.Threading.Thread.Sleep(25);
+            }
+        } finally { released=SendInput(1,up,size)==1; }
+        return moved && released;
+    }
 }
 '@
 
@@ -82,6 +98,7 @@ $watchSurface = $null
 $watchOutputCreated = $false
 $watchApprovedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 $watchOwnershipIssues = New-Object 'System.Collections.Generic.HashSet[string]'
+$watchExplicitExits = New-Object 'System.Collections.Generic.HashSet[string]'
 $watchExit = 2
 $watchReceipt = [ordered]@{
     schema=1; tier='DIAGNOSTIC_ONLY'; outcome='BLOCKED_INFRA'; stage='preflight'; reason='not_completed'
@@ -93,6 +110,7 @@ $watchReceipt = [ordered]@{
     embedded_identity_verified=$false; independent_visual_review_required=$true
     provider_consent_accepted=$false; forced_cleanup=$false; cleanup_complete=$false
     ownership_uncertainty=$false; ownership_issue_count=0; ownership_issue_reasons=@()
+    ownership_issue_details=@(); explicit_owned_exit_count=0; explicit_owned_exits=@()
     initial_failure=$null; cleanup_failures=@(); last_ui_operation='preflight'; app_scroll_actions=0
 }
 
@@ -105,13 +123,42 @@ function Tick {
     if($watchClock.Elapsed.TotalSeconds -gt $MaxSeconds){Block 'finite_deadline_reached'}
     Start-Sleep -Milliseconds 160
 }
-function Record-OwnershipIssue([string]$Reason,[int]$ProcessId) {
+function Owned-Role($Record) {
+    if($null -eq $Record){return 'unclassified'}
+    switch([IO.Path]::GetFileName($Record.path)) {
+        'GlobalPulse.exe' {return 'app'}
+        'GlobalPulse.TV.exe' {return 'native_helper'}
+        'msedgewebview2.exe' {return 'webview_child'}
+        default {return 'unclassified'}
+    }
+}
+function Record-OwnershipIssue([string]$Reason,[int]$ProcessId,[string]$Detail='unavailable') {
     # Keep uncertainty sticky. No raw exception, executable path, or process
     # metadata is exported. A later empty result must not turn unknown to gone.
     $watchReceipt.ownership_uncertainty=$true
-    if($watchOwnershipIssues.Count -lt 128){[void]$watchOwnershipIssues.Add($Reason+':'+$ProcessId)}
+    $newIssue=$false
+    if($watchOwnershipIssues.Count -lt 128){$newIssue=$watchOwnershipIssues.Add($Reason+':'+$ProcessId)}
     $watchReceipt.ownership_issue_count=$watchOwnershipIssues.Count
     if($Reason -notin $watchReceipt.ownership_issue_reasons -and $watchReceipt.ownership_issue_reasons.Count -lt 16){$watchReceipt.ownership_issue_reasons+=,$Reason}
+    if($newIssue -and $watchReceipt.ownership_issue_details.Count -lt 16){
+        $record=if($watchOwned.ContainsKey([string]$ProcessId)){$watchOwned[[string]$ProcessId]}else{$null}
+        $watchReceipt.ownership_issue_details+=,[ordered]@{role=(Owned-Role $record);reason=$Reason;detail=$Detail;operation=$watchReceipt.last_ui_operation;elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2)}
+    }
+}
+function Read-OwnedExitState($Process,$Record,[string]$Phase) {
+    # Only an explicit true on this SAME acquired Process instance is exit
+    # evidence. Do not acquire a broader Handle or query a replacement PID.
+    try {$exited=$Process.HasExited}
+    catch {Record-OwnershipIssue 'owned_exit_query_unknown' $Record.id $Phase;return $null}
+    if($exited -eq $true) {
+        $key=[string]$Record.id+':'+[string]$Record.start
+        if($watchExplicitExits.Count -lt 64 -and $watchExplicitExits.Add($key)) {
+            $watchReceipt.explicit_owned_exit_count=$watchExplicitExits.Count
+            if($watchReceipt.explicit_owned_exits.Count -lt 16){$watchReceipt.explicit_owned_exits+=,[ordered]@{role=(Owned-Role $Record);phase=$Phase;elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2)}}
+        }
+        return $true
+    }
+    return $false
 }
 function Refuse-Ownership([string]$Reason,[int]$ProcessId) {
     Record-OwnershipIssue $Reason $ProcessId
@@ -156,13 +203,28 @@ function Current-Process($Record) {
     try {$current=[Diagnostics.Process]::GetProcessById([int]$Record.id)}
     catch [System.ArgumentException] {return $null} # Explicit PID no longer exists.
     catch {Record-OwnershipIssue 'owned_pid_query_unknown' $Record.id;return $null}
+    $exitState=Read-OwnedExitState $current $Record 'before_metadata'
+    if($null -eq $exitState -or $exitState){return $null}
     try {$started=$current.StartTime.ToUniversalTime().Ticks}
-    catch {Record-OwnershipIssue 'owned_process_metadata_unknown' $Record.id;return $null}
+    catch {
+        $exitState=Read-OwnedExitState $current $Record 'start_query_failed'
+        if($exitState -ne $true){Record-OwnershipIssue 'owned_process_metadata_unknown' $Record.id}
+        return $null
+    }
     if($started -ne $Record.start){return $null} # PID recycled: original exited; never touch replacement.
+    $exitState=Read-OwnedExitState $current $Record 'after_start'
+    if($null -eq $exitState -or $exitState){return $null}
     try {$path=$current.Path}
-    catch {Record-OwnershipIssue 'owned_executable_path_unknown' $Record.id;return $null}
+    catch {
+        $exitState=Read-OwnedExitState $current $Record 'path_query_failed'
+        if($exitState -ne $true){Record-OwnershipIssue 'owned_executable_path_unknown' $Record.id}
+        return $null
+    }
+    $exitState=Read-OwnedExitState $current $Record 'after_path'
+    if($null -eq $exitState -or $exitState){return $null}
     if([string]::IsNullOrWhiteSpace($path) -or $path -ne $Record.path){
-        Record-OwnershipIssue 'owned_executable_identity_unknown' $Record.id
+        $detail=if([string]::IsNullOrWhiteSpace($path)){'live_path_blank'}else{'live_path_mismatch'}
+        Record-OwnershipIssue 'owned_executable_identity_unknown' $Record.id $detail
         return $null
     }
     return $current
@@ -209,6 +271,84 @@ function Fit-OwnedDashboard {
     if(-not $fits){Block 'owned_dashboard_did_not_fit_desktop'}
     $watchReceipt.fitted_window_rect=@($r.X,$r.Y,$r.Width,$r.Height)
     $watchReceipt.desktop_fit_verified=$true
+}
+function Prepare-MediaViewport {
+    # Existing local layout controls only. The map layer panel makes the map
+    # minimum too tall on this CI desktop; hiding that panel changes neither
+    # selected layers nor source/network policy. This is disposable app data.
+    $watchReceipt.last_ui_operation='prepare_owned_media_viewport'
+    $before=Visible-Rectangle $watchTv $watchWindow
+    $watchReceipt.tv_viewport_before=@($before.X,$before.Y,$before.Width,$before.Height)
+    $layers=Need-Named $watchWindow @('Show or hide persistent map layer controls') $watchApp.Id
+    $toggle=$null
+    if(-not $layers.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern,[ref]$toggle)){Block 'map_layer_panel_state_unavailable'}
+    $state=$toggle.Current.ToggleState
+    if($state -eq [System.Windows.Automation.ToggleState]::Indeterminate){Block 'map_layer_panel_state_indeterminate'}
+    $watchReceipt.map_layer_panel_initially_visible=($state -eq [System.Windows.Automation.ToggleState]::On)
+    if($state -eq [System.Windows.Automation.ToggleState]::On){Click-Observed $layers $watchApp.MainWindowHandle}
+    if($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off){Block 'map_layer_panel_not_hidden'}
+    $watchReceipt.map_layer_panel_hidden_for_viewport=$true
+
+    $handles=@()
+    $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($watchTv)
+    for($depth=0;$depth -lt 16 -and $null -ne $ancestor;$depth++) {
+        if($ancestor.Current.NativeWindowHandle -eq $watchApp.MainWindowHandle){break}
+        if($ancestor.Current.ProcessId -eq $watchApp.Id -and $ancestor.Current.ClassName -eq 'QSplitter') {
+            $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty,'QSplitterHandle')
+            foreach($handle in $ancestor.FindAll([System.Windows.Automation.TreeScope]::Children,$condition)) {
+                $r=$handle.Current.BoundingRectangle
+                # Qt's Grip maps to UIA Thumb, not Separator. Ignore handle0
+                # (empty) and the narrow vertical handles of horizontal panes.
+                if($handle.Current.ProcessId -eq $watchApp.Id -and $handle.Current.ControlType -eq [System.Windows.Automation.ControlType]::Thumb -and -not $r.IsEmpty -and $r.Width -ge 200 -and $r.Height -ge 3 -and $r.Height -le 12 -and (Physically-Visible $handle $watchWindow)){$handles+=,@{element=$handle;splitter=$ancestor}}
+            }
+        }
+        $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+    }
+    if($handles.Count -ne 1){Block 'owned_vertical_splitter_handle_not_unique'}
+    $handle=$handles[0].element;$splitter=$handles[0].splitter
+    [void][PulseWatchInput]::SetForegroundWindow($watchApp.MainWindowHandle)
+    Tick
+    if($null -eq (Current-Process $watchOwned[[string]$watchApp.Id])){Block 'splitter_owner_identity_unavailable'}
+    [uint32]$owner=0
+    [void][PulseWatchInput]::GetWindowThreadProcessId($watchApp.MainWindowHandle,[ref]$owner)
+    if($owner -ne $watchApp.Id){Block 'splitter_window_owner_mismatch'}
+    $r=$handle.Current.BoundingRectangle;$bounds=$splitter.Current.BoundingRectangle
+    $watchReceipt.splitter_handle_before=@($r.X,$r.Y,$r.Width,$r.Height)
+    $watchReceipt.splitter_parent_rectangle=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)
+    if(-not (Physically-Visible $handle $watchWindow) -or $bounds.IsEmpty){Block 'splitter_handle_not_visible'}
+    $x=[int]($r.X+$r.Width/2);$y=[int]($r.Y+$r.Height/2)
+    # Derive the endpoint from the observed owned parent, not desktop guesses.
+    # Qt enforces its real minimum; success comes only from geometry readback.
+    $targetY=[int]($bounds.Top+$bounds.Height/3)
+    if($targetY -le $bounds.Top -or $targetY -ge $bounds.Bottom -or $x -le $bounds.Left -or $x -ge $bounds.Right){Block 'splitter_drag_endpoint_invalid'}
+    [void](Snapshot '01b-media-before-splitter')
+    $watchReceipt.splitter_drag_requested=($targetY -lt $y-2)
+    if($watchReceipt.splitter_drag_requested) {
+        $point=New-Object PulseWatchInput+POINT;$point.X=$x;$point.Y=$y
+        $hit=[PulseWatchInput]::WindowFromPoint($point)
+        if($hit -ne $watchApp.MainWindowHandle -and -not [PulseWatchInput]::IsChild($watchApp.MainWindowHandle,$hit)){Block 'splitter_handle_occluded'}
+        $hitElement=[System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point($x,$y)))
+        $expected=($handle.GetRuntimeId() -join ',');$matched=$false
+        for($depth=0;$depth -lt 4 -and $null -ne $hitElement;$depth++) {
+            if($hitElement.Current.ProcessId -ne $watchApp.Id){break}
+            if(($hitElement.GetRuntimeId() -join ',') -eq $expected){$matched=$true;break}
+            $hitElement=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($hitElement)
+        }
+        if(-not $matched){Block 'splitter_accessibility_hit_mismatch'}
+        $watchReceipt.last_ui_operation='drag_observed_owned_vertical_splitter'
+        if(-not [PulseWatchInput]::Drag($x,$y,$x,$targetY)){Block 'owned_splitter_drag_failed'}
+        Tick
+    }
+    $after=$handle.Current.BoundingRectangle
+    $clip=Visible-Rectangle $watchTv $watchWindow
+    $watchReceipt.splitter_handle_after=@($after.X,$after.Y,$after.Width,$after.Height)
+    $watchReceipt.splitter_drag_moved=($after.Top -lt $r.Top-1)
+    $watchReceipt.tv_viewport_after=@($clip.X,$clip.Y,$clip.Width,$clip.Height)
+    [void](Snapshot '01c-media-after-splitter')
+    if($clip.Width -lt 200 -or $clip.Height -lt 150){Block 'owned_media_viewport_still_too_small'}
+    # This is only layout capacity. The actual attached native surface and
+    # provider controls must pass their unchanged physical visibility checks.
+    $watchReceipt.media_viewport_capacity_ready=$true
 }
 function Visible-Rectangle($Element,$Root) {
     if($Element.Current.IsOffscreen){return [Drawing.Rectangle]::Empty}
@@ -616,6 +756,9 @@ try {
     $tvRoots=Matching-Named $watchWindow @('Single large television player') $watchApp.Id
     if($tvRoots.Count -ne 1){Block 'owned_tv_container_not_unique'}
     $watchTv=$tvRoots[0]
+    $watchStage='prepare_media_viewport'
+    Prepare-MediaViewport
+    $watchStage='select_exact_fixture'
     $edit=Need-Named $watchWindow @('Add a specific YouTube video') $watchApp.Id
     Click-Observed $edit $watchApp.MainWindowHandle
     $watchReceipt.last_ui_operation='set_exact_fixture_url'

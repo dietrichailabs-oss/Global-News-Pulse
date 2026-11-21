@@ -373,3 +373,87 @@ def test_graceful_exit_is_attempted_independently_of_media_stop_failure():
     assert "graceful_exit_control_unavailable" in text
     assert "$watchReceipt.cleanup_failures.Count -lt 16" in body("Record-CleanupFailure")
     assert "if($watchReceipt.forced_cleanup -or -not $watchReceipt.cleanup_complete)" in text
+
+
+def test_measured_local_layers_toggle_precedes_owned_splitter_resize():
+    prepare = body("Prepare-MediaViewport")
+    assert "Need-Named $watchWindow @('Show or hide persistent map layer controls') $watchApp.Id" in prepare
+    assert "TogglePattern]::Pattern" in prepare
+    assert "ToggleState]::Indeterminate" in prepare
+    assert "if($state -eq [System.Windows.Automation.ToggleState]::On){Click-Observed $layers" in prepare
+    assert "$toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off" in prepare
+    assert "map_layer_panel_initially_visible=" in prepare
+    assert prepare.index("map_layer_panel_hidden_for_viewport=$true") < prepare.index("$handles=@()")
+    assert "$ancestor.Current.ClassName -eq 'QSplitter'" in prepare
+    assert "ClassNameProperty,'QSplitterHandle'" in prepare
+    assert "TreeScope]::Children" in prepare
+    assert "ControlType]::Thumb" in prepare
+    assert "$r.Width -ge 200 -and $r.Height -ge 3 -and $r.Height -le 12" in prepare
+    assert "$handles.Count -ne 1" in prepare
+    flow = source()[source().index("$tvRoots=Matching-Named"):]
+    assert flow.index("Prepare-MediaViewport") < flow.index("$watchStage='actual_app_consent'")
+    assert "Set-DisplayResolution" not in source()
+
+
+def test_splitter_drag_is_observed_owned_hit_tested_and_read_back():
+    prepare = body("Prepare-MediaViewport")
+    assert "Current-Process $watchOwned[[string]$watchApp.Id]" in prepare
+    assert "GetWindowThreadProcessId($watchApp.MainWindowHandle" in prepare
+    assert "$owner -ne $watchApp.Id" in prepare
+    assert "Physically-Visible $handle $watchWindow" in prepare
+    assert "$targetY=[int]($bounds.Top+$bounds.Height/3)" in prepare
+    assert "splitter_drag_endpoint_invalid" in prepare
+    assert "WindowFromPoint($point)" in prepare and "AutomationElement]::FromPoint" in prepare
+    assert "$handle.GetRuntimeId()" in prepare and "splitter_accessibility_hit_mismatch" in prepare
+    assert "PulseWatchInput]::Drag($x,$y,$x,$targetY)" in prepare
+    assert "splitter_handle_before=" in prepare and "splitter_handle_after=" in prepare
+    assert "tv_viewport_before=" in prepare and "tv_viewport_after=" in prepare
+    assert "splitter_drag_moved=($after.Top -lt $r.Top-1)" in prepare
+    assert "Snapshot '01b-media-before-splitter'" in prepare
+    assert "Snapshot '01c-media-after-splitter'" in prepare
+    assert "$clip.Width -lt 200 -or $clip.Height -lt 150" in prepare
+    # A moved splitter/capacity check is not substituted for actual native
+    # surface visibility or a fully visible provider control later on.
+    assert "$visible.Width -ge 200 -and $visible.Height -ge 150" in body("Reveal-OwnedTarget")
+    assert "provider_control_not_fully_visible" in body("Invoke-ProviderControl")
+    assert "Drag(" not in body("Invoke-ProviderControl")
+    assert "finally { released=SendInput(1,up,size)==1; }" in source()
+
+
+def test_only_explicit_same_process_exit_resolves_metadata_exit_race():
+    exit_state = body("Read-OwnedExitState")
+    assert "try {$exited=$Process.HasExited}" in exit_state
+    assert "if($exited -eq $true)" in exit_state
+    assert "catch {Record-OwnershipIssue 'owned_exit_query_unknown'" in exit_state
+    assert "return $null" in exit_state and "return $false" in exit_state
+    for forbidden in ("GetProcessById", "Get-Process", "$Process.Handle", "OpenProcess(", ".Kill()"):
+        assert forbidden not in exit_state
+    assert "$watchExplicitExits.Count -lt 64" in exit_state
+    assert "$watchReceipt.explicit_owned_exits.Count -lt 16" in exit_state
+    current = body("Current-Process")
+    assert current.count("[Diagnostics.Process]::GetProcessById") == 1
+    for phase in ("before_metadata", "after_start", "after_path",
+                  "start_query_failed", "path_query_failed"):
+        assert "Read-OwnedExitState $current $Record '" + phase + "'" in current
+    assert current.index("'before_metadata'") < current.index("$current.StartTime")
+    assert current.index("'after_start'") < current.index("$path=$current.Path")
+    assert current.index("'after_path'") < current.index("[string]::IsNullOrWhiteSpace($path)")
+    assert "if($exitState -ne $true){Record-OwnershipIssue" in current
+    assert "if($null -eq $exitState -or $exitState){return $null}" in current
+    assert "'live_path_blank'" in current and "'live_path_mismatch'" in current
+    assert "Record-OwnershipIssue 'owned_executable_identity_unknown' $Record.id $detail" in current
+    assert "ownership_uncertainty=$false" not in current
+
+
+def test_exit_and_uncertainty_receipts_are_bounded_role_enums_not_raw_metadata():
+    role = body("Owned-Role")
+    assert "return 'app'" in role and "return 'native_helper'" in role
+    assert "return 'webview_child'" in role and "return 'unclassified'" in role
+    record = body("Record-OwnershipIssue")
+    assert "$watchReceipt.ownership_issue_details.Count -lt 16" in record
+    assert "role=(Owned-Role $record);reason=$Reason;detail=$Detail" in record
+    exit_state = body("Read-OwnedExitState")
+    assert "role=(Owned-Role $Record);phase=$Phase;elapsed_seconds=" in exit_state
+    for snippet in (record, exit_state):
+        assert "path=$" not in snippet and "pid=$" not in snippet
+        assert "ownership_uncertainty=$false" not in snippet

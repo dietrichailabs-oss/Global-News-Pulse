@@ -131,6 +131,54 @@ Forced or uncertain cleanup still fails the diagnostic. Do not silently rerun
 unchanged bytes or promote the earlier offline PASS into live/owner-ready
 approval.
 
+### Second exact native attempt: packages PASS, physical viewport HOLD
+
+Source `ad32d1dd0679a39902647b2cb513444122bd478a`, tree
+`3fd5f1977bc922acb086fcdda3919405f39ffa52`, completed Windows run
+`44937596890` attempt 1 / job `136947539659`. Actual PowerShell 5.1 parsing,
+2,146 Windows tests (14 unchanged deselections, 10 subtests, 501.03 seconds),
+66 native cases including 20 playback cases, private offline H.264 capability,
+all eight lifecycle phases and artifact uploads passed. Distinct downloaded
+byte QA verified all five outer archives and all 3,357 portable payload files.
+Its clean Windows source fingerprint is
+`577bd48b1fb371d0a0701e3125c0ccc913fbc5a410bc25adbb002fde91c82e4b`
+for 393 files. This is exact-byte/offline approval, not owner-ready approval.
+
+The separate live diagnostic again made the overall job fail. This time the
+primary failure is preserved: `reveal_native_surface`,
+`native_surface_not_physically_visible`, after 12 app scroll actions. Independent
+inspection of all three captures confirms that the dashboard fits 1024x720,
+the exact saved fixture is selected, and the actual app consent dialog was
+used. The final capture shows `PAGE LOADED · video not yet verified` and only
+a clipped white native area. There are no playback observations, native-frame
+captures or demonstrated Play action. This is not a provider denial.
+
+Final cleanup separately records `owned_process_cleanup_uncertain`, one
+`owned_executable_identity_unknown` event, `cleanup_complete=false`,
+`forced_cleanup=false`, and one observed private profile still present. The
+event means a previously admitted process's path was blank or different after
+PID/start lookup, not that the process was proved alive or proved exited. Its
+role and timing were not recorded, so an exit race is only a hypothesis. Keep
+this failure; do not retroactively reinterpret it as clean termination.
+
+Actual offline Qt geometry proves that the outer splitter already sits at the
+map's 353-pixel minimum; an ordinary upward drag alone changes nothing. Using
+the existing Layers toggle to hide its controls reduces that minimum to 257
+without changing collection, map filters or provider state. An observed handle
+drag can then give the media viewport 307x273 pixels and expose a 307x184 inert
+native placeholder after ordinary scrolling. These are offline layout
+observations, not Windows playback evidence.
+
+The bounded harness-only correction uses that exact owned Layers control with
+checked-state readback and the app's existing vertical splitter, with observed
+handle geometry, ownership, hit validation and actual viewport readback.
+Do not change display settings or shrink the required visible player area.
+Provider controls still require full physical visibility and accessible
+invocation. Process tracking may recognize explicit `HasExited` on the same
+acquired Process object before or after a metadata read; an unknown or denied
+query from a live process still blocks. No product-player, radio/tray,
+workflow, signing, identity, host/frame, sandbox or trust change is implied.
+
 ### Required evidence before any success claim
 
 Execute the actual observation script against inert adversarial fixtures,
