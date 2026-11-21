@@ -8,7 +8,6 @@ closed instead of silently producing a release candidate.
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import re
@@ -16,20 +15,6 @@ import shutil
 from pathlib import Path
 
 REVIEWED_REFERENCE_ROOT = Path(__file__).resolve().parents[1] / "packaging" / "licenses"
-REVIEWED_PACKAGE_LOCK_PATH = Path(__file__).resolve().parents[1] / "packaging" / "tv" / "packages.lock.json"
-# NuGet's signed-package content hash (packages.lock/.nupkg.metadata) is
-# intentionally distinct from the SHA-512 of the complete signed .nupkg bytes.
-# These two identities were independently verified against the NuGet v3 package.
-REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512 = "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
-REVIEWED_WEBVIEW2_ARCHIVE_SHA512 = "cOaiVqP3BmQHMnxGpZzANM22tUXgycrisyJHjIGNzIaMsm8iXj7Kx+ceYg+RbYwJtzT009qfcFTocvVLY+ekMw=="
-# Published WebView2 assembly identities are .deps.json "reference" entries, not
-# independently restored packages. Only these exact SDK version identities may
-# take their notice provenance from the pinned parent Microsoft.Web.WebView2.
-REVIEWED_WEBVIEW2_REFERENCE_PARENTS = {
-    ("microsoft.web.webview2.core", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
-    ("microsoft.web.webview2.winforms", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
-    ("microsoft.web.webview2.wpf", "1.0.4314.35"): ("Microsoft.Web.WebView2", "1.0.4314.35"),
-}
 REVIEWED_EXTERNAL_LICENSE_REFERENCES = {
     ("runtimepack.microsoft.windows.sdk.net.ref", "10.0.19041.57"):
         "Microsoft.Windows.SDK.NET.Ref-10.0.19041.57-LICENSE-REFERENCE.txt",
@@ -73,70 +58,6 @@ def notice_files(root: Path) -> list[Path]:
     return sorted(found, key=lambda item: item.relative_to(root).as_posix().lower())
 
 
-def reviewed_reference_notice_root(
-    library_name: str, version: str, libraries: dict, nuget_root: Path,
-) -> tuple[Path, str, str, str]:
-    """Resolve reviewed WebView2 references using BOTH NuGet and archive hashes.
-
-    NuGet contentHash excludes signed-archive metadata, so it must match the
-    pinned package lock and .nupkg.metadata, never the raw signed .nupkg hash.
-    Unknown references, missing receipts, and mismatches STOP.
-    """
-    alias = REVIEWED_WEBVIEW2_REFERENCE_PARENTS.get((library_name.lower(), version))
-    if alias is None:
-        raise ValueError(
-            f"Shipped dependency has unsupported notice source: {library_name}/{version} (reference)"
-        )
-    parent, pinned_version = alias
-    parent_identity = f"{parent}/{pinned_version}"
-    if parent_identity in libraries:
-        parent_kind = str(libraries[parent_identity].get("type", "")).lower()
-        if parent_kind != "package":
-            raise ValueError(f"Reference parent dependency type mismatch: {parent_identity}")
-
-    lock = json.loads(REVIEWED_PACKAGE_LOCK_PATH.read_text(encoding="utf-8-sig"))
-    dependency_sets = (lock.get("dependencies") or {}).values()
-    records = [dep.get(parent) for dep in dependency_sets if isinstance(dep, dict)]
-    records = [record for record in records if isinstance(record, dict)]
-    if not records or any(
-        record.get("type") != "Direct"
-        or record.get("resolved") != pinned_version
-        or record.get("requested") != f"[{pinned_version}, )"
-        or not isinstance(record.get("contentHash"), str)
-        for record in records
-    ):
-        raise ValueError(f"Exact WebView2 reference parent lock missing: {parent_identity}")
-    locked_hashes = {record["contentHash"].strip() for record in records}
-    if len(locked_hashes) != 1:
-        raise ValueError(f"WebView2 reference package lock hashes conflict: {parent_identity}")
-    locked_hash = locked_hashes.pop()
-    if locked_hash != REVIEWED_WEBVIEW2_NUGET_CONTENT_SHA512:
-        raise ValueError(f"Reviewed WebView2 NuGet content hash changed: {parent_identity}")
-    root = package_root(nuget_root, parent, pinned_version)
-    metadata_file = root / ".nupkg.metadata"
-    if (not metadata_file.is_file() or metadata_file.is_symlink()
-            or metadata_file.stat().st_size > 16 * 1024):
-        raise ValueError(f"Restored WebView2 NuGet content metadata missing: {parent_identity}")
-    metadata = json.loads(metadata_file.read_text(encoding="utf-8-sig"))
-    if (not isinstance(metadata, dict)
-            or metadata.get("contentHash") != locked_hash
-            or not isinstance(metadata.get("source"), str)
-            or not metadata["source"].startswith("https://api.nuget.org/v3/")):
-        raise ValueError(f"Restored WebView2 NuGet content proof differs from lock: {parent_identity}")
-    basename = f"{parent.lower()}.{pinned_version.lower()}.nupkg"
-    hash_file = root / f"{basename}.sha512"
-    archive = root / basename
-    if (not archive.is_file() or archive.is_symlink()
-            or not hash_file.is_file() or hash_file.is_symlink()):
-        raise ValueError(f"Restored WebView2 SDK archive or hash receipt missing: {parent_identity}")
-    with archive.open("rb") as stream:
-        actual_hash = base64.b64encode(hashlib.file_digest(stream, "sha512").digest()).decode("ascii")
-    if (actual_hash != REVIEWED_WEBVIEW2_ARCHIVE_SHA512
-            or hash_file.read_text(encoding="utf-8").strip() != actual_hash):
-        raise ValueError(f"Restored WebView2 signed archive SHA512 differs from official bytes: {parent_identity}")
-    return root, parent_identity, locked_hash, actual_hash
-
-
 def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
     deps_path = deps_path.resolve(strict=True)
     nuget_root = nuget_root.resolve(strict=True)
@@ -170,11 +91,7 @@ def collect(deps_path: Path, nuget_root: Path, output: Path) -> dict:
         notice_source_package = identity
         reference_lock_hash = None
         reference_archive_hash = None
-        if kind == "reference":
-            root, notice_source_package, reference_lock_hash, reference_archive_hash = reviewed_reference_notice_root(
-                package, version, libraries, nuget_root
-            )
-        elif kind in {"package", "runtimepack"}:
+        if kind in {"package", "runtimepack"}:
             root = package_root(nuget_root, package, version)
         else:
             raise ValueError(f"Shipped dependency has unsupported notice source: {identity} ({kind or 'unknown'})")

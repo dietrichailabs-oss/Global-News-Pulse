@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_issue82_ham_effective_port.py tests/test_issue82_ham_manual_tune_qt.py tests/test_issue82_ham_scan_pending.py tests/test_issue82_ham_retune_state.py tests/test_issue82_ham_load_receipts.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_issue31_tv_basic_player.py
+          python -m pytest -q --tb=short tests/test_issue82_ham_effective_port.py tests/test_issue82_ham_manual_tune_qt.py tests/test_issue82_ham_scan_pending.py tests/test_issue82_ham_retune_state.py tests/test_issue82_ham_load_receipts.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_youtube_removal.py
       - name: Ensure tracked source not mutated by tests
         if: always()
         shell: bash

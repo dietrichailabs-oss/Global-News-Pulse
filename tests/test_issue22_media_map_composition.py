@@ -28,17 +28,17 @@ def _close(app, controller, window):
     app.processEvents()
 
 
-def test_main_window_uses_single_tv_radio_and_real_world_map(tmp_path):
+def test_main_window_uses_radio_cameras_and_real_world_map(tmp_path):
     app, controller, window = _desktop(tmp_path)
     try:
         assert isinstance(window.media, MediaPanel)
         assert isinstance(window.world_map, WorldMap)
         assert len(window.media.tiles) == 1
-        assert window.media.tiles[0] is window.media.tv
+        assert window.media.tiles[0] is window.media.camera
         assert isinstance(window.media.radio, RadioPanel)
-        assert [window.media.tabs.tabText(i) for i in range(3)] == ["TV", "Radio", "Cameras"]
-        assert window.media.tv._builtins == []
-        assert window.media.tv.tv_status.text() == "OFF"
+        assert [window.media.tabs.tabText(i) for i in range(window.media.tabs.count())] == ["Radio", "Cameras"]
+        assert not hasattr(window.media, "tv")
+        assert window.media.camera.camera is None
         assert window.media.radio.status.text() == "OFF"
         assert window.media.radio._session is None
     finally:
@@ -49,7 +49,7 @@ def test_map_navigation_refresh_cannot_activate_off_radio(tmp_path):
     app, controller, window = _desktop(tmp_path)
     try:
         assert window.world_map.select_country("Ukraine")
-        window.media.tabs.setCurrentIndex(1)
+        window.media.tabs.setCurrentIndex(0)
         window.media.radio.selector.setCurrentIndex(1)
         controller.data_changed.emit()
         app.processEvents()

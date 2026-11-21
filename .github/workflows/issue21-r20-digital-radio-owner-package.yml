@@ -4,11 +4,6 @@ on:
   push:
     branches: [eng/issue21-r20-digital-radio-20261119]
   workflow_dispatch:
-    inputs:
-      live_youtube_watch_probe:
-        description: 'Opt in to the bounded public Blender watch-page diagnostic; no provider consent or sign-in'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -29,9 +24,6 @@ jobs:
       PYTHONNOUSERSITE: '1'
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
-      # Explicit per-invocation development consent, not ordinary background
-      # playback and never an assertion that the owner personally clicked.
-      GP_YOUTUBE_WATCH_QA: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message, '[r20-youtube-live-qa]')) || (github.event_name == 'workflow_dispatch' && inputs.live_youtube_watch_probe) }}
       # Public-repo package gate: current product tests plus documented exclusions for
       # private-repo-only historical replay/evidence cases.
       PYTEST_ADDOPTS: >-
@@ -72,64 +64,92 @@ jobs:
           $dotnetVersion = (& dotnet --version).Trim()
           Write-Host "SELECTED_DOTNET_SDK=$dotnetVersion"
           if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') { throw 'Pinned SDK10 selection failed before package tests' }
-      - name: Require exact R20 parent and bounded owner-feedback integration
+      - name: Require exact R20 parent and bounded YouTube retirement
         run: |
           $ErrorActionPreference = 'Stop'
           git merge-base --is-ancestor 76b8164308dd2c8ca6da465e0df729c102715124 HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Expected R20 exact parent not found' }
-          $actual = @(git diff --name-only 76b8164308dd2c8ca6da465e0df729c102715124 HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Expected R20 original integration ancestor not found' }
+          $parent = (& git rev-parse HEAD^).Trim()
+          if ($parent -ne '10dd8c883242c9d3f8f545dc928d67711abdea77') { throw 'Unexpected YouTube-removal parent' }
+          $actual = @(git diff --name-only 10dd8c883242c9d3f8f545dc928d67711abdea77 HEAD)
           $expected = @(
+            '.github/workflows/ci.yml',
             '.github/workflows/issue21-r20-digital-radio-owner-package.yml',
+            '.github/workflows/issue22-nws-conflict-integration-ci.yml',
+            '.github/workflows/issue22-pr7-qa-remediation-ci.yml',
+            '.github/workflows/issue22-registered-app-referer-ci.yml',
+            '.github/workflows/issue22-webview2-http-observation-ci.yml',
+            '.github/workflows/issue22-webview2-identity-observation-ci.yml',
+            '.github/workflows/issue22-windows-package-identity-ci.yml',
+            '.github/workflows/issue31-tv-basic-ci.yml',
+            '.github/workflows/issue31-tv-owner-package.yml',
+            '.github/workflows/issue37-interaction-engineering-ci.yml',
+            '.github/workflows/issue76-ham-tray-tv-ci.yml',
+            '.github/workflows/issue76-unified-quit-ci.yml',
+            '.github/workflows/issue82-ham-load-receipt-ci.yml',
+            '.github/workflows/issue82-ham-manual-tune-qt-ci.yml',
+            '.github/workflows/issue82-ham-retune-state-ci.yml',
+            '.github/workflows/issue82-ham-scan-pending-ci.yml',
+            '.github/workflows/issue82-na5b-effective-port-ci.yml',
+            '.github/workflows/issue82-native-v2-qa.yml',
+            '.github/workflows/issue82-owner-win11-optin-sources-tabs-ci.yml',
+            '.github/workflows/issue82-r11-notify-async-integration.yml',
+            '.github/workflows/issue82-startup-video-ci.yml',
+            '.github/workflows/issue82-tv-error-readout-ci.yml',
+            '.github/workflows/issue82-tv-visible-diagnostics-ci.yml',
+            '.github/workflows/owner-night-canonical-category-filter-ci.yml',
+            '.github/workflows/owner-night-category-drilldown-ci.yml',
+            '.github/workflows/owner-night-stability-map-ci.yml',
+            'README.md',
             'docs/ISSUE21_R20_DIGITAL_RADIO_OWNER_QA.md',
-            'global_pulse/__main__.py',
-            'global_pulse/brief_rendering.py',
-            'global_pulse/brief_selection.py',
-            'global_pulse/controller.py',
-            'global_pulse/core.py',
-            'global_pulse/gdelt_service.py',
-            'global_pulse/internet_radio.py',
-            'global_pulse/local_radio.py',
-            'global_pulse/native_notifications.py',
-            'global_pulse/provider_actions.py',
-            'global_pulse/sdr_directory.py',
+            'docs/KNOWN_LIMITATIONS.md',
+            'docs/PRIVATE_TEST_GUIDE.md',
+            'docs/SOURCE_ACCESS_MATRIX.md',
+            'docs/THIRD_PARTY_NOTICES.md',
+            'docs/USER_GUIDE.md',
+            'global_pulse/media_widget.py',
+            'global_pulse/native_tv.py',
+            'global_pulse/resources/media_catalog.json',
+            'global_pulse/resources/sources.json',
+            'global_pulse/resources/tv_playback_verified.json',
             'global_pulse/single_media.py',
             'global_pulse/sources.py',
-            'global_pulse/translation_process.py',
             'global_pulse/ui.py',
+            'packaging/tv/GlobalPulse.TV.csproj',
             'packaging/tv/NativeTvProgram.cs',
+            'packaging/tv/packages.lock.json',
+            'scripts/build_windows.ps1',
+            'scripts/collect_dotnet_notices.py',
             'scripts/issue22_youtube_watch_probe.ps1',
-            'tests/test_issue21_sdr_owner_controls.py',
-            'tests/test_issue22_idle_crisis_single_credit.py',
+            'scripts/issue82_native_embed_probe.py',
+            'scripts/package_manifest.py',
+            'tests/test_dotnet_notices.py',
+            'tests/test_e2_workstation_layout.py',
+            'tests/test_issue22_media_map_composition.py',
             'tests/test_issue22_owner_media_lineup.py',
-            'tests/test_issue22_unknown_language.py',
+            'tests/test_issue22_source_composition.py',
+            'tests/test_issue22_webview2_http_observation.py',
+            'tests/test_issue22_webview2_identity_observation.py',
             'tests/test_issue22_windows_package_identity.py',
             'tests/test_issue22_youtube_playback_observation.py',
             'tests/test_issue22_youtube_watch_probe.py',
-            'tests/test_issue64_daily_weekly_archive.py',
-            'tests/test_issue82_collector_tray_latency.py',
-            'tests/test_issue82_ham_retune_state.py',
-            'tests/test_owner_feedback.py',
-            'tests/test_owner_feedback_qa_repairs.py',
-            'tests/test_r20_daily_brief_depth.py',
-            'tests/test_r20_digital_radio.py',
-            'tests/test_r20_local_radio.py',
-            'tests/test_r20_owner_radio_feedback.py',
-            'tests/test_r20_source_inventory.py',
-            'tests/test_single_media.py'
+            'tests/test_issue31_tv_basic_player.py',
+            'tests/test_issue37_country_owner_video.py',
+            'tests/test_issue64_gui_latency_profile.py',
+            'tests/test_issue76_ham_tv_tray_tabs.py',
+            'tests/test_issue82_native_tv_policy.py',
+            'tests/test_issue82_startup_video_diagnostics.py',
+            'tests/test_issue82_tv_error_readout.py',
+            'tests/test_issue82_tv_visible_diagnostics.py',
+            'tests/test_packaging.py',
+            'tests/test_single_media.py',
+            'tests/test_sources.py',
+            'tests/test_tv_channel_controls.py',
+            'tests/test_tv_package_manifest_gate.py',
+            'tests/test_tv_pending_timeout.py',
+            'tests/test_youtube_removal.py'
           )
-          if (Compare-Object $expected $actual) { throw 'Unexpected integration source delta for R20 owner candidate' }
-      - name: Parse optional QA harness with actual Windows PowerShell 5.1
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & powershell.exe -NoProfile -NonInteractive -Command @'
-          $tokens=$null
-          $errors=$null
-          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts\issue22_youtube_watch_probe.ps1'
-          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
-          if ($errors.Count -ne 0) { Write-Error 'PowerShell 5.1 rejected the optional QA script'; exit 1 }
-          Write-Host 'POWERSHELL_51_QA_SCRIPT_PARSE=PASS'
-          '@
-          if ($LASTEXITCODE -ne 0) { throw 'Optional QA script failed native PowerShell 5.1 syntax validation' }
+          if (Compare-Object $expected $actual) { throw 'Unexpected source delta for owner-directed YouTube removal' }
       - name: Prepare reviewed Inno compiler
         run: |
           $ErrorActionPreference = 'Stop'
@@ -152,34 +172,14 @@ jobs:
           & .\scripts\build_windows.ps1 -Python $python -InnoCompiler $env:GP_INNO_COMPILER -OutputDirectory $output
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
           "GP_OUTPUT=$output" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Execute exact packaged native playback-state and policy cases offline
+      - name: Verify removed YouTube helper is absent from the packaged app
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse\tv\GlobalPulse.TV.exe'
-          $receipt = Join-Path $env:GP_OUTPUT 'R20_NATIVE_TV_POLICY.jsonl'
-          $stderr = Join-Path $env:GP_OUTPUT 'R20_NATIVE_TV_POLICY_STDERR.txt'
-          $p = Start-Process -FilePath $exe -ArgumentList '--self-test-policy' -PassThru -RedirectStandardOutput $receipt -RedirectStandardError $stderr
-          if (-not $p.WaitForExit(15000)) { $p.Kill(); throw 'Exact packaged native policy/state test timed out' }
-          if ($p.ExitCode -ne 0) { throw 'Exact packaged native policy/state test failed' }
-          $checks = @(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() } | ConvertFrom-Json | Where-Object { $_.type -eq 'policy_self_test' })
-          if ($checks.Count -ne 1 -or $checks[0].passed -ne $true -or $checks[0].cases -lt 66 -or $checks[0].playback_cases -lt 20 -or $checks[0].failures -ne 0 -or $checks[0].network -ne 'none') {
-            throw 'Native policy/playback cases did not all pass offline'
-          }
-          Get-Content -LiteralPath $receipt
-      - name: Probe exact packaged private WebView2 codec without network
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse\tv\GlobalPulse.TV.exe'
-          $receipt = Join-Path $env:GP_OUTPUT 'R20_NATIVE_TV_CODEC.jsonl'
-          $stderr = Join-Path $env:GP_OUTPUT 'R20_NATIVE_TV_CODEC_STDERR.txt'
-          $p = Start-Process -FilePath $exe -ArgumentList '--probe' -PassThru -RedirectStandardOutput $receipt -RedirectStandardError $stderr
-          if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Exact packaged offline WebView2 codec probe timed out' }
-          if ($p.ExitCode -ne 0) { throw 'Exact packaged offline WebView2 codec probe failed' }
-          $checks = @(Get-Content -LiteralPath $receipt | Where-Object { $_.Trim() } | ConvertFrom-Json | Where-Object { $_.type -eq 'codec_probe' })
-          if ($checks.Count -ne 1 -or $checks[0].h264 -notin @('probably','maybe') -or $checks[0].in_private -ne $true -or $checks[0].network -ne 'none') {
-            throw 'No valid offline WebView2 H.264/private-profile capability receipt'
-          }
-          Get-Content -LiteralPath $receipt
+          $python = Join-Path $env:GITHUB_WORKSPACE 'build\venv-windows\Scripts\python.exe'
+          $runtime = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse'
+          if (Test-Path -LiteralPath (Join-Path $runtime 'tv')) { throw 'Retired TV payload remains in the package' }
+          & $python scripts/package_manifest.py verify $runtime
+          if ($LASTEXITCODE -ne 0) { throw 'YouTube-free package integrity verification failed' }
       - name: Offline installer lifecycle smoke
         run: |
           $ErrorActionPreference = 'Stop'
@@ -246,42 +246,7 @@ jobs:
             ${{ env.GP_OUTPUT }}/OWNER_TEST_RECEIPT.json
             ${{ env.GP_OUTPUT }}/WINDOWS_BUILD_RECORD.json
             ${{ env.GP_OUTPUT }}/WINDOWS_SMOKE.json
+            ${{ env.GP_OUTPUT }}/internal-tests.xml
             ${{ env.GP_OUTPUT }}/SHA256SUMS.txt
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_POLICY.jsonl
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_CODEC.jsonl
           if-no-files-found: error
-          retention-days: 1
-      - name: Opt-in live official watch-page diagnostic on exact frozen app
-        id: youtube_watch
-        if: env.GP_YOUTUBE_WATCH_QA == 'true'
-        timeout-minutes: 5
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $runtime = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse'
-          $record = Join-Path $env:GP_OUTPUT 'WINDOWS_BUILD_RECORD.json'
-          $evidence = Join-Path $env:RUNNER_TEMP 'r20-youtube-watch-diagnostic'
-          "GP_YOUTUBE_WATCH_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & powershell.exe -NoProfile -NonInteractive -STA -File scripts/issue22_youtube_watch_probe.ps1 -RuntimePath $runtime -BuildRecordPath $record -OutputDirectory $evidence -SourceCommit $env:GITHUB_SHA -AuthorizedFixture YE7VzlLtp-4 -MaxSeconds 210
-          if ($LASTEXITCODE -ne 0) { throw 'Live watch-page diagnostic blocked by infrastructure or harness; inspect its separate receipt, not a playback PASS' }
-      - name: Preserve separate live watch diagnostic and bounded app captures
-        if: always() && env.GP_YOUTUBE_WATCH_QA == 'true' && env.GP_YOUTUBE_WATCH_EVIDENCE != '' && steps.youtube_watch.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: GlobalPulse-R20-YOUTUBE-WATCH-DIAGNOSTIC-${{ github.sha }}
-          path: |
-            ${{ env.GP_YOUTUBE_WATCH_EVIDENCE }}/WATCH_PROBE.json
-            ${{ env.GP_YOUTUBE_WATCH_EVIDENCE }}/*.png
-          if-no-files-found: error
-          retention-days: 1
-      - name: Preserve exact offline native gate receipts including failures
-        if: always() && env.GP_OUTPUT != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: GlobalPulse-R20-NATIVE-TV-OFFLINE-GATES-${{ github.sha }}
-          path: |
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_POLICY.jsonl
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_POLICY_STDERR.txt
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_CODEC.jsonl
-            ${{ env.GP_OUTPUT }}/R20_NATIVE_TV_CODEC_STDERR.txt
-          if-no-files-found: warn
           retention-days: 1

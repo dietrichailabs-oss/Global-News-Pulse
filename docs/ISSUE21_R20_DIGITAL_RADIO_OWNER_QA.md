@@ -1,8 +1,67 @@
 # R20 digital radio and owner-feedback corrections — bounded QA handoff
 
-Status: **DRAFT / bounded YouTube correction under review / no new playback PASS**. Based on exact
-R19 integration parent `76b8164308dd2c8ca6da465e0df729c102715124`.
-Do not merge, publish or reuse streams commercially from this draft.
+Status: **DRAFT / owner-directed YouTube removal / regression and package QA**.
+This successor is based on exact investigation head
+`10dd8c883242c9d3f8f545dc928d67711abdea77`, with the original R19 integration
+ancestor `76b8164308dd2c8ca6da465e0df729c102715124` preserved.
+Do not merge or publish this draft as a public binary release.
+
+## Current November 21 owner decision: remove YouTube
+
+The owner explicitly directed: **"fine then strip youtube out, it clearly is
+being a pain in the ass"**. This supersedes all YouTube repair, live playback,
+client-identity, sign-in and bot-check actions below. Previous failures remain
+historical failures, not playback passes.
+
+This removal retires the Television class and TV tab, embedded and watch-page
+paths, saved/test-video controls, Qt video player, native TV host and helper,
+WebView2-only build inputs, and the live diagnostic. The media panel now starts
+on Radio and retains the Cameras tab. Old video settings and historical reports
+are not erased; stale video selections cannot recreate a removed launch path.
+News article source links are not censored.
+
+Thirteen YouTube-host media entries and the two YouTube-only bundled manual
+sources are removed. Fourteen non-YouTube provider pages remain external-only
+links, alongside the retained camera/radio directory metadata. The feed parser
+no longer turns video IDs into player actions. An unrelated government RSS
+query token named `youtube_video` remains part of its official feed URL.
+
+Working AM/FM/Internet radio, HAM/SDR, radio presets, reviewed cameras, source
+collection, archive, translation, native notifications and tray/exit behavior
+remain. QtWebEngine stays for HAM/SDR. There is no signing, trust-store or app
+identity registration change.
+
+### Verification and exact scope
+
+- Replace retired player-only tests with removal tests; migrate mixed suites
+  without dropping their radio, camera, source, startup, tray or layout checks.
+- Keep the existing 14 historical deselections and two ignored historical
+  modules unchanged. The replacement test count is not a playback result.
+- New package scans must reject the retired TV subtree, relocated helper,
+  Microsoft WebView2 SDK payloads and retired Python/resource files. Keep
+  remaining file-set/hash/PE/license/SBOM and notification requirements intact.
+- The Windows workflow runs the complete current suite, package-integrity
+  verification and all existing installer lifecycle phases, with no live
+  YouTube step or opt-in input.
+- Pure YouTube workflows are retired. Mixed regression workflows keep unrelated
+  checks and reference the removal suite instead of nonexistent player tests.
+
+### Clean installation and user data
+
+New packages contain no TV helper. An overlay install may leave unused files
+from an older version in its program directory. Full physical removal therefore
+uses the prior version's standard uninstaller followed by installation of the
+new build. The default settings/radio preferences/archive directory is separate
+and preserved. This is **clean-install/portable-only** physical-removal scope;
+no automatic overlay cleanup is claimed and no unknown user files are deleted.
+Uninstall/reinstall and file preservation remain subject to exact new-candidate
+Windows smoke evidence. The user's existing installation is not altered here.
+
+The previous owner HAM/tuning and improved-tray observations remain scoped to
+the versions they tested. Public-release approval remains separate. Retired
+source and tests are recoverable from Git history.
+
+## Historical YouTube investigation (superseded; not an action order)
 
 ## November 21 priority: YouTube playback and truthful player state
 

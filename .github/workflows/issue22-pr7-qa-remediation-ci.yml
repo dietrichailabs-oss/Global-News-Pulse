@@ -60,7 +60,7 @@ jobs:
             tests/test_issue22_publisher_country_alias.py \
             tests/test_issue22_owner_media_lineup.py \
             tests/test_single_media.py \
-            tests/test_tv_pending_timeout.py \
+            tests/test_youtube_removal.py \
             tests/test_issue22_media_map_composition.py \
             tests/test_issue22_filtered_star_binding.py \
             tests/test_issue22_situation_stars.py \

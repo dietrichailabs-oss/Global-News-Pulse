@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "2026.11.13.source-expansion23",
+  "catalog_version": "2026.11.21.r20-youtube-removal",
   "reviewed_at": "2026-11-13",
   "remote_updates": "disabled; ship reviewed catalog with signed/reviewed application updates",
   "sources": [
@@ -738,67 +738,6 @@
       "official": false,
       "independence": "unknown",
       "limitation": "Manual portal; no credentials supplied."
-    },
-    {
-      "id": "tousitv",
-      "name": "Tousi TV",
-      "url": "https://www.youtube.com/@TousiTV/streams",
-      "homepage": "https://www.youtube.com/@TousiTV/streams",
-      "adapter": "manual",
-      "category": "Video",
-      "region": "Global",
-      "country": "",
-      "enabled": false,
-      "min_interval": 600,
-      "allowed_domains": [
-        "www.youtube.com"
-      ],
-      "access": "Manual link / unavailable automation",
-      "access_status": "review_required",
-      "license": "YouTube channel links and permitted official embeds; no video downloads or platform scraping.",
-      "license_url": "https://developers.google.com/youtube/terms/developer-policies",
-      "attribution": "Tousi TV",
-      "status": "disabled",
-      "authentication": "See limitation",
-      "review_date": "2026-11-08",
-      "retention_days": 365,
-      "language": "en",
-      "official": false,
-      "independence": "unknown",
-      "limitation": "Manual channel/stream selection. Free reliable automated live detection unavailable without approved API configuration.",
-      "identity_evidence": [
-        "https://www.youtube.com/@TousiTV",
-        "https://tousi.tv/about"
-      ],
-      "live_status": "unknown"
-    },
-    {
-      "id": "youtube",
-      "name": "YouTube public videos",
-      "url": "https://www.youtube.com/",
-      "homepage": "https://www.youtube.com/",
-      "adapter": "manual",
-      "category": "Video",
-      "region": "Global",
-      "country": "",
-      "enabled": false,
-      "min_interval": 600,
-      "allowed_domains": [
-        "www.youtube.com"
-      ],
-      "access": "Manual link / unavailable automation",
-      "access_status": "review_required",
-      "license": "Official embed only on user request; availability and provider permissions govern playback.",
-      "license_url": "https://developers.google.com/youtube/player_parameters",
-      "attribution": "YouTube public videos",
-      "status": "disabled",
-      "authentication": "Data API key/quota for automated discovery",
-      "review_date": "2026-11-08",
-      "retention_days": 365,
-      "language": "en",
-      "official": false,
-      "independence": "unknown",
-      "limitation": "Manual video links/official embeds; upload feeds do not prove that a broadcast is live."
     },
     {
       "id": "x",

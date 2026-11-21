@@ -113,21 +113,24 @@ def test_archive_world_brief_star_tab_camera_and_media_latency(app, tmp_path, ar
         assert controller.store.situation_state(identity)["saved"] is False
         assert window._selected_id == identity
 
-        # The packaged app uses exactly one TV, one Radio and one Cameras
-        # tab, not the old tiled MediaPanel. Never start any stream here.
+        # The packaged app uses Radio and Cameras tabs after TV removal,
+        # not the old tiled MediaPanel. Never start any stream here.
         window.media.set_event({
             "id": identity, "synthetic": True, "severity": "unassessed",
         })
         timings = []
         for _ in range(12):
             def media_browse():
-                window.media.tabs.setCurrentIndex(2)  # camera bank, no connect
-                window.media.tabs.setCurrentIndex(0)  # single TV, no Watch
-                window.media.tabs.setCurrentIndex(1)  # radio, no Play
-                window.media.tabs.setCurrentIndex(0)
+                window.media.tabs.setCurrentIndex(1)  # camera bank, no connect
+                window.media.tabs.setCurrentIndex(0)  # radio, no Play
+                window.media.tabs.setCurrentIndex(1)  # camera bank, no connect
+                window.media.tabs.setCurrentIndex(0)  # radio, no Play
             timings.append(_measure(app, media_browse))
-        results["camera_tv_radio_tab_roundtrip"] = _summary(timings)
-        assert window.media.tabs.count() == 3
+        results["camera_radio_tab_roundtrip"] = _summary(timings)
+        assert window.media.tabs.count() == 2
+        assert [window.media.tabs.tabText(i) for i in range(2)] == ["Radio", "Cameras"]
+        assert window.media.tabs.currentWidget() is window.media.radio
+        assert not hasattr(window.media, "tv")
         assert not window.media.auto_cameras
         assert window.media.camera.camera is None
         window.media.stop()

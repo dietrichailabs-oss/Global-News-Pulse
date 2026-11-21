@@ -1,4 +1,13 @@
-# Current freeware compliance candidate — 2026-11-10
+# R20 owner-directed YouTube removal — 2026-11-21
+
+YouTube playback, the TV tab, saved-video controls and bundled native TV helper
+are removed. Radio/HAM and reviewed cameras remain. Earlier YouTube/Tousi TV
+capability descriptions below are historical and do not describe this candidate.
+For full physical removal when upgrading, uninstall the previous version before
+installing this build, or use a fresh portable extraction. See `USER_GUIDE.md`.
+This removal is not a YouTube playback fix or public-release approval.
+
+# Historical freeware compliance candidate — 2026-11-10
 
 Global Pulse is provided free of charge. This does not change the application's
 source-code licensing or remove third-party obligations.

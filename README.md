@@ -13,11 +13,16 @@ The current source includes:
 - opt-in local GDELT batch ingestion and coded-country layer;
 - NWS affected-area geometry and zone resolution;
 - Situation Star / Brief persistence and filtered-selection fixes;
-- one large TV surface with clearly labeled owner-test video candidates;
+- a radio-first media panel with separate reviewed-camera access;
 - documented direct Internet radio stations;
 - an explicit in-app public SDR receiver path using an isolated memory-only browser session;
 - reviewed manual webcam access;
 - Windows installer and portable packaging.
+
+YouTube playback has been removed at the owner's request. There is no YouTube/TV
+tab, saved-video control, or bundled native TV helper. AM/FM/Internet radio,
+HAM/SDR, reviewed cameras, and news source links remain. Existing saved-video
+preferences and historical reports are left untouched but do not launch a player.
 
 ## CI
 

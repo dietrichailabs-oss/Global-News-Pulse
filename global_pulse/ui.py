@@ -623,12 +623,11 @@ class MainWindow(SituationActions, QMainWindow):
         feed.layout.addWidget(self.feed_list,1)
         self.feed_empty=label("Monitoring has not collected events yet.\nStart monitoring or change the filters.","Muted",True);self.feed_empty.setAlignment(Qt.AlignmentFlag.AlignCenter);feed.layout.addWidget(self.feed_empty)
         self.lower_split.addWidget(feed)
-        media=Panel("CONTEXTUAL MEDIA")
+        media=Panel("RADIO & CAMERAS")
         media.heading.addWidget(label("ON DEMAND","Eyebrow"))
         try:
             from .single_media import MediaPanel
             self.media=MediaPanel()
-            self.media.set_catalog(getattr(self.controller,"media_catalog",[]))
         except ImportError:
             self.media=QTextBrowser();self.media.setPlainText("Media panel unavailable in this build.")
         self.media_scroll=QScrollArea();self.media_scroll.setWidgetResizable(True);self.media_scroll.setWidget(self.media);self.media_scroll.setMinimumSize(0,0)

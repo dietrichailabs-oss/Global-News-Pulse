@@ -10,7 +10,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication,QMessageBox
 
 from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel
-from global_pulse.single_media import Television,MediaPanel
+from global_pulse.single_media import MediaPanel
 from global_pulse.sources import load_media_catalog
 from global_pulse.camera_context import camera_catalog
 
@@ -184,23 +184,6 @@ def test_radio_off_also_destroys_sdr_session(app):
         panel.shutdown();panel.deleteLater();app.processEvents()
 
 
-def test_tv_exposes_exact_video_owner_test_candidates_without_promoting_verified_builtins(app):
-    tv=Television()
-    try:
-        tv.set_catalog(load_media_catalog())
-        assert tv._builtins==[]
-        assert tv._test_candidates
-        assert all(item.get("owner_test_candidate") is True for item in tv._test_candidates)
-        assert all(item["title"].startswith("TEST · ") for item in tv._test_candidates)
-        # Only exact video identities are admitted. Channel/live directory pages remain absent.
-        assert all("watch?v=" in item["url"] or "youtu.be/" in item["url"] or "/live/" in item["url"]
-                   for item in tv._test_candidates)
-        assert tv.selector.count() >= len(tv._test_candidates)
-        assert any("TEST · " in str(tv.selector.itemText(i)) for i in range(tv.selector.count()))
-    finally:
-        tv.stop();tv.deleteLater();app.processEvents()
-
-
 def test_camera_bank_is_available_manually_without_event_match(app):
     panel=MediaPanel()
     try:
@@ -216,17 +199,14 @@ def test_camera_bank_is_available_manually_without_event_match(app):
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
 
-
-def test_news_refresh_does_not_start_radio_tv_or_camera(app):
+def test_news_refresh_does_not_start_radio_or_camera(app):
     panel=MediaPanel()
     try:
-        panel.set_catalog(load_media_catalog())
         panel.set_event({"id":"owner-observed-fixture","status":"active","title":"Routine update",
                          "country":"","region":"Global","severity":"moderate","reports":[]})
         assert panel.radio.status.text()=="OFF"
         assert panel.radio._session is None
-        assert panel.tv.tv_status.text()=="OFF"
-        assert panel.tv.view is None
+        assert not hasattr(panel,"tv")
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()

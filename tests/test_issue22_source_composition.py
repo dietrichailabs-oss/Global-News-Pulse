@@ -113,8 +113,11 @@ def test_metadata_only_embedded_media_is_rejected_at_parser_and_store_boundaries
                  "url": "https://www.youtube.com/watch?v=abcdefghijk",
                  "title": "unapproved embedded media"}]}
     assert normalize_report(injected, "2026-11-13T12:00:00Z")["media"] == []
-    # Do not block an explicitly non-metadata-only feed by accident.
+    # Retiring video removes the videoid-to-player shortcut, not the source
+    # report itself, even for a non-metadata-only feed.
     rich_source = {**source, "metadata_only": False}
     rich = parse_feed(rss, rich_source, "2026-11-13T12:00:00Z")[0]
-    assert len(rich["media"]) == 1
-    assert len(normalize_report(rich, "2026-11-13T12:00:00Z")["media"]) == 1
+    assert rich["media"] == []
+    assert normalize_report(rich, "2026-11-13T12:00:00Z")["media"] == []
+    assert rich["title"] == "Policy publication"
+    assert rich["url"] == "https://www.federalreserve.gov/newsevents/pressreleases/test.htm"

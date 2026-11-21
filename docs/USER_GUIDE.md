@@ -76,23 +76,34 @@ and output is labeled machine translation. Unsupported languages, missing models
 and failures produce a clear message. The application does not invent full
 article text, captions or audio transcripts.
 
-## Media, webcams and radio
+## Radio and cameras
 
-The contextual media panel shows related links and a small reviewed public-source
-directory. A supported YouTube video can use the official player after you accept
-the connection disclosure. Playback starts only with a user gesture and begins
-muted. **Float** creates a movable/resizable player window; **Stop** ends media
-playback without pausing source monitoring.
+The media panel opens on **Radio**, with separate **AM / FM / Internet Radio**
+and **HAM / SDR** controls. Choose a station or public receiver, connect, and use
+its available tuning controls. Local broadcast listings use Internet streams;
+receiving over-the-air radio requires compatible receiver hardware.
 
-The embedded player uses a temporary, isolated browser profile and denies camera,
-microphone, geolocation, downloads and new windows. It will not run with Chromium
-sandboxing disabled. Provider/region availability and rights are shown.
+The **Cameras** tab offers reviewed public cameras, with matching area cameras
+shown for selected events. Automatic camera connections require your explicit
+permission. **Stop all media** ends media playback without pausing source
+monitoring. Switching tabs stops the media from the previous tab.
 
-Tousi TV is a verified channel link with a manual live-page fallback. This build
-does not claim to automatically detect its broadcasts. Webcam/radio entries are
-public directories or original-source links; individual endpoints still depend
-on provider permission and availability. The application does not record or
-retransmit audio or access private cameras/accounts.
+YouTube playback and the TV tab have been removed. There are no video test,
+saved-video, watch-page, or floating YouTube controls, and new packages do not
+include the native TV helper. Old saved-video preferences and historical news
+reports are preserved but do not start a player. Original news source links
+remain available; they are not in-app video playback.
+
+Public receiver/camera endpoints still depend on provider permission and
+availability. The application does not record or retransmit audio or access
+private cameras/accounts. The isolated browser used by HAM/SDR remains available
+and retains its existing consent and sandbox protections.
+
+When upgrading, the old installer can leave unused TV-helper files in its
+program directory. To remove those old files too, close Pulse, uninstall the
+previous installed version, then install the new build. The standard uninstaller
+preserves the separate application-data directory containing settings, radio
+presets, and the news archive; do not manually delete that data directory.
 
 ## Alerts and background behavior
 
