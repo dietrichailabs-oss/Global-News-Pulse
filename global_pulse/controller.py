@@ -27,6 +27,16 @@ def in_quiet_hours(settings, now=None):
     return quiet_hours_active(settings, now)
 
 
+class ShutdownPending(RuntimeError):
+    """Already-admitted archive work is draining, not a failed close.
+
+    Only the shutdown coordinator retries this state automatically, without
+    overlapping disk finalizers. Its original deadline bounds hidden waiting;
+    after that, visible progress can still complete automatically. Genuine
+    Store/SQLite/child-cleanup failures keep their original exception types.
+    """
+
+
 class Controller(QObject):
     data_changed = Signal()
     # Real collector evidence is batched on the GUI event loop. Explicit user
@@ -72,6 +82,11 @@ class Controller(QObject):
         self.notification_status = "Native pop-up notifications off · enable in Settings (alerts remain in history)"
         self.last_collection = "Never"
         self._closed = False
+        # Tray activation must not wait for collector-held SQLite locks merely
+        # to decide whether X hides the window. These values reflect persisted
+        # choices only, never an unsaved Settings checkbox.
+        self.close_to_tray_enabled = bool(self.get_setting("close_to_tray", True))
+        self.tray_explained = bool(self.get_setting("tray_explained", False))
         self.storage_problem.connect(self._pause_for_storage)
         self._ingest_lock = threading.RLock()
         self._workers = TranslationProcess(self.data_dir, self)
@@ -198,6 +213,15 @@ class Controller(QObject):
                 self.store.set_setting(key, value)
             finally:
                 self._gdelt.set_active(was_active and self.monitoring and not self.demo)
+        elif key in {"close_to_tray", "tray_explained"}:
+            # Keep the policy cache in the same ordering as durable writes,
+            # including the background first-close explanation snapshot.
+            with self.store._lock:
+                self.store.set_setting(key, value)
+                if key == "close_to_tray":
+                    self.close_to_tray_enabled = bool(value)
+                else:
+                    self.tray_explained = bool(value)
         else:
             self.store.set_setting(key, value)
         if key == "notifications_enabled":
@@ -222,6 +246,46 @@ class Controller(QObject):
         elif key == "retention_days":
             self.store.prune(int(value))
         self.data_changed.emit()
+
+    def persist_layout_snapshot(self, settings):
+        """Disk-only close-to-tray save; never emits dashboard refreshes.
+
+        The GUI owns snapshot capture. This method accepts only the layout
+        keys and optional first-tray notice marker, and is serialized with
+        ingestion/final shutdown so an older deferred save cannot overwrite
+        the final Exit snapshot or touch an already-closed connection.
+        """
+        required = {"window_geometry", "vertical_split", "lower_split",
+                    "map_view", "intel_split", "map_layers_visible"}
+        if (not isinstance(settings, dict) or not required <= settings.keys()
+                or settings.keys() - required - {"tray_explained"}):
+            raise ValueError("Invalid layout snapshot keys")
+        if not isinstance(settings["window_geometry"], str):
+            raise ValueError("Invalid window geometry")
+        for key in ("vertical_split", "lower_split", "intel_split"):
+            values = settings[key]
+            if (not isinstance(values, list) or len(values) > 16
+                    or any(type(value) is not int or value < 0 for value in values)):
+                raise ValueError("Invalid splitter layout")
+        if not isinstance(settings["map_view"], dict):
+            raise ValueError("Invalid map layout")
+        if type(settings["map_layers_visible"]) is not bool:
+            raise ValueError("Invalid map layer visibility")
+        if "tray_explained" in settings and type(settings["tray_explained"]) is not bool:
+            raise ValueError("Invalid tray explanation marker")
+        # Round-trip before waiting for locks: reject Qt objects/nonfinite
+        # numbers and detach mutable containers from the GUI-owned snapshot.
+        try:
+            snapshot = json.loads(json.dumps(settings, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("Layout snapshot must contain finite plain values") from error
+        with self._ingest_lock, self.store._lock:
+            if self._closed or self._store_closed:
+                return False
+            self.store.set_settings_atomic(snapshot)
+            if "tray_explained" in snapshot:
+                self.tray_explained = snapshot["tray_explained"]
+        return True
 
     def archive_storage_status(self, *, nonblocking=False):
         """Return honest archive status; passive Qt polls may defer on BUSY.
@@ -711,7 +775,8 @@ class Controller(QObject):
         self.translator.cancelled.set()
         # Invalidate network callbacks immediately, without joining their
         # provider timeouts on Qt. Scheduler workers are already daemonized;
-        # their stop/generation checks forbid writes after this request.
+        # stop/generation checks reject newly completed network callbacks.
+        # Already-admitted archive work drains behind finish_close's barrier.
         self.scheduler.request_stop()
         self._headlines.close()
         self._workers.begin_close()
@@ -732,9 +797,9 @@ class Controller(QObject):
         if self._store_closed:
             return
         if not self.scheduler.settle_callbacks(timeout=1.0):
-            raise RuntimeError("A source archive callback is still finishing; exit can be retried safely")
+            raise ShutdownPending("Waiting for an admitted source archive callback to finish")
         if not self._ingest_lock.acquire(timeout=1.0):
-            raise RuntimeError("An archive update is still finishing; exit can be retried safely")
+            raise ShutdownPending("Waiting for an admitted archive update to finish")
         try:
             self._gdelt.finish_close()
             self._workers.finish_close()

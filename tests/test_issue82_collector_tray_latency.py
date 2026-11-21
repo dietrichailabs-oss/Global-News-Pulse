@@ -1091,3 +1091,448 @@ def test_expedited_reentrant_followup_keeps_real_worker_and_navigation_guards(
     assert applied == [{"_idle_snapshot": snapshot}]
     assert not w._idle_snapshot_inflight
 
+
+def _bind_production_tray_callbacks(controller, menu, tray, timer, activations):
+    """Exercise the actual bootstrap closures, not a replacement popup path."""
+    from global_pulse import __main__ as entrypoint
+    from PySide6.QtGui import QCursor
+    from PySide6.QtWidgets import QSystemTrayIcon
+    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    nodes = {n.name: n for n in main.body if isinstance(n, ast.FunctionDef)}
+    wrapper = ast.parse(
+        "def bind():\n"
+        "    shutting_down = False\n"
+        "    tray_last_state = 'error'\n"
+        "    tray_last_tip = 'last actual tooltip'\n"
+        "    tray_pending_menu = False\n"
+        "    def state(): return tray_last_state, tray_last_tip, tray_pending_menu\n"
+        "    return update_tray, tray_activated, state\n")
+    wrapper.body[0].body[-1:-1] = [nodes["update_tray"], nodes["tray_activated"]]
+    ast.fix_missing_locations(wrapper)
+    env = {"controller": controller, "menu": menu, "tray": tray,
+           "tray_refresh_timer": timer, "_tray_health_state": _tray_health_state,
+           "pulse_icon": lambda value: value, "activate": lambda: activations.append(True),
+           "QCursor": QCursor, "QSystemTrayIcon": QSystemTrayIcon}
+    exec(compile(wrapper, entrypoint.__file__, "exec"), env)
+    return env["bind"]()
+
+
+def test_busy_tray_refresh_leaves_first_click_menu_responsive_and_keeps_real_state(app, tmp_path):
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+    c = Controller(tmp_path, demo=True)
+    c.monitoring = True
+    menu = QMenu()
+    menu.addAction("Open Global Pulse")
+    menu.addAction("Exit Completely", c.quit)
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.setInterval(700)
+    icons, tips, activations = [], [], []
+    tray = SimpleNamespace(setIcon=icons.append, setToolTip=tips.append)
+    update, activated, state = _bind_production_tray_callbacks(c, menu, tray, timer, activations)
+    entered, release = threading.Event(), threading.Event()
+
+    def hold_archive():
+        with c.store._lock:
+            entered.set()
+            assert release.wait(3)
+
+    worker = threading.Thread(target=hold_archive, daemon=True)
+    worker.start()
+    assert entered.wait(1)
+    try:
+        start = time.monotonic()
+        update()
+        activated(QSystemTrayIcon.ActivationReason.Trigger)
+        assert time.monotonic() - start < .15
+        assert menu.isVisible(), "First click must expose the existing native tray menu"
+        assert any(action.text() == "Exit Completely" and action.isEnabled() for action in menu.actions())
+        assert timer.isActive(), "A busy archive must schedule a later real health read"
+        assert not icons and not tips and state()[:2] == ("error", "last actual tooltip")
+        assert not activations, "Opening the tray menu must not reopen the dashboard"
+        # A visible menu cannot be destabilized by a native icon replacement.
+        release.set()
+        worker.join(1)
+        update()
+        assert not icons and state()[2]
+        menu.hide()
+        update()
+        assert icons == ["active"] and state()[0] == "active"
+        assert tips == ["Global Pulse · monitoring active"]
+        activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+        assert activations == [True]
+        c.begin_close()
+        update()
+        activated(QSystemTrayIcon.ActivationReason.Trigger)
+        assert not menu.isVisible() and icons == ["active"]
+    finally:
+        release.set()
+        worker.join(2)
+        timer.stop()
+        menu.hide()
+        menu.deleteLater()
+        c.close()
+
+
+def test_admitted_source_callback_drains_quietly_before_exit_deadline(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False))
+    entered, release = threading.Event(), threading.Event()
+    warnings, beats = [], []
+    q.blocked.connect(warnings.append)
+    pulse = QTimer()
+    pulse.setInterval(20)
+    pulse.timeout.connect(lambda: beats.append(True))
+
+    def finish_admitted_callback():
+        with c.scheduler._lock, c._ingest_lock, c.store._lock, c.store._conn:
+            c.store._conn.execute("INSERT INTO settings VALUES('admitted_tray_write','true')")
+            entered.set()
+            assert release.wait(3)
+
+    worker = threading.Thread(target=finish_admitted_callback, daemon=True)
+    worker.start()
+    assert entered.wait(1)
+    try:
+        pulse.start()
+        q.begin({"window_geometry": "quiet-callback-drain"})
+        # Exceed the callback barrier's one-second attempt, but remain inside
+        # the existing three-second end-to-end deadline. This is not a lost
+        # write or a reason to ask the owner to click Retry.
+        QTimer.singleShot(1200, release.set)
+        _exit_spin(app, lambda: q.completed, timeout=2.5)
+        assert not warnings and len(beats) >= 10
+        assert c._store_closed and q._error is None
+        with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as saved:
+            assert saved.get_setting("admitted_tray_write") is True
+            assert saved.get_setting("window_geometry") == "quiet-callback-drain"
+            assert saved._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        release.set()
+        worker.join(2)
+        pulse.stop()
+        q.timer.stop()
+        if q._finalizer:
+            q._finalizer.join(3)
+        c.close()
+
+
+def test_exit_recovery_dialog_does_not_reopen_closed_dashboard(app, tmp_path):
+    c = Controller(tmp_path, demo=True)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False))
+    window = QWidget()
+    window.show()
+    app.processEvents()
+    window.hide()
+    show_problem, warning = _bind_production_exit_warning(window, q)
+    q.blocked.connect(show_problem)
+    try:
+        q.blocked.emit("Actual archive write failure retained for recovery")
+        app.processEvents()
+        assert warning() is not None and warning().isVisible()
+        assert "Actual archive write failure" in warning().text()
+        assert not window.isVisible(), "Safe recovery must not resurrect the dashboard"
+        assert not window.isEnabled()
+        assert not c._store_closed and not q.completed
+    finally:
+        if warning():
+            warning().close()
+        window.close()
+        c.close()
+
+
+def _tray_layout_test_snapshot(label):
+    return {"window_geometry": label, "vertical_split": [470, 350],
+            "lower_split": [560, 560, 280], "map_view": {},
+            "intel_split": [220, 70, 55], "map_layers_visible": True}
+
+
+def test_tray_layout_writer_coalesces_on_one_disk_thread_without_redraws(app, tmp_path, monkeypatch):
+    from global_pulse.__main__ import _TrayLayoutWriter
+    c = Controller(tmp_path, demo=True)
+    writer = _TrayLayoutWriter(c)
+    entered, release = threading.Event(), threading.Event()
+    original = c.persist_layout_snapshot
+    calls, redraws, errors = [], [], []
+    c.data_changed.connect(lambda: redraws.append(True))
+    writer.failed.connect(errors.append)
+
+    def hold_first_snapshot(settings):
+        calls.append((dict(settings), threading.get_ident()))
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(2)
+        return original(settings)
+
+    monkeypatch.setattr(c, "persist_layout_snapshot", hold_first_snapshot)
+    try:
+        start = time.monotonic()
+        writer.submit(_tray_layout_test_snapshot("first"))
+        assert time.monotonic() - start < .15 and entered.wait(1)
+        first_worker = writer._worker
+        for index in range(100):
+            writer.submit(_tray_layout_test_snapshot(f"latest-{index}"))
+        assert writer._worker is first_worker and len(calls) == 1
+        release.set()
+        _exit_spin(app, lambda: writer._worker is None, timeout=1)
+        assert len(calls) == 2 and calls[-1][0] == _tray_layout_test_snapshot("latest-99")
+        assert all(thread_id != threading.get_ident() for _, thread_id in calls)
+        assert c.store.get_setting("window_geometry") == "latest-99"
+        assert not redraws and not errors, "Layout persistence is not a news/filter update"
+    finally:
+        release.set()
+        if writer._worker:
+            writer._worker.join(2)
+        c.close()
+
+
+@pytest.mark.parametrize("held_barrier", ["store", "ingest"])
+def test_tray_layout_worker_cannot_overwrite_newer_final_exit_snapshot(app, tmp_path, monkeypatch, held_barrier):
+    from global_pulse.__main__ import _TrayLayoutWriter
+    c = Controller(tmp_path, demo=True)
+    writer = _TrayLayoutWriter(c)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False))
+    entered, release, submitted = threading.Event(), threading.Event(), threading.Event()
+    lock = c.store._lock if held_barrier == "store" else c._ingest_lock
+    original = c.persist_layout_snapshot
+    outcomes = []
+
+    def observe(settings):
+        submitted.set()
+        result = original(settings)
+        outcomes.append(result)
+        return result
+
+    def held_archive():
+        with lock:
+            entered.set()
+            assert release.wait(3)
+
+    monkeypatch.setattr(c, "persist_layout_snapshot", observe)
+    holder = threading.Thread(target=held_archive, daemon=True)
+    holder.start()
+    assert entered.wait(1)
+    try:
+        writer.submit(_tray_layout_test_snapshot("old-tray-snapshot"))
+        assert submitted.wait(1)
+        start = time.monotonic()
+        q.begin({"window_geometry": "newer-final-snapshot"})
+        assert time.monotonic() - start < .15
+        writer.submit(_tray_layout_test_snapshot("post-exit-must-not-be-admitted"))
+        release.set()
+        _exit_spin(app, lambda: q.completed and writer._worker is None, timeout=2)
+        assert outcomes == [False], "A queued layout write must yield to the final exit snapshot"
+        with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as saved:
+            assert saved.get_setting("window_geometry") == "newer-final-snapshot"
+            assert saved._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        release.set()
+        holder.join(2)
+        if writer._worker:
+            writer._worker.join(2)
+        q.timer.stop()
+        if q._finalizer:
+            q._finalizer.join(3)
+        c.close()
+
+
+@pytest.mark.parametrize("real_failure_after_wait", [False, True])
+def test_typed_pending_after_deadline_stays_visible_then_finishes_without_manual_retry(
+    app, tmp_path, monkeypatch, real_failure_after_wait
+):
+    from global_pulse.controller import ShutdownPending
+    c = Controller(tmp_path, demo=True)
+    q = _ExitCoordinator(c, NativeNotifications(enabled=False), deadline_ms=70)
+    window = QWidget()
+    show_problem, warning = _bind_production_exit_warning(window, q)
+    q.waiting.connect(lambda message: show_problem(message, waiting=True))
+    q.blocked.connect(show_problem)
+    q.finished.connect(lambda: warning().close() if warning() else None)
+    release = threading.Event()
+    original = c.finish_close
+    active, peak, calls, errors, waiting = [0], [0], [], [], []
+    q.blocked.connect(errors.append)
+    q.waiting.connect(waiting.append)
+
+    def pending_then_finish(*args):
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        calls.append(time.monotonic())
+        try:
+            if not release.is_set():
+                raise ShutdownPending("Admitted source callback is still committing")
+            if real_failure_after_wait:
+                raise sqlite3.OperationalError("Independent actual disk write failure")
+            original(*args)
+        finally:
+            active[0] -= 1
+
+    monkeypatch.setattr(c, "finish_close", pending_then_finish)
+    try:
+        q.begin({"window_geometry": "visible-pending-drain"})
+        original_deadline = q._deadline
+        _exit_spin(app, lambda: bool(waiting), timeout=1)
+        assert len(waiting) == 1 and not errors and not q.failed
+        assert q._deadline == original_deadline and q.timer.interval() == 100
+        assert warning().isVisible() and warning().windowTitle() == "Finishing shutdown"
+        assert not warning().button(QMessageBox.StandardButton.Retry).isEnabled()
+        assert not window.isVisible() and not c._store_closed
+        for _ in range(4):
+            q.begin({"window_geometry": "must-not-replace-final-snapshot"})
+        assert q._deadline == original_deadline and peak[0] == 1
+        release.set()
+        if real_failure_after_wait:
+            _exit_spin(app, lambda: bool(errors), timeout=1)
+            assert errors == ["Independent actual disk write failure"]
+            assert q.failed and not c._store_closed and not q.timer.isActive()
+            assert warning().isVisible() and warning().button(QMessageBox.StandardButton.Retry).isEnabled()
+            assert not window.isVisible()
+            q._deadline_notice("Later external quit deadline")
+            assert q.failed and q._pending_reason is None
+            assert errors == ["Independent actual disk write failure"]
+            assert len(waiting) == 1 and warning().button(QMessageBox.StandardButton.Retry).isEnabled()
+            assert "Independent actual disk write failure" in warning().text()
+            monkeypatch.setattr(c, "finish_close", original)
+            warning().button(QMessageBox.StandardButton.Retry).click()
+        _exit_spin(app, lambda: q.completed, timeout=1)
+        assert peak[0] == 1 and c._store_closed and not warning().isVisible()
+        with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as saved:
+            assert saved.get_setting("window_geometry") == "visible-pending-drain"
+    finally:
+        release.set()
+        q.timer.stop()
+        if q._finalizer:
+            q._finalizer.join(3)
+        if warning():
+            warning().close()
+        window.close()
+        c.close()
+
+
+def test_tray_layout_sqlite_failure_does_not_strand_future_saves(app, tmp_path, monkeypatch):
+    from global_pulse.__main__ import _TrayLayoutWriter
+    c = Controller(tmp_path, demo=True)
+    writer = _TrayLayoutWriter(c)
+    errors = []
+    writer.failed.connect(errors.append)
+    original = c.persist_layout_snapshot
+
+    def reject(_):
+        raise sqlite3.OperationalError("Synthetic layout write failure")
+
+    monkeypatch.setattr(c, "persist_layout_snapshot", reject)
+    try:
+        writer.submit(_tray_layout_test_snapshot("failed"))
+        _exit_spin(app, lambda: writer._worker is None and bool(errors), timeout=1)
+        assert errors == ["Synthetic layout write failure"]
+        assert c.store.get_setting("window_geometry") is None
+        monkeypatch.setattr(c, "persist_layout_snapshot", original)
+        writer.submit(_tray_layout_test_snapshot("next-success"))
+        _exit_spin(app, lambda: writer._worker is None, timeout=1)
+        assert c.store.get_setting("window_geometry") == "next-success"
+    finally:
+        if writer._worker:
+            writer._worker.join(2)
+        c.close()
+
+
+def test_actual_close_to_tray_uses_saved_policy_and_keeps_qt_free_during_layout_save(app, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from global_pulse import __main__ as entrypoint
+    c = Controller(tmp_path, demo=True)
+    c.set_setting("close_to_tray", True)
+    writer = entrypoint._TrayLayoutWriter(c)
+    window = QWidget()
+    window.vertical_split = SimpleNamespace(sizes=lambda: [470, 350])
+    window.lower_split = SimpleNamespace(sizes=lambda: [560, 560, 280])
+    window.intel_stack = SimpleNamespace(sizes=lambda: [220, 70, 55])
+    window.world_map = SimpleNamespace(view_state=lambda: {"zoom": 1.5})
+    window.layer_button = SimpleNamespace(isChecked=lambda: True)
+    # This unsaved checkbox must not replace the actually persisted policy.
+    window.setting_close = SimpleNamespace(isChecked=lambda: False)
+    window.show()
+    app.processEvents()
+    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    nodes = {n.name: n for n in main.body if isinstance(n, ast.FunctionDef)}
+    wrapper = ast.parse(
+        "def bind():\n"
+        "    shutting_down = False\n"
+        "    tray_save_pending = False\n"
+        "    tray_notice_seen = controller.tray_explained\n"
+        "    return close_window\n")
+    wrapper.body[0].body[-1:-1] = [nodes["persist_tray_layout"], nodes["close_window"]]
+    ast.fix_missing_locations(wrapper)
+    env = {"controller": c, "window": window, "QTimer": QTimer,
+           "tray": SimpleNamespace(isVisible=lambda: True), "tray_layout_writer": writer,
+           "QSystemTrayIcon": SimpleNamespace(supportsMessages=lambda: False)}
+    exec(compile(wrapper, entrypoint.__file__, "exec"), env)
+    close_window = env["bind"]()
+    entered, release = threading.Event(), threading.Event()
+    redraws, beats = [], []
+    c.data_changed.connect(lambda: redraws.append(True))
+    monkeypatch.setattr(c, "get_setting", lambda *_: pytest.fail("Tray close must not read SQLite on Qt"))
+    pulse = QTimer()
+    pulse.setInterval(10)
+    pulse.timeout.connect(lambda: beats.append(True))
+
+    def hold_archive():
+        with c.store._lock:
+            entered.set()
+            assert release.wait(3)
+
+    holder = threading.Thread(target=hold_archive, daemon=True)
+    holder.start()
+    assert entered.wait(1)
+    try:
+        pulse.start()
+        started = time.monotonic()
+        close_window()
+        assert time.monotonic() - started < .15 and not window.isVisible()
+        QTest.qWait(80)
+        assert len(beats) >= 3 and writer._worker is not None
+        assert not redraws, "Closing to tray must not trigger six hidden dashboard redraws"
+        release.set()
+        _exit_spin(app, lambda: writer._worker is None, timeout=1)
+        assert c.store.get_setting("close_to_tray") is True
+        assert c.store.get_setting("map_view") == {"zoom": 1.5}
+        assert c.store.get_setting("tray_explained") is True and c.tray_explained
+        assert not redraws
+    finally:
+        release.set()
+        holder.join(2)
+        pulse.stop()
+        if writer._worker:
+            writer._worker.join(2)
+        window.close()
+        c.close()
+
+
+def test_tray_layout_error_after_qobject_retirement_releases_worker(app, tmp_path, monkeypatch, caplog):
+    import shiboken6
+    from global_pulse.__main__ import _TrayLayoutWriter
+    c = Controller(tmp_path, demo=True)
+    writer = _TrayLayoutWriter(c)
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed_failure(_):
+        entered.set()
+        assert release.wait(2)
+        raise sqlite3.OperationalError("Synthetic write error after UI retirement")
+
+    monkeypatch.setattr(c, "persist_layout_snapshot", delayed_failure)
+    try:
+        writer.submit(_tray_layout_test_snapshot("retired-ui"))
+        assert entered.wait(1)
+        shiboken6.delete(writer)
+        release.set()
+        _exit_spin(app, lambda: writer._worker is None, timeout=1)
+        assert "Synthetic write error after UI retirement" in caplog.text
+    finally:
+        release.set()
+        if writer._worker:
+            writer._worker.join(2)
+        c.close()
+

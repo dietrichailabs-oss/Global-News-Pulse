@@ -1545,6 +1545,33 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(key)[:200], encoded))
 
+    def set_settings_atomic(self, settings: dict[str, Any]) -> None:
+        """Persist one plain settings snapshot with the existing size limits.
+
+        Validation finishes before any SQL mutation. All rows commit together
+        or roll back together; callers must not fan a layout snapshot into
+        separate settings transactions or UI refresh signals.
+        """
+        if not isinstance(settings, dict):
+            raise ValueError("Settings snapshot must be a dictionary")
+        from .capacity_limits import MAX_USER_FEED_SETTING_BYTES
+        encoded = []
+        keys = set()
+        for key, value in settings.items():
+            name = str(key)[:200]
+            if name in keys:
+                raise ValueError("Settings snapshot contains overlapping keys")
+            keys.add(name)
+            payload = _json(value)
+            limit = MAX_USER_FEED_SETTING_BYTES if key == "user_feeds" else 250_000
+            if len(payload.encode("utf-8")) > limit:
+                raise ValueError("Setting is too large")
+            encoded.append((name, payload))
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                encoded)
+
     def get_source_state(self, source_id: str) -> dict:
         with self._lock:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()

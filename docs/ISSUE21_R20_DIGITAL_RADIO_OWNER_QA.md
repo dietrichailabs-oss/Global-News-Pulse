@@ -402,3 +402,92 @@ pending for the new exact source.
 
 Public release is **HOLD** until independent QA, live Windows audio/performance
 verification, YouTube handling decisions, and publisher/licensing authorization.
+
+## November 20 owner follow-up: tray menu and shutdown callbacks
+
+After the `84a98bdb` owner-test handoff, Mark reports that HAM radio audio and
+tuning work on his machine. Record this as **owner-observed PASS for the tested
+receiver/session**, not all-receiver or waterfall acceptance. This feedback does
+not independently identify his installed source hash or selected receiver.
+
+Two owner failures remain distinct:
+
+1. The tray icon's menu/list, including Exit, is slow to appear **before** an
+   Exit action can be selected.
+2. Closing displayed source-callback error wording, re-showed the dashboard,
+   then eventually closed. The exact owner log or stack trace was not supplied.
+
+The prior local/native/package passes remain historical automated evidence;
+they do not override this physical owner feedback. Reports are recorded on
+[PR182](https://github.com/dietrichailabs-oss/Global-News-Pulse/pull/182#issuecomment-7055319464)
+and the [Issue2 owner ledger](https://github.com/dietrichailabs-oss/Global-News-Pulse/issues/2#issuecomment-7055319710).
+
+Independent reproduction of the accepted `4fad0cd8` source found:
+
+- A 350 ms worker-held Store lock blocked the Qt tray-health read for 351.01 ms
+  and delayed an already-queued menu popup to 371.9 ms. Coalescing health reads
+  to 700 ms did not make each read nonblocking.
+- A normal admitted callback still holding the shutdown barrier after one
+  second produced the text `A source archive callback is still finishing;
+  exit can be retried safely`. The Store correctly remained open, but ordinary
+  drain was presented as failure rather than completing automatically.
+- The existing recovery handler explicitly called `window.show()`, changing
+  the main dashboard from hidden to visible.
+
+These are real SQLite/Qt **offline source-path reproductions**, not recovered
+owner logs, a claim of process restart, or physical Windows latency timings.
+
+The successor must keep tray-menu presentation independent of busy database
+work; distinguish temporary callback/ingest drain from genuine write failure;
+and keep any necessary recovery UI separate from the closed main dashboard.
+No forced process exit, discarded writes, premature singleton release, or
+indefinitely hidden failed cleanup is acceptable. Late callbacks and repeated
+Exit must remain harmless. Final layout and notification history must still
+be committed, and only owned child processes may be cancelled.
+
+Required new regression evidence includes lock-contended Qt menu popup, actual
+admitted callback retirement with persisted readback, no false early shutdown
+warning, genuine storage-error recovery, no dashboard resurrection, and safe
+close-to-tray layout persistence. Fresh exact-source local/native full tests,
+offline installer lifecycle and distinct downloaded-byte QA are required
+before another test-ready handoff. No existing test threshold, exclusion or
+public/rights/YouTube gate is relaxed. Working HAM behavior stays unchanged.
+
+### Bounded successor implementation and acceptance scope
+
+- Tray health takes a nonblocking Store lease. On BUSY it keeps the last
+  measured icon state and retries on the normal timer; it never paints a false
+  healthy status or makes menu presentation wait for a collector transaction.
+- Close-to-tray reads cached **persisted** policy, captures Qt layout values on
+  Qt, and uses one coalesced disk worker. The six layout values commit atomically
+  without six dashboard-refresh signals. The ingestion/shutdown barrier and a
+  second closed-state check prevent old deferred saves from overwriting the
+  final Exit snapshot or touching a closed connection.
+- Only the scheduler callback barrier and ingestion-lock contention are typed
+  as `ShutdownPending`. They retry serially without overlapping finalizers.
+  The existing three-second deadline bounds the invisible phase: admitted
+  work still draining after that point shows standalone informational progress
+  and completes automatically when safe. It does not reopen the dashboard.
+- Genuine SQLite/write/child errors retain warning and Retry behavior. A real
+  error after temporary waiting takes precedence over the old progress state.
+  No exception-log suppression or blanket retry of arbitrary failures is used.
+- The previous **untracked Store-lock timeout** recovery test stays unchanged:
+  that distinct condition still reports a recoverable archive-close problem
+  and requires Retry. This patch does not classify every Store reader or lock
+  timeout as admitted callback drain or promise zero-time durable shutdown.
+
+Pre-freeze engineering found a new pending-to-real-SQL-error race: its latency
+module run returned 35 passed / 1 failed because the timer remained active when
+a finalizer failed during the same launch/deadline turn. Production deadline
+handling now stops that timer and preserves the true failure. The failing
+assertion was not relaxed. This diagnostic was retained as tool-output evidence,
+not a fabricated raw-log file or a frozen-source/full-suite result.
+
+Regression additions also exercise the actual Qt menu and bootstrap close
+handler under a worker-held Store lock, one-second-plus admitted callbacks,
+progress-to-failure recovery, atomic rollback and readback, old-save/Exit races,
+coalesced snapshots, later saves after SQLite failures, and retirement of the
+Qt writer while a disk error is returning. Existing latency thresholds, test
+functions, workflow exclusions, native-backend and package smoke gates remain
+unchanged. Independent/full/native/package acceptance must be recorded against
+the new immutable source, not borrowed from `84a98bdb`.
