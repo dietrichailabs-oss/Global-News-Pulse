@@ -1146,7 +1146,10 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller, "_closed", False):
             return
         if not self._evidence_refresh_timer.isActive():
-            self._evidence_refresh_timer.start()
+            # start(delay) changes QTimer's stored interval. Restore the
+            # ordinary first-due batch after an expedited reentrant follow-up
+            # or the separate post-splash one-second worker-rate deferral.
+            self._evidence_refresh_timer.start(160)
 
     @Slot()
     def _refresh_evidence_when_idle(self):
@@ -1980,7 +1983,18 @@ class MainWindow(SituationActions, QMainWindow):
             self._idle_feed_cache=None
             self._idle_country_cache=None
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
-        finally:self._refreshing=False
+        finally:
+            self._refreshing=False
+            # Entry stopped the previous evidence timer. An active timer now
+            # represents newer evidence received during this composition.
+            # That work is already coalesced: do not add another full batch
+            # delay after the current pass. Queue only once the outer refresh
+            # has returned from any nested Qt loop, never while _refreshing.
+            # The callback still enforces the normal worker/navigation gates.
+            if (self._evidence_refresh_timer.isActive()
+                    and not self._force_close
+                    and not getattr(self.controller,"_closed",False)):
+                self._evidence_refresh_timer.start(0)
 
     def _populate_filter_options(self, options=None):
         # Explicit/filter refreshes retain synchronous semantics; validated

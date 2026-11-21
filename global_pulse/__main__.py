@@ -5,10 +5,12 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, Slot
+from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QGridLayout, QLabel, QMenu, QMessageBox, QSplashScreen, QSystemTrayIcon, QVBoxLayout
 
@@ -29,16 +31,27 @@ def _native_status_visible(status, enabled):
     return str(status)
 
 
-def _tray_health_state(controller):
-    """Preserve alerts > paused > active-source errors > active precedence."""
-    if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
-        return "alerts"
-    if not controller.monitoring:
-        return "paused"
-    # _apply_sources caches the exact IDs passed to Scheduler. A disabled or
-    # unavailable old source error must not color the live tray icon red.
-    return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
-            else "active")
+def _tray_health_state(controller, *, nonblocking=False):
+    """Preserve state precedence; a busy archive is not a healthy snapshot.
+
+    The native tray's Qt timer must not wait for a collector transaction just
+    to recolor an icon: that also prevents Explorer clicks from reaching the
+    already-built menu. Hold one short, reentrant lease for both health reads
+    or return None so the caller can retain its last real state and retry.
+    """
+    if not controller.store._lock.acquire(blocking=not nonblocking):
+        return None
+    try:
+        if any(not alert.get("read", False) for alert in controller.store.list_alerts(limit=50)):
+            return "alerts"
+        if not controller.monitoring:
+            return "paused"
+        # _apply_sources caches the exact IDs passed to Scheduler. A disabled or
+        # unavailable old source error must not color the live tray icon red.
+        return ("error" if controller.store.any_source_error(controller._enabled_collection_ids)
+                else "active")
+    finally:
+        controller.store._lock.release()
 
 
 class _TrayRefreshBridge(QObject):
@@ -57,6 +70,238 @@ class _TrayRefreshBridge(QObject):
             return
         if not self.timer.isActive():
             self.timer.start()
+
+
+class _TrayLayoutWriter(QObject):
+    """One coalesced disk worker; snapshots originate on the Qt thread.
+
+    Controller's ingest/shutdown barrier owns persistence. If exit wins
+    admission, its newer final snapshot supersedes any queued tray snapshot;
+    if this write was already admitted, the finalizer waits for its commit.
+    """
+    failed = Signal(str)
+
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        self._lock = threading.Lock()
+        self._pending = None
+        self._worker = None
+
+    def submit(self, settings):
+        if self.controller._closed:
+            return
+        with self._lock:
+            self._pending = dict(settings)
+            if self._worker is not None:
+                return
+            self._worker = threading.Thread(
+                target=self._persist, name="pulse-tray-layout", daemon=True)
+            self._worker.start()
+
+    def _persist(self):
+        while True:
+            with self._lock:
+                settings, self._pending = self._pending, None
+                if settings is None:
+                    self._worker = None
+                    return
+            try:
+                self.controller.persist_layout_snapshot(settings)
+            except Exception as error:
+                if not self.controller._closed:
+                    try:
+                        self.failed.emit(str(error))
+                    except RuntimeError:
+                        # A retired Qt owner cannot receive a late disk error;
+                        # still finish this loop and clear worker ownership so
+                        # the coalesced queue is never stranded by signal teardown.
+                        logging.getLogger("global_pulse").warning(
+                            "Tray layout save failed after its UI receiver retired: %s", error)
+
+
+class _ExitCoordinator(QObject):
+    """Nonblocking, finite explicit-exit lifecycle; all Qt stays on Qt.
+
+    The one background thread only finishes already-admitted archive work and
+    persists final local state. Failure never releases the singleton or claims
+    success. Its visible retry signal prevents a hidden, unbounded shutdown.
+    """
+    finished = Signal()
+    blocked = Signal(str)
+    waiting = Signal(str)
+
+    def __init__(self, controller, notifier, parent=None, *, deadline_ms=3000):
+        super().__init__(parent)
+        self.controller = controller
+        self.notifier = notifier
+        self.deadline_ms = deadline_ms
+        self.started = False
+        self.completed = False
+        self.failed = False
+        self._last_blocked_message = None
+        self.settings = {}
+        self.outcomes = []
+        self._finalizer = None
+        self._finalized = threading.Event()
+        self._error = None
+        self._pending_reason = None
+        self._waiting_notice = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(10)
+        self.timer.timeout.connect(self._tick)
+
+    def begin(self, settings):
+        if self.started:
+            self.retry()
+            return
+        self.started = True
+        self.settings = dict(settings)
+        self.controller.begin_close()
+        self.outcomes = self.notifier.begin_close()
+        self._deadline = time.monotonic() + self.deadline_ms / 1000
+        self.timer.start()
+
+    def retry(self):
+        if self.completed or not self.failed:
+            return True
+        # Never launch a second disk finalizer over a still-running commit.
+        if self._finalizer is not None and self._finalizer.is_alive():
+            return False
+        if self._finalized.is_set() and self._error is None:
+            self._tick()
+            return True
+        if self._finalized.is_set():
+            self._finalizer = None
+            self._finalized.clear()
+            self._error = None
+        self.failed = False
+        self._pending_reason = None
+        self._waiting_notice = False
+        self.controller.begin_close()
+        self.outcomes.extend(self.notifier.begin_close())
+        self._deadline = time.monotonic() + self.deadline_ms / 1000
+        self.timer.setInterval(10)
+        self.timer.start()
+        return True
+
+    def _fail(self, message):
+        # A real write failure after a transient drain supersedes that earlier
+        # progress classification; a later external-quit timer must not demote
+        # the error to waiting or disable its required Retry action.
+        self._pending_reason = None
+        if not self.failed or message != self._last_blocked_message:
+            self.failed = True
+            self._last_blocked_message = message
+            self.timer.setInterval(100)
+            self.blocked.emit(message)
+
+    def _show_waiting(self):
+        # The deadline bounds invisible cleanup, not permission to mislabel a
+        # still-draining admitted callback as a failed archive write. Visible
+        # progress keeps polling; no second finalizer or manual Retry is needed.
+        self.failed = False
+        self.timer.setInterval(100)
+        if not self._waiting_notice:
+            self._waiting_notice = True
+            self.waiting.emit(
+                "An admitted source/archive update is finishing. Monitoring and media "
+                "are stopped; Global Pulse will exit automatically after the saved "
+                "archive is safe.")
+
+    def _deadline_notice(self, message):
+        if self._finalized.is_set() and self._error is not None:
+            from .controller import ShutdownPending
+            if not isinstance(self._error, ShutdownPending):
+                self.timer.stop()
+                self._fail(str(self._error))
+                return
+        if self._pending_reason is not None:
+            self._show_waiting()
+        else:
+            self._fail(message)
+
+    @Slot()
+    def _tick(self):
+        if self.completed:
+            self.timer.stop()
+            return
+        if self._finalized.is_set():
+            if self._error is not None:
+                from .controller import ShutdownPending
+                if isinstance(self._error, ShutdownPending):
+                    # An already-admitted callback still owns the archive;
+                    # this is progress, not a failed write. Retry without
+                    # reopening the dashboard or
+                    # creating overlapping finalizers. The previous thread's
+                    # completion event can precede its final return briefly.
+                    if self._finalizer is not None and self._finalizer.is_alive():
+                        return
+                    self._pending_reason = str(self._error)
+                    self._finalizer = None
+                    self._finalized.clear()
+                    self._error = None
+                    if time.monotonic() >= self._deadline:
+                        self._show_waiting()
+                    return
+                self.timer.stop()
+                self._fail(str(self._error))
+            else:
+                self.timer.stop()
+                self.completed = True
+                self.finished.emit()
+            return
+        if self._finalizer is None:
+            try:
+                children_ready = self.controller.close_ready()
+                notifier_ready = self.notifier.close_ready()
+            except (RuntimeError, OSError, ValueError) as error:
+                self.timer.stop()
+                self._fail(str(error))
+                return
+            if children_ready and notifier_ready:
+                def finish_archive():
+                    try:
+                        self.controller.finish_close(self.settings, self.outcomes)
+                    except Exception as error:
+                        self._error = error
+                    finally:
+                        self._finalized.set()
+                self._finalizer = threading.Thread(
+                    target=finish_archive, name="pulse-exit-archive", daemon=True)
+                self._finalizer.start()
+        if time.monotonic() >= self._deadline:
+            self._deadline_notice("Exit is waiting for an owned worker or a critical archive write. "
+                                  "The archive and single-instance lock are preserved; retry Exit Completely.")
+
+    def drain_after_event_loop(self):
+        """External app.quit cannot discard an in-flight critical commit.
+
+        The normal path is already complete. If an external quit ended the
+        application loop early, keep Qt responsive through the same deadline
+        and visible recovery UI, rather than raising out of main while a
+        daemon finalizer still owns the archive.
+        """
+        if self.completed:
+            return
+        loop = QEventLoop()
+        self.finished.connect(loop.quit)
+        limit = QTimer()
+        limit.setSingleShot(True)
+        limit.timeout.connect(lambda: self._deadline_notice(
+            "Safe shutdown is still pending. Archive cleanup has not completed; "
+            "the application remains available for recovery and retry."))
+        limit.start(self.deadline_ms + 100)
+        try:
+            while not self.completed:
+                loop.exec()
+                if not self.completed:
+                    # A second external quit must not tear down a still-live
+                    # commit either. Its recovery window remains visible.
+                    self._deadline_notice("An external quit was deferred while critical archive cleanup finishes.")
+        finally:
+            limit.stop()
+            self.finished.disconnect(loop.quit)
 
 
 def pulse_icon(state="active", size=64):
@@ -336,6 +581,8 @@ def main(argv=None):
     notifier.delivery_changed.connect(delivered)
 
     def activate(identifier=""):
+        if controller._closed:
+            return
         window.showNormal() if window.isMinimized() else window.show()
         window.raise_()
         window.activateWindow()
@@ -356,6 +603,8 @@ def main(argv=None):
     mute.setChecked(not controller.get_setting("notifications_enabled", False))
     mute.toggled.connect(lambda value: controller.set_setting("notifications_enabled", not value))
     def apply_native_preference(enabled):
+        if getattr(controller, "_closed", False):
+            return
         # Sync the Settings checkbox and tray independently of which UI action
         # the user chose. No cross-thread blocking helper stop on the UI path.
         was_blocked = mute.blockSignals(True)
@@ -414,7 +663,12 @@ def main(argv=None):
             tray_pending_menu = True
             return
         tray_pending_menu = False
-        state = _tray_health_state(controller)
+        state = _tray_health_state(controller, nonblocking=True)
+        if state is None:
+            # Leave the menu/click path responsive while an admitted source
+            # transaction owns SQLite. BUSY never paints a false green icon.
+            tray_refresh_timer.start()
+            return
         if state != tray_last_state:
             tray.setIcon(pulse_icon(state))
             tray_last_state = state
@@ -448,29 +702,86 @@ def main(argv=None):
     controller.notification_changed.connect(tray_refresh_bridge.schedule)
     controller.alert_received.connect(tray_refresh_bridge.schedule)
 
-    def shutdown():
-        nonlocal shutting_down
-        if shutting_down:
-            return
-        shutting_down = True
-        window.save_layout()
-        for widget in window.findChildren(QWidget):
-            if widget.__class__.__name__ == "MediaPanel":
-                widget.shutdown()
-        notifier.stop()
-        try:
-            controller.close()
-        except RuntimeError as error:
-            shutting_down = False
-            window.show()
-            QMessageBox.critical(window, "Full exit not completed", str(error) + ". The window remains available; retry Exit Completely.")
-            return
+    exit_coordinator = _ExitCoordinator(controller, notifier, app)
+    exit_warning = None
+
+    def finish_exit():
+        # Release the singleton only after child exits and the final commit.
+        if exit_warning is not None:
+            exit_warning.close()
         instance.close()
         window.set_close_handler(None)
         window._force_close = True
         window.close()
         tray.hide()
         app.quit()
+
+    def show_exit_problem(message, *, waiting=False):
+        nonlocal exit_warning
+        if exit_coordinator.completed:
+            return
+        window.setEnabled(False)
+        # Recovery belongs to this small standalone dialog. The owner already
+        # closed the dashboard; a slow/failed final commit must not resurrect
+        # it or make successful shutdown look like an application restart.
+        window.hide()
+        if exit_warning is None:
+            exit_warning = QMessageBox(
+                QMessageBox.Icon.Warning, "Full exit not completed", "",
+                QMessageBox.StandardButton.Retry)
+            def retry_exit(_):
+                if not exit_coordinator.retry():
+                    # QMessageBox closes itself after buttonClicked. Reopen
+                    # after that turn if a critical commit is still running.
+                    # A later failure is a new blocked message, not suppressed
+                    # by the earlier deadline warning.
+                    QTimer.singleShot(0, lambda: show_exit_problem(
+                        str(exit_coordinator._error) if exit_coordinator._error else
+                        "Archive cleanup is still running. The archive and single-instance "
+                        "lock remain protected; please wait for completion."))
+            exit_warning.buttonClicked.connect(retry_exit)
+        exit_warning.setIcon(QMessageBox.Icon.Information if waiting else QMessageBox.Icon.Warning)
+        exit_warning.setWindowTitle("Finishing shutdown" if waiting else "Full exit not completed")
+        exit_warning.button(QMessageBox.StandardButton.Retry).setEnabled(not waiting)
+        exit_warning.setText(str(message))
+        exit_warning.setInformativeText(
+            "Monitoring and media are stopped; archive cleanup may still be completing. "
+            "No data was force-discarded. The application will close after successful "
+            "cleanup." if waiting else
+            "Monitoring and media are stopped; archive cleanup may still be completing. "
+            "No data was force-discarded. The application will close after successful "
+            "cleanup, or you can retry once the blocking archive operation finishes.")
+        exit_warning.show()
+        exit_warning.raise_()
+
+    exit_coordinator.finished.connect(finish_exit)
+    exit_coordinator.blocked.connect(show_exit_problem)
+    exit_coordinator.waiting.connect(lambda message: show_exit_problem(message, waiting=True))
+
+    def shutdown():
+        nonlocal shutting_down
+        if shutting_down:
+            exit_coordinator.retry()
+            return
+        shutting_down = True
+        # Snapshot UI values only; persist one transaction off the Qt thread.
+        settings = {
+            "window_geometry": bytes(window.saveGeometry().toBase64()).decode("ascii"),
+            "vertical_split": window.vertical_split.sizes(),
+            "lower_split": window.lower_split.sizes(),
+            "map_view": window.world_map.view_state(),
+            "intel_split": window.intel_stack.sizes(),
+            "map_layers_visible": window.layer_button.isChecked(),
+        }
+        for timer in window.findChildren(QTimer):
+            timer.stop()
+        window._force_close = True
+        window.hide()
+        tray.hide()
+        for widget in window.findChildren(QWidget):
+            if widget.__class__.__name__ == "MediaPanel":
+                widget.shutdown()
+        exit_coordinator.begin(settings)
 
     # Imported here to avoid including a GUI object in the pure helper functions.
     from PySide6.QtWidgets import QWidget
@@ -482,25 +793,42 @@ def main(argv=None):
     controller.quit_requested.connect(shutdown)
 
     tray_save_pending = False
+    tray_notice_seen = controller.tray_explained
+    tray_layout_writer = _TrayLayoutWriter(controller, app)
+    tray_layout_writer.failed.connect(lambda message: logging.getLogger("global_pulse").warning(
+        "Could not persist tray layout: %s", message))
 
     def persist_tray_layout():
         nonlocal tray_save_pending
         tray_save_pending = False
         if shutting_down or getattr(controller, "_closed", False):
             return
-        try:
-            window.save_layout()
-        except (OSError, RuntimeError, ValueError) as error:
-            logging.warning("Could not persist tray layout: %s", error)
+        # Qt values are copied here; the coalesced worker never touches widgets
+        # or emits six data_changed redraws merely because X hid the dashboard.
+        settings = {
+            "window_geometry": bytes(window.saveGeometry().toBase64()).decode("ascii"),
+            "vertical_split": window.vertical_split.sizes(),
+            "lower_split": window.lower_split.sizes(),
+            "map_view": window.world_map.view_state(),
+            "intel_split": window.intel_stack.sizes(),
+            "map_layers_visible": window.layer_button.isChecked(),
+        }
+        if tray_notice_seen:
+            settings["tray_explained"] = True
+        tray_layout_writer.submit(settings)
 
     def close_window():
-        nonlocal tray_save_pending
+        nonlocal tray_save_pending, tray_notice_seen
         if shutting_down:
             return
-        if controller.get_setting("close_to_tray", True) and tray.isVisible():
-            first_close = not controller.get_setting("tray_explained", False)
+        # These values change only after successful persisted preference writes,
+        # not when the owner merely toggles an unsaved Settings checkbox.
+        if controller.close_to_tray_enabled and tray.isVisible():
+            first_close = not tray_notice_seen
             # Hide before any database write; no duplicated synchronous saves.
             window.hide()
+            if first_close:
+                tray_notice_seen = True
             if not tray_save_pending:
                 tray_save_pending = True
                 QTimer.singleShot(0, persist_tray_layout)
@@ -508,10 +836,6 @@ def main(argv=None):
                 def show_tray_notice():
                     if shutting_down or getattr(controller, "_closed", False):
                         return
-                    try:
-                        controller.set_setting("tray_explained", True)
-                    except (OSError, RuntimeError, ValueError):
-                        logging.warning("Could not save tray explanation flag")
                     if QSystemTrayIcon.supportsMessages():
                         tray.showMessage(
                             "Global Pulse keeps monitoring",
@@ -577,6 +901,8 @@ def main(argv=None):
         controller.status_changed.emit("SYNTHETIC REVIEW · collection disabled")
     else:
         def begin():
+            if getattr(controller, "_closed", False):
+                return
             # A legacy profile may contain notifications_enabled=True from an
             # earlier default. Without a fresh v2 opt-in this does not even
             # launch the Windows helper or prompt for Microsoft component terms.
@@ -600,6 +926,7 @@ def main(argv=None):
     finally:
         if not shutting_down:
             controller.quit()
+        exit_coordinator.drain_after_event_loop()
         handler.close()
         log.removeHandler(handler)
     return result

@@ -94,14 +94,22 @@ def test_map_uses_one_aggregate_classifier_and_retains_neutral_evidence():
     ]
     original = map_widget.build_country_activity
     calls = []
+    class FixtureClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz) if tz else NOW.replace(tzinfo=None)
     def counted(rows, **kw):
         calls.append((len(rows), bool(kw.get("single_record_credits") is not None)))
+        # Both sides of this equivalence check use the fixture's clock. The
+        # +3-day record must remain future-dated after the real date advances.
+        assert kw["now"] == NOW
         return original(rows, **kw)
 
     widget = map_widget.WorldMap()
     started = perf_counter()
     try:
-        with patch.object(map_widget, "build_country_activity", side_effect=counted):
+        with (patch.object(map_widget, "datetime", FixtureClock),
+              patch.object(map_widget, "build_country_activity", side_effect=counted)):
             widget.set_events(records, country_events=records)
             widget.coverage_summary()   # Cached; must not run the classifier again
         assert calls == [(len(records), True)], calls

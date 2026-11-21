@@ -981,15 +981,39 @@ class Scheduler:
         self._wake.set()
 
     def stop(self, timeout=2.0):
+        self.request_stop()
         with self._lock:
-            self._stop.set()
-            self._wake.set()
             self._generation += 1
             threads = ([self._thread] if self._thread else []) + list(self._workers.values())
         end = time.monotonic() + max(0, timeout)
         for thread in threads:
             if thread and thread is not threading.current_thread():
                 thread.join(max(0, end - time.monotonic()))
+
+    def request_stop(self):
+        """Invalidate collectors immediately, even during a locked callback.
+
+        Setting these events needs no scheduler/Store lock. The GUI must not
+        wait for a callback's SQLite transaction merely to request exit.
+        """
+        self._stop.set()
+        self._wake.set()
+
+    def settle_callbacks(self, timeout=1.0):
+        """Off-GUI barrier for a callback admitted before request_stop.
+
+        Network requests outside this lock may finish later, but see _stop
+        before any persistence or callback. We do not join their socket waits.
+        """
+        if not self._stop.is_set():
+            raise RuntimeError("Collector stop must be requested before shutdown")
+        if not self._lock.acquire(timeout=max(0.0, timeout)):
+            return False
+        try:
+            self._generation += 1
+            return True
+        finally:
+            self._lock.release()
 
     def _run(self):
         while not self._stop.is_set():
@@ -1079,6 +1103,10 @@ class Scheduler:
                 host = urlsplit(source["url"]).hostname or ""
                 if time.monotonic() < self._host_next.get(host, 0):
                     continue
+                # request_stop deliberately does not wait for this lock. A
+                # stop during the Store reads above must cancel admission too.
+                if self._stop.is_set():
+                    return
                 state["configured_interval"] = self.interval
                 generation = self._generation
                 worker = threading.Thread(target=self._collect, args=(copy.deepcopy(source), state, generation), name="GPCollect-" + sid, daemon=True)
@@ -1091,6 +1119,9 @@ class Scheduler:
 
     def _collect(self, source, state, generation):
         try:
+            # Also cover a stop between Thread.start and its first timeslice.
+            if self._stop.is_set():
+                return
             result = self.collector_factory(source).collect(state)
             with self._lock:
                 if self._stop.is_set():

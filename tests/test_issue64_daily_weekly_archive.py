@@ -42,7 +42,7 @@ def test_period_sampler_and_daily_weekly_export_survive_501_newer_weather(tmp_pa
         since = (now - timedelta(days=1)).isoformat()
         assert all(e["category"] == "Disaster"
                    for e in ctrl.events(since=since, limit=500))
-        for period, expected in (("daily", 4), ("weekly", 9)):
+        for period, expected in (("daily", 8), ("weekly", 9)):
             events = ctrl.brief_events(since=since, period=period)
             assert len(events) <= 2 * expected
             assert any(e["category"] == "Health" for e in events)
@@ -70,6 +70,30 @@ def test_off_period_records_are_not_mislabeled_current(tmp_path):
         assert not any(e["category"] == "Health" for e in results)
     finally:
         ctrl.close()
+
+
+def test_daily_owner_depth_uses_eight_real_stored_nonweather_records(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    ctrl = Controller(tmp_path, demo=True)
+    try:
+        now = datetime.now(timezone.utc)
+        at = (now - timedelta(minutes=2)).isoformat()
+        ctrl.store.ingest([record(1200 + i, "Government", at) for i in range(12)], now=at)
+        events = ctrl.brief_events(since=(now - timedelta(days=1)).isoformat(), period="daily")
+        assert len(events) == 8
+        assert all(e["category"] == "Government" for e in events)
+        out = tmp_path / "daily-depth.md"
+        ctrl.export_brief(out, "daily")
+        page = out.read_text(encoding="utf-8")
+        assert sum(line.startswith("### ") and "SYNTHETIC Government source report" in line
+                   for line in page.splitlines()) == 8
+        assert "rolling last 24 hours" in page
+        assert "UNASSESSED means" in page
+        assert "0 official measurement(s)" in page
+        assert "8 unverified record(s)" in page
+    finally:
+        ctrl.close()
+        app.processEvents()
 
 
 def test_qt_briefs_tab_uses_period_category_sample(tmp_path):

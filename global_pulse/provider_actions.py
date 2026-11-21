@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import html
 import sqlite3
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QTextBrowser
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTextBrowser
 
 from .source_availability import capability, enabled_ids, health_text, source_link
 
@@ -69,6 +69,24 @@ def build_sources(window):
     panel.layout.addWidget(label("Automatic feeds can collect reports. Website-only entries open in your browser; they are not connected feeds. Enabling does not override pause, access rules or provider retry limits.", "Muted", True))
     window.source_summary = label("", "Muted", True)
     panel.layout.addWidget(window.source_summary)
+    filters = QHBoxLayout()
+    window.source_search = QLineEdit()
+    window.source_search.setPlaceholderText("Search all sources: name, ID, topic, country or publisher…")
+    window.source_search.setClearButtonEnabled(True)
+    window.source_search.setAccessibleName("Search the complete source registry")
+    filters.addWidget(window.source_search, 1)
+    window.source_filter = QComboBox()
+    window.source_filter.setAccessibleName("Source collection filter")
+    for text, key in (("All sources", "all"), ("Enabled collectors", "enabled"),
+                      ("Available collectors", "available"), ("Off collectors", "off"),
+                      ("Not checked", "unchecked"), ("Needs attention", "attention"),
+                      ("Website / setup / unavailable", "unavailable")):
+        window.source_filter.addItem(text, key)
+    filters.addWidget(window.source_filter)
+    filters.addWidget(button("Show all", lambda: reset_source_filters(window)))
+    panel.layout.addLayout(filters)
+    window.source_visible_count = label("", "Muted", True)
+    panel.layout.addWidget(window.source_visible_count)
     window.source_table = QTableWidget(0, 10)
     window.source_table.setHorizontalHeaderLabels(["Source", "Type", "Collection", "Last result", "Last successful check", "Newest publication", "Next due", "Minimum interval", "Collection action", "Provider page"])
     window._configure_table(window.source_table)
@@ -82,11 +100,120 @@ def build_sources(window):
     window.source_table.setAccessibleName("Providers, collection controls and observed source health")
     window.source_table.itemSelectionChanged.connect(window._source_selected)
     panel.layout.addWidget(window.source_table, 3)
+    # The batch collector is not a catalog publisher and has its own opt-in
+    # and durable scheduling. It must be visible here without pretending that
+    # every website mentioned in GDELT is another configured source feed.
+    batches = QHBoxLayout()
+    window.source_batch_status = label("GDELT batch collector: status not yet available", "Muted", True)
+    batches.addWidget(window.source_batch_status, 1)
+    batches.addWidget(button("Batch details", lambda: show_batch_source_details(window)))
+    batches.addWidget(button("Batch settings", lambda: window.open_page(6)))
+    panel.layout.addLayout(batches)
     window.source_browser = QTextBrowser()
     window.source_browser.setOpenExternalLinks(False)
     window.source_browser.anchorClicked.connect(lambda url: window.controller.open_url(url.toString()))
     panel.layout.addWidget(window.source_browser, 1)
     window.pages.addWidget(panel)
+    window.source_search.textChanged.connect(lambda *_: apply_source_filters(window))
+    window.source_filter.currentIndexChanged.connect(lambda *_: apply_source_filters(window))
+    # Hidden row indexes do not identify providers after sorting. Reapply
+    # only the in-memory display filter when the model rearranges its rows.
+    window.source_table.model().layoutChanged.connect(lambda *_: apply_source_filters(window))
+    # Reuse the already-recorded Settings status AFTER its existing signal
+    # handlers run. This adds no SQL, source poll or network activity to idle
+    # Sources refreshes, including during a collector-held Store lock.
+    window._source_batch_timer = QTimer(window)
+    window._source_batch_timer.setSingleShot(True)
+    window._source_batch_timer.setInterval(0)
+    window._source_batch_timer.timeout.connect(lambda: refresh_batch_source_status(window))
+    for name in ("gdelt_status_changed", "data_changed"):
+        signal = getattr(window.controller, name, None)
+        if signal is not None:
+            signal.connect(window._source_batch_timer.start)
+    window._source_batch_timer.start()
+
+
+def refresh_batch_source_status(window):
+    """Show existing in-memory/recorded GDELT status, never query on Qt here."""
+    controls = getattr(window, "gdelt_controls", None)
+    service = getattr(window.controller, "_gdelt", None)
+    if controls is None or service is None:
+        text = "GDELT batch collector: recorded status not yet available; see Batch settings."
+        detail = text
+    else:
+        enabled = getattr(controls, "_saved_enabled", False) is True
+        active = bool(getattr(service, "active", False))
+        running = getattr(service, "process", None) is not None
+        current = ("worker running" if running else "active; waiting for next allowed check"
+                   if active else "monitoring paused" if enabled else "off")
+        recorded = controls.status_label.text()
+        first_line = recorded.splitlines()[0] if recorded else "not yet available"
+        text = ("GDELT 15-minute batches · " + ("Enabled" if enabled else "Off") +
+                " · " + current + ". Recorded Settings status: " + first_line)
+        detail = ("GDELT 15-minute batch archive — separate collector, not additional registered publishers.\n" +
+                  "Configured: " + ("enabled" if enabled else "off") + "; current worker: " + current +
+                  "\nRecorded collector status (no new request made by this view):\n" + recorded +
+                  "\nCoded event records and linked websites are not verified incidents or independently configured source feeds.")
+    if window.source_batch_status.text() != text:
+        window.source_batch_status.setText(text)
+    window.source_batch_status.setToolTip("<pre>" + html.escape(detail) + "</pre>")
+    window._source_batch_details = detail
+
+
+def show_batch_source_details(window):
+    refresh_batch_source_status(window)
+    window.source_table.clearSelection()
+    window.source_table.setCurrentCell(-1, -1)
+    window.source_browser.setPlainText(window._source_batch_details)
+
+
+def reset_source_filters(window):
+    blocked = window.source_search.blockSignals(True)
+    window.source_search.clear()
+    window.source_search.blockSignals(blocked)
+    blocked = window.source_filter.blockSignals(True)
+    window.source_filter.setCurrentIndex(0)
+    window.source_filter.blockSignals(blocked)
+    apply_source_filters(window)
+
+
+def apply_source_filters(window):
+    """Search every displayed registry row; never fetch or enable a source."""
+    if not hasattr(window, "source_search"):
+        return
+    table = window.source_table
+    query = window.source_search.text().strip().casefold()
+    mode = window.source_filter.currentData() or "all"
+    enabled = getattr(window, "_source_inventory_enabled", frozenset())
+    states = getattr(window, "_source_inventory_states", {})
+    matches = 0
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        source = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not isinstance(source, dict):
+            continue
+        sid = source.get("id")
+        available = capability(source)[0]
+        state = states.get(sid) or {}
+        status = str(state.get("status") or "").casefold()
+        attention = (status in {"error", "failed", "denied", "rate_limited", "unavailable", "stale"}
+                     or state.get("freshness") == "stale")
+        admitted = (mode == "all" or mode == "enabled" and sid in enabled
+                    or mode == "available" and available
+                    or mode == "off" and available and sid not in enabled
+                    or mode == "unavailable" and not available
+                    or mode == "attention" and available and attention
+                    or mode == "unchecked" and available and not state.get("last_attempt")
+                    and not state.get("last_success") and status in {"", "not_checked"})
+        searchable = " ".join(str(source.get(key) or "") for key in
+                              ("id", "name", "publisher_origin_id", "country", "region",
+                               "category", "homepage", "url")).casefold()
+        visible = admitted and (not query or query in searchable)
+        table.setRowHidden(row, not visible)
+        matches += int(visible)
+    window.source_visible_count.setText(
+        f"Showing {matches} of {table.rowCount()} registry entries · {len(enabled)} enabled collectors. "
+        "No rows are removed by search. GDELT batch collection is shown separately below.")
 
 
 def _catalog_fingerprint(catalog):
@@ -183,6 +310,13 @@ def populate_sources(window, *, idle=False):
     old_rows = _existing_source_rows(table)
     reuse = (bool(old_rows) and set(old_rows) == {s["id"] for s in catalog}
              and getattr(window, "_source_registry_fingerprint", None) == fingerprint)
+    refresh_details = (selected_id is not None and
+                       (not reuse or prior_visual != visual_key or prior_states is None or
+                        states.get(selected_id, {}) != prior_states.get(selected_id, {})))
+    # Filter the exact state represented in the table, not a new blocking
+    # preference/status read for each key press or source-status pulse.
+    window._source_inventory_enabled = frozenset(enabled)
+    window._source_inventory_states = states
     blocked = table.blockSignals(True)
     sorting = table.isSortingEnabled()
     selected_row = None
@@ -260,7 +394,9 @@ def populate_sources(window, *, idle=False):
                 table.setCellWidget(row, 9, _site_button(window, source))
             if sid == selected_id:
                 selected_row = row
-        summary = f"{collectable} automatic feeds · {len(enabled)} enabled · {len(catalog)-collectable} website/setup/unavailable entries (not collecting)"
+        summary = (f"{collectable} automatic feeds · {len(enabled)} enabled · "
+                   f"{len(catalog)-collectable} website/setup/unavailable entries (not collecting) · "
+                   f"{len(catalog)} total registered entries, including sources never checked")
         if window.source_summary.text() != summary:
             window.source_summary.setText(summary)
         if not reuse:
@@ -274,6 +410,7 @@ def populate_sources(window, *, idle=False):
     finally:
         table.setSortingEnabled(sorting)
         table.blockSignals(blocked)
+    apply_source_filters(window)
     # A Store write may occur while the table is being rendered. In that
     # case do not bless a mixed status snapshot as current: the next
     # coalesced source-status signal must be allowed to reconcile it.
@@ -287,10 +424,12 @@ def populate_sources(window, *, idle=False):
         window._source_status_render_key = None
         window._source_status_last_states = None
         window._source_status_visual_key = None
-    if selected_row is not None and not reuse:
-        # Passive detail rendering must not reopen SQLite after the snapshot.
-        # Deliberate user row selection still requests fresh Store evidence.
-        source_selected(window, states=states if idle else None)
+    if selected_row is not None and refresh_details:
+        # A reused selected row can change collection/monitoring or receive a
+        # new error/recovery without changing selection. Its detail pane must
+        # not keep the old result or collection mode indefinitely.
+        # Reuse this same batch snapshot, including on the passive idle path.
+        source_selected(window, states=states)
     return current_revision == store_revision if idle else True
 
 
@@ -309,10 +448,18 @@ def source_selected(window, *, states=None):
     title, url = source_link(source)
     esc = lambda value: html.escape(str(value or ""), quote=True)
     link = f"<p><a href='{esc(url)}'>{esc(title)}</a> (external browser)</p>" if url else ""
-    fields = [("Type", kind), ("Next step", reason), ("Access", source.get("access")),
+    collection = window.source_table.item(window.source_table.currentRow(), 2)
+    fields = [("Source ID", source["id"]), ("Type", kind),
+              ("Collection", collection.text() if collection else "Unknown"),
+              ("Topic", source.get("category") or "Not specified"),
+              ("Publisher coverage", source.get("country") or source.get("region") or "Not specified"),
+              ("Next step", reason), ("Access", source.get("access")),
               ("License", source.get("license")), ("Attribution", source.get("attribution")),
               ("Limitation", source.get("limitation") or source.get("notes")),
-              ("Last result", health_text(state)), ("Last failure", timestamp(state.get("last_failure"))),
+              ("Last recorded result", health_text(state)),
+              ("Last attempted check", timestamp(state.get("last_attempt"))),
+              ("Last successful check", timestamp(state.get("last_success"))),
+              ("Last failure", timestamp(state.get("last_failure"))),
               ("Last error", state.get("error") or "None recorded"),
               ("Newest publication", timestamp(state.get("latest_publication")) if state.get("latest_publication") else "Unknown; retrieval does not prove fresh reporting")]
     window.source_browser.setHtml(f"<h3>{esc(source.get('name', source['id']))}</h3>" + link + "<p>" + "<br>".join(f"<b>{esc(k)}:</b> {esc(v)}" for k, v in fields) + "</p>")

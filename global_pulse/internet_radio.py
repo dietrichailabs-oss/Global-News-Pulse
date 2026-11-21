@@ -2,39 +2,64 @@
 
 Only publisher-documented MP3 addresses can be passed to the native audio backend.
 A user may explicitly connect one specific public HTTPS WebSDR/KiwiSDR receiver
-inside an isolated memory-only WebEngine session. Feed/event content and saved
+or a separately consented, finite reviewed HTTP WebSDR origin inside an isolated
+memory-only WebEngine session. Feed/event content and saved
 settings cannot silently supply playback or receiver URLs. No recording: decoded
 audio buffers are counted for liveness, never retained.
 """
 from __future__ import annotations
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
+from html import escape
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Qt, QItemSelectionModel
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider, QMessageBox, QLineEdit
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
+    QSlider, QMessageBox, QLineEdit, QTabWidget, QScrollArea, QSizePolicy,
+    QTableView, QHeaderView, QAbstractItemView,
+)
 from .security import safe_url
+from .local_radio import LocalRadioPanel
 from .sdr_directory import (
-    DIRECTORY_URLS, MAX_DIRECTORY_BYTES, parse_directory, public_receiver_url,
+    DIRECTORY_URLS, DIRECTORY_IMPORT_RESTRICTIONS, MAX_DIRECTORY_BYTES, MAX_RECEIVERS,
+    CURATED_WEBDR_HTTP_ORIGINS, curated_websdr_receivers, curated_receiver_for_url,
+    receiver_range_label, parse_directory, public_receiver_url,
 )
 
 STATIONS = (
-    # News / talk only. Music-only WQXR, New Sounds and Operavore entries were
-    # removed after physical owner testing; culture/music programming is kept
-    # out of the default news radio bank.
-    {"id":"wnyc_fm","name":"WNYC 93.9 FM","language":"English · News/Talk","url":"https://fm939.wnyc.org/wnycfm","documentation":"https://prod.wnyc.org/audio-other-formats/"},
-    {"id":"deutschlandfunk","name":"Deutschlandfunk","language":"German · News/Talk","url":"https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
-    {"id":"wnyc_am","name":"WNYC 820 AM","language":"English · News/Talk","url":"https://am820.wnyc.org/wnycam","documentation":"https://prod.wnyc.org/audio-other-formats/"},
-    {"id":"deutschlandfunk_nova","name":"Deutschlandfunk Nova","language":"German · News/Talk","url":"https://st03.sslstream.dlf.de/dlf/03/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
-    {"id":"deutschlandfunk_debatten","name":"Deutschlandfunk Dokumente & Debatten","language":"German · News/Debate","url":"https://st04.sslstream.dlf.de/dlf/04/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    # Deliberately finite publisher-documented HTTPS MP3 streams, not arbitrary
+    # URLs supplied by a community aggregator. Stream availability, user region,
+    # broadcaster redistribution rights and native codec support require QA.
+    # The dial labels ONLY a publisher-advertised broadcast RF frequency.
+    {"id":"wnyc_fm","name":"WNYC 93.9 FM","category":"News & Talk","dial":"FM · 93.9 MHz","language":"English","url":"https://fm939.wnyc.org/wnycfm","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"wnyc_am","name":"WNYC 820 AM","category":"News & Talk","dial":"AM · 820 kHz","language":"English","url":"https://am820.wnyc.org/wnycam","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"wqxr","name":"WQXR 105.9 FM","category":"Classical","dial":"FM · 105.9 MHz","language":"English","url":"https://stream.wqxr.org/wqxr","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"new_sounds","name":"New Sounds","category":"Music","dial":"INTERNET STREAM","language":"English","url":"https://q2stream.wqxr.org/q2","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"operavore","name":"Operavore","category":"Classical","dial":"INTERNET STREAM","language":"English","url":"https://opera-stream.wqxr.org/operavore","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"new_standards","name":"New Standards","category":"Music","dial":"INTERNET STREAM","language":"English","url":"https://tjc.wnyc.org/js-stream","documentation":"https://prod.wnyc.org/audio-other-formats/"},
+    {"id":"deutschlandfunk","name":"Deutschlandfunk","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_kultur","name":"Deutschlandfunk Kultur","category":"Culture","dial":"INTERNET STREAM","language":"German","url":"https://st02.sslstream.dlf.de/dlf/02/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_nova","name":"Deutschlandfunk Nova","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st03.sslstream.dlf.de/dlf/03/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"deutschlandfunk_debatten","name":"Deutschlandfunk Dokumente & Debatten","category":"News & Talk","dial":"INTERNET STREAM","language":"German","url":"https://st04.sslstream.dlf.de/dlf/04/128/mp3/stream.mp3","documentation":"https://www.deutschlandradio.de/streamingdienste-100.html"},
+    {"id":"france_inter","name":"France Inter","category":"News & Talk","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceinter-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_info","name":"franceinfo","category":"News & Talk","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceinfo-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_culture","name":"France Culture","category":"Culture","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/franceculture-lofi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"france_musique","name":"France Musique","category":"Classical","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/francemusique-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-brands"},
+    {"id":"fip","name":"FIP","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fip-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_rock","name":"FIP Rock","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fiprock-midfi.mp3?id_station=71","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_electro","name":"FIP Electro","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fipelectro-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
+    {"id":"fip_metal","name":"FIP Metal","category":"Music","dial":"INTERNET STREAM","language":"French","url":"https://icecast.radiofrance.fr/fipmetal-midfi.mp3?id=openapi","documentation":"https://developers.radiofrance.fr/doc/en/tutorial-by-example/list-locals-and-webradios"},
 )
+BROADCAST_CATEGORIES = ("All stations", "News & Talk", "Music", "Classical", "Culture")
 
 # The owner tested this public WebSDR on its operator's original HTTP/8901
-# endpoint. It is a legacy *unencrypted* service; only this exact origin is
-# admitted for private in-app testing after a separate consent prompt. No
-# general-purpose HTTP/any-port WebEngine access is enabled.
+# endpoint. Additional individually supplied receiver origins live in the finite
+# curated allowlist; each requires its own explicit unencrypted-transport consent.
+# No general-purpose HTTP/any-port WebEngine access is enabled.
 OWNER_TEST_WEBDR_ORIGIN = "http://na5b.com:8901/"
 
 def _owner_legacy_websdr(info, kind):
@@ -42,8 +67,9 @@ def _owner_legacy_websdr(info, kind):
         return False
     from urllib.parse import urlsplit
     url=urlsplit(str((info or {}).get("url") or ""))
-    return (url.scheme == "http" and url.hostname == "na5b.com"
-            and url.port == 8901 and not url.username and not url.password)
+    return (url.scheme == "http"
+            and (url.hostname, url.port) in CURATED_WEBDR_HTTP_ORIGINS
+            and not url.username and not url.password)
 
 def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
     """Compare actual URL scheme/host/effective port, not QUrl's caller default.
@@ -63,7 +89,7 @@ def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
 
 
 HAM_DIRECTORIES = (
-    {"id":"websdr","name":"WebSDR public receivers","url":"https://websdr.org/","note":"Manual ham-band tuning on public receiver pages; provider controls availability."},
+    {"id":"websdr","name":"WebSDR public receivers","url":"http://www.websdr.org/","note":"The provider documents an HTTP-only public directory; no automatic connection."},
     {"id":"kiwisdr","name":"KiwiSDR public receivers","url":"https://kiwisdr.com/public/","note":"Manual ham/shortwave tuning on public receiver pages; provider controls availability."},
 )
 
@@ -202,6 +228,7 @@ class RadioPanel(QWidget):
         self._epoch = 0
         self._consented = False
         self._closed = False
+        self._getter = None
         self._setter = None
         self.presets = [None]*5
         self.receiver_view = None
@@ -214,6 +241,9 @@ class RadioPanel(QWidget):
         # Never save page URLs, credentials, contents or player activity.
         self._sdr_load_error = ""
         self.sdr_state = "OFF"
+        # One user-requested latest tune may wait for the current page load.
+        # Never overlap two WebEngine navigations on the same receiver view.
+        self._pending_tune = None
         self.sdr_directory_cache = {}
         self.sdr_directory_reply = None
         self.sdr_directory_data = bytearray()
@@ -231,13 +261,37 @@ class RadioPanel(QWidget):
         self.scan_step = None
         self.scan_direction = 1
         self.setObjectName("InternetRadio")
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8,8,8,8)
+        self.radio_tabs = QTabWidget(self)
+        self.radio_tabs.setAccessibleName("Choose broadcast radio or HAM SDR tuner")
+        broadcast_tab=QScrollArea(self.radio_tabs)
+        broadcast_tab.setWidgetResizable(True)
+        broadcast_tab.setAccessibleName("Scrollable broadcast radio controls and local station discovery")
+        broadcast_content=QWidget()
+        broadcast_tab.setWidget(broadcast_content)
+        self.broadcast_scroll=broadcast_tab
+        ham_tab=QWidget(self.radio_tabs)
+        self.radio_tabs.addTab(broadcast_tab,"AM / FM / INTERNET RADIO")
+        self.radio_tabs.addTab(ham_tab,"HAM / SDR")
+        root.addWidget(self.radio_tabs)
+        layout = QVBoxLayout(broadcast_content)
         layout.setContentsMargins(8,8,8,8)
-        title = QLabel("INTERNET RADIO")
+        title = QLabel("BROADCAST RADIO — DIRECT INTERNET STREAMS")
         title.setObjectName("Eyebrow")
         layout.addWidget(title)
+        category_row=QHBoxLayout()
+        category_row.addWidget(QLabel("Genre"))
+        self.broadcast_category=QComboBox()
+        self.broadcast_category.setAccessibleName("Broadcast radio station genre")
+        for category in BROADCAST_CATEGORIES:
+            self.broadcast_category.addItem(category,category)
+        category_row.addWidget(self.broadcast_category,1)
+        self.broadcast_count=QLabel(f"{len(STATIONS)} documented streams")
+        category_row.addWidget(self.broadcast_count)
+        layout.addLayout(category_row)
         tuning = QHBoxLayout()
-        self.previous = QPushButton("◀")
+        self.previous = QPushButton("◀ PREV")
         self.previous.setAccessibleName("Previous radio station")
         self.previous.clicked.connect(lambda:self.select_relative(-1))
         self.selector = QComboBox()
@@ -246,18 +300,28 @@ class RadioPanel(QWidget):
         self.selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         for item in STATIONS:
             self.selector.addItem(item["name"], item["id"])
-        self.next = QPushButton("▶")
+        self.broadcast_category.currentIndexChanged.connect(self._category_changed)
+        self.next = QPushButton("NEXT ▶")
         self.next.setAccessibleName("Next radio station")
         self.next.clicked.connect(lambda:self.select_relative(1))
         tuning.addWidget(self.previous);tuning.addWidget(self.selector,1);tuning.addWidget(self.next)
         layout.addLayout(tuning)
+        self.frequency_display=QLabel()
+        self.frequency_display.setTextFormat(Qt.TextFormat.PlainText)
+        self.frequency_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.frequency_display.setAccessibleName("Exact published AM FM frequency or internet-only stream")
+        self.frequency_display.setStyleSheet(
+            "font-family:Consolas,monospace;font-size:30px;font-weight:800;padding:8px;background:#101818;"
+            "color:#86f5c7;border:1px solid #407b67;border-radius:8px;"
+        )
+        layout.addWidget(self.frequency_display)
         self.display = QLabel()
         self.display.setTextFormat(Qt.TextFormat.PlainText)
         self.display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display.setWordWrap(True)
         self.display.setMinimumHeight(75)
-        self.display.setStyleSheet("font-size:19px;font-weight:600;padding:12px;background:#151619;border:1px solid #494052;border-radius:8px;")
-        layout.addWidget(self.display,1)
+        self.display.setStyleSheet("font-size:19px;font-weight:600;padding:10px;background:#151619;border:1px solid #494052;border-radius:8px;")
+        layout.addWidget(self.display)
         self.status = QLabel("OFF")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setAccessibleName("Radio playback state")
@@ -291,14 +355,92 @@ class RadioPanel(QWidget):
             control.customContextMenuRequested.connect(lambda pos,i=index:self.save_preset(i))
             saved.addWidget(control);self.preset_buttons.append(control)
         layout.addLayout(saved)
-        help_text=QLabel("Preset: click to recall, right-click to save. Streams connect directly to their broadcasters; no recording.")
+        preset_actions=QHBoxLayout()
+        self.preset_slot=QComboBox()
+        self.preset_slot.setAccessibleName("Preset slot to save, recall or clear")
+        for index in range(5):
+            self.preset_slot.addItem(f"Preset {index+1}",index)
+        self.preset_save=QPushButton("Save preset")
+        self.preset_save.setAccessibleName("Save current station to selected preset")
+        self.preset_save.clicked.connect(
+            lambda:self.save_preset(self.preset_slot.currentData())
+        )
+        self.preset_recall=QPushButton("Recall preset")
+        self.preset_recall.clicked.connect(
+            lambda:self.recall_preset(self.preset_slot.currentData())
+        )
+        self.preset_clear=QPushButton("Clear preset")
+        self.preset_clear.clicked.connect(
+            lambda:self.clear_preset(self.preset_slot.currentData())
+        )
+        preset_actions.addWidget(self.preset_slot,1)
+        preset_actions.addWidget(self.preset_save)
+        preset_actions.addWidget(self.preset_recall)
+        preset_actions.addWidget(self.preset_clear)
+        layout.addLayout(preset_actions)
+        self.preset_status=QLabel("Choose a station and preset slot, then Save preset.")
+        self.preset_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.preset_status.setWordWrap(True)
+        self.preset_status.setAccessibleName("Radio preset save or recall result")
+        layout.addWidget(self.preset_status)
+        help_text=QLabel("Saved presets survive restarting Pulse. Number buttons recall; right-click remains a save shortcut. Streams connect directly to broadcasters; no recording.")
         help_text.setWordWrap(True)
         help_text.setObjectName("Muted")
         layout.addWidget(help_text)
+        more_row=QHBoxLayout()
+        self.browse_radio=QPushButton("Explore more radio stations")
+        self.browse_radio.setAccessibleName("Open community radio directory in browser")
+        self.browse_radio.clicked.connect(self._browse_radio_directory)
+        more_row.addWidget(self.browse_radio)
+        more_row.addStretch()
+        layout.addLayout(more_row)
+        disclaimer=QLabel(
+            "Only publisher-documented HTTPS MP3 streams play inside Pulse. "
+            "Some stations have no fixed AM/FM frequency. The external community "
+            "directory is for discovery, not a claim of tested playback or reuse rights."
+        )
+        disclaimer.setWordWrap(True)
+        disclaimer.setObjectName("Muted")
+        layout.addWidget(disclaimer)
+        self.local_radio=LocalRadioPanel(self,catalog=STATIONS)
+        self.local_radio.station_selected.connect(self.select_station_by_id)
+        layout.addWidget(self.local_radio)
+        layout.addStretch(1)
 
-        ham_title=QLabel("HAM / SDR RECEIVERS")
-        ham_title.setObjectName("Eyebrow")
-        layout.addWidget(ham_title)
+        layout=QVBoxLayout(ham_tab)
+        self.ham_layout=layout
+        # Keep real vertical headroom for native Windows font metrics. The tab
+        # already labels HAM / SDR, so start with the selected receiver instead
+        # of stacking a duplicate eyebrow above the actual controls.
+        layout.setContentsMargins(6,6,6,6)
+        layout.setSpacing(4)
+        self.ham_receiver_name=QLabel("Choose a public receiver")
+        self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_receiver_name.setWordWrap(True)
+        self.ham_receiver_name.setStyleSheet("font-size:15px;font-weight:700;color:#b9e8ee;")
+        layout.addWidget(self.ham_receiver_name)
+        self.ham_frequency_display=QLabel("7.100 MHz")
+        self.ham_frequency_display.setAccessibleName("Pulse requested HAM frequency and mode, not verified on operator")
+        self.ham_frequency_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ham_frequency_display.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_frequency_display.setStyleSheet(
+            "font-family:Consolas,monospace;font-size:28px;font-weight:800;color:#86f5c7;background:#101818;"
+            "padding:4px;border:1px solid #407b67;border-radius:8px;"
+        )
+        layout.addWidget(self.ham_frequency_display)
+        self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
+        self.ham_frequency_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ham_frequency_detail.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_frequency_detail.setWordWrap(True)
+        self.ham_frequency_detail.setAccessibleName("Exact requested kilohertz and mode; operator playback unverified")
+        layout.addWidget(self.ham_frequency_detail)
+        self.ham_bands=QLabel(
+            "Available bands: choose a receiver. Only operator-supplied bands are shown."
+        )
+        self.ham_bands.setTextFormat(Qt.TextFormat.PlainText)
+        self.ham_bands.setWordWrap(True)
+        self.ham_bands.setAccessibleName("Bands reported for selected SDR receiver")
+        layout.addWidget(self.ham_bands)
         ham_row=QHBoxLayout()
         self.ham_selector=QComboBox()
         self.ham_selector.setAccessibleName("Public ham and SDR receiver directory")
@@ -311,28 +453,69 @@ class RadioPanel(QWidget):
         layout.addLayout(ham_row)
 
         discovery_row=QHBoxLayout()
-        self.receiver_picker=QComboBox()
-        self.receiver_picker.setAccessibleName("Discovered public SDR receiver")
+        # Keep one selection model for the catalog and existing URL/tuning
+        # machinery. The old editable combo looked like an empty URL field;
+        # expose its actual records in a permanent two-column list instead.
+        self.receiver_picker=QComboBox(ham_tab)
+        self.receiver_picker.setAccessibleName("Choose public SDR receiver and listed coverage")
         self.receiver_picker.setMinimumWidth(0)
         self.receiver_picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.receiver_picker.setEditable(True)
         self.receiver_picker.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.receiver_picker.setMaxVisibleItems(20)
+        self.receiver_picker.lineEdit().setPlaceholderText("Search loaded receivers by name or location")
         self.receiver_picker.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.receiver_picker.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         self.receiver_picker.addItem("Select a receiver — Refresh list",None)
         self.receiver_picker.currentIndexChanged.connect(self._select_discovered_receiver)
+        self.receiver_picker.hide()
+        self.receiver_search=QLineEdit()
+        self.receiver_search.setPlaceholderText("Search receiver names, location or bands")
+        self.receiver_search.setAccessibleName("Search the visible public receiver list")
+        self.receiver_search.setClearButtonEnabled(True)
+        self.receiver_search.setMinimumWidth(0)
+        self.receiver_search.textChanged.connect(self._filter_receiver_list)
+        self.receiver_list=QTableView(ham_tab)
+        self.receiver_list.setAccessibleName("Public receivers: name and operator-listed coverage")
+        self.receiver_list.setModel(self.receiver_picker.model())
+        self.receiver_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.receiver_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.receiver_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.receiver_list.setWordWrap(False)
+        self.receiver_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.receiver_list.setShowGrid(False)
+        self.receiver_list.setAlternatingRowColors(True)
+        self.receiver_list.setMinimumWidth(0)
+        self.receiver_list.setMinimumHeight(50)
+        self.receiver_list.setMaximumHeight(144)
+        self.receiver_list.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+        self.receiver_list.verticalHeader().hide()
+        self.receiver_list.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.receiver_list.verticalHeader().setDefaultSectionSize(23)
+        self.receiver_list.horizontalHeader().hide()
+        self.receiver_list.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.receiver_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.receiver_list.setStyleSheet(
+            "QTableView { background:#101318; alternate-background-color:#171b23; border:1px solid #46516a; }"
+            "QTableView::item { padding:2px 5px; }"
+            "QTableView::item:selected { background:#42345f; color:#ffffff; }"
+        )
+        self.receiver_list.selectionModel().currentRowChanged.connect(self._receiver_list_selected)
+        self._receiver_selections={}
         self.receiver_refresh=QPushButton("Refresh list")
         self.receiver_refresh.clicked.connect(self.refresh_receiver_directory)
         self.receiver_external=QPushButton("Open receiver in browser")
         self.receiver_external.clicked.connect(self.open_selected_receiver)
         self.receiver_external.setEnabled(False)
-        discovery_row.addWidget(self.receiver_picker,1)
+        discovery_row.addWidget(self.receiver_search,1)
         discovery_row.addWidget(self.receiver_refresh)
         discovery_row.addWidget(self.receiver_external)
         layout.addLayout(discovery_row)
+        layout.insertWidget(layout.count()-1,self.receiver_list,1)
         self.receiver_list_note=QLabel(
             "No list loaded. Refresh retrieves public directory links on request; receiver status is unverified."
         )
+        self.receiver_list_note.setTextFormat(Qt.TextFormat.PlainText)
         self.receiver_list_note.setWordWrap(True)
         self.receiver_list_note.setObjectName("Muted")
         layout.addWidget(self.receiver_list_note)
@@ -408,12 +591,40 @@ class RadioPanel(QWidget):
             self.mode.addItem(label,value)
         self.tune_button=QPushButton("Tune")
         self.tune_button.clicked.connect(self._manual_tune)
+        self.frequency.textChanged.connect(lambda _value:self._update_ham_dial())
+        self.mode.currentIndexChanged.connect(lambda _index:self._update_ham_dial())
         tuner_row.addWidget(self.receiver_type)
         tuner_row.addWidget(QLabel("kHz"))
         tuner_row.addWidget(self.frequency,1)
         tuner_row.addWidget(self.mode)
         tuner_row.addWidget(self.tune_button)
         layout.addLayout(tuner_row)
+        stepping=QHBoxLayout()
+        self.ham_back=QPushButton("◀ LOWER")
+        self.ham_back.setAccessibleName("Tune lower by selected kilohertz step")
+        self.ham_back.clicked.connect(lambda:self.step_receiver(-1))
+        self.ham_step=QComboBox()
+        self.ham_step.setAccessibleName("HAM tuning increment in kilohertz")
+        for step in (1,5,10,25,100):
+            self.ham_step.addItem(f"{step} kHz step",step)
+        self.ham_step.setCurrentIndex(1)
+        self.ham_band=QComboBox()
+        self.ham_band.setAccessibleName("Selected receiver listed frequency range in megahertz")
+        self.ham_band.setMinimumWidth(0)
+        self.ham_band.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.ham_band.setMinimumContentsLength(8)
+        self.ham_band.setPlaceholderText("Outside listed ranges")
+        self.ham_band.addItem("Range not listed",None)
+        self.ham_band.setEnabled(False)
+        self.ham_band.activated.connect(self._choose_receiver_band)
+        self.ham_forward=QPushButton("HIGHER ▶")
+        self.ham_forward.setAccessibleName("Tune higher by selected kilohertz step")
+        self.ham_forward.clicked.connect(lambda:self.step_receiver(1))
+        stepping.addWidget(self.ham_back)
+        stepping.addWidget(self.ham_step)
+        stepping.addWidget(self.ham_band,1)
+        stepping.addWidget(self.ham_forward)
+        layout.addLayout(stepping)
 
         scan_row=QHBoxLayout()
         self.scan_start=QLineEdit("7000")
@@ -434,7 +645,15 @@ class RadioPanel(QWidget):
         scan_row.addWidget(QLabel("Step"));scan_row.addWidget(self.scan_step_edit)
         scan_row.addWidget(QLabel("Dwell s"));scan_row.addWidget(self.scan_dwell)
         scan_row.addWidget(self.scan_button);scan_row.addWidget(self.scan_stop)
-        layout.addLayout(scan_row)
+        self.scan_controls=QWidget(ham_tab)
+        self.scan_controls.setLayout(scan_row)
+        self.scan_controls.hide()
+        self.advanced_scan=QPushButton("Advanced frequency scan ▸")
+        self.advanced_scan.setCheckable(True)
+        self.advanced_scan.setAccessibleName("Show or hide advanced HAM frequency scan")
+        self.advanced_scan.toggled.connect(self._advanced_scan_toggled)
+        layout.addWidget(self.advanced_scan)
+        layout.addWidget(self.scan_controls)
 
         self.ham_note=QLabel(
             "Receiver screen/waterfall is the public provider's own embedded UI. Tune sets the receiver URL frequency/mode. "
@@ -444,39 +663,368 @@ class RadioPanel(QWidget):
         self.ham_note.setWordWrap(True);self.ham_note.setObjectName("Muted")
         layout.addWidget(self.ham_note)
 
+        # The core tuner is the first screen, not below a page of transport
+        # diagnostics. These controls remain above the receiver surface even
+        # when long directory labels or the advanced details are shown.
+        layout.removeItem(stepping)
+        layout.insertLayout(3,stepping)
+        layout.removeItem(tuner_row)
+        layout.insertLayout(4,tuner_row)
+        receiver_row.removeWidget(self.receiver_connect)
+        receiver_row.removeWidget(self.receiver_off)
+        discovery_row.removeWidget(self.receiver_external)
+        discovery_row.addWidget(self.receiver_connect)
+        self.receiver_browser_quick=QPushButton("Open in browser")
+        self.receiver_browser_quick.setAccessibleName("Open selected browser-only receiver")
+        self.receiver_browser_quick.clicked.connect(self.open_selected_receiver)
+        self.receiver_browser_quick.hide()
+        discovery_row.addWidget(self.receiver_browser_quick)
+        discovery_row.addWidget(self.receiver_off)
+        self.receiver_connect.setText("Connect")
+        self.receiver_off.setText("Stop")
+        self.ham_details=QWidget(ham_tab)
+        details_layout=QVBoxLayout(self.ham_details)
+        details_layout.setContentsMargins(4,4,4,4)
+        for detail_widget in (self.ham_bands,self.receiver_list_note):
+            layout.removeWidget(detail_widget)
+            details_layout.addWidget(detail_widget)
+        for detail_row in (receiver_row,legacy_row,audio_row):
+            layout.removeItem(detail_row)
+            details_layout.addLayout(detail_row)
+        details_layout.addWidget(self.receiver_external)
+        for detail_widget in (self.sdr_volume_help,self.advanced_scan,
+                              self.scan_controls,self.ham_note):
+            layout.removeWidget(detail_widget)
+            details_layout.addWidget(detail_widget)
+        self.ham_details_scroll=QScrollArea(ham_tab)
+        self.ham_details_scroll.setWidgetResizable(True)
+        self.ham_details_scroll.setWidget(self.ham_details)
+        self.ham_details_scroll.setMaximumHeight(180)
+        self.ham_details_scroll.setMinimumHeight(0)
+        self.ham_details_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+        self.ham_details_scroll.hide()
+        self.ham_details_toggle=QPushButton("Receiver details, volume and scan ▸")
+        self.ham_details_toggle.setCheckable(True)
+        self.ham_details_toggle.setAccessibleName("Show receiver details, manual URL, volume and advanced scan")
+        self.ham_details_toggle.toggled.connect(self._ham_details_toggled)
+        layout.addWidget(self.ham_details_toggle)
+        layout.addWidget(self.ham_details_scroll,1)
+        self.directory_summary=QLabel("Load the receiver directory, choose a receiver, then Connect.")
+        self.directory_summary.setTextFormat(Qt.TextFormat.PlainText)
+        self.directory_summary.setWordWrap(False)
+        self.directory_summary.setAccessibleName("Receiver directory load result")
+        layout.insertWidget(layout.indexOf(self.sdr_status),self.directory_summary)
+        for core_label in (self.ham_receiver_name,self.ham_frequency_display,
+                           self.ham_frequency_detail,self.sdr_status,self.directory_summary):
+            core_label.setMinimumWidth(0)
+            core_label.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)
+        self.ham_frequency_display.setMaximumHeight(70)
+
         self.selector.currentIndexChanged.connect(self._station_changed)
         self._station_changed()
         self._preset_labels()
+        self._update_ham_dial()
+        self._change_receiver_directory()
 
     def configure_preferences(self, getter, setter):
+        self._getter = getter
         self._setter = setter
         self.presets = valid_presets(getter("internet_radio_presets_v1",[None]*5))
         self._preset_labels()
         # Legacy receiver/frequency presets are deliberately not overwritten.
+
+    def _ham_details_toggled(self, shown):
+        self.ham_details_scroll.setVisible(bool(shown))
+        self.ham_details_toggle.setText(
+            "Receiver details, volume and scan ▾" if shown else
+            "Receiver details, volume and scan ▸"
+        )
+
+    def _category_changed(self, *_):
+        """Filter only our publisher-documented streams; never auto-fetch media."""
+        category=self.broadcast_category.currentData()
+        selected=self.selector.currentData()
+        matches=[s for s in STATIONS if category=="All stations" or s["category"]==category]
+        self.selector.blockSignals(True)
+        try:
+            self.selector.clear()
+            for item in matches:
+                self.selector.addItem(item["name"],item["id"])
+            index=self.selector.findData(selected)
+            if index>=0:
+                self.selector.setCurrentIndex(index)
+        finally:
+            self.selector.blockSignals(False)
+        self.broadcast_count.setText(f"{len(matches)} documented streams")
+        if matches and self.selector.currentData() != selected:
+            # A filter retaining the same station must not restart audio.
+            self._station_changed()
+
+    def _browse_radio_directory(self):
+        """Unvetted community links remain in the user's external browser."""
+        if self._closed:
+            return False
+        approved=QMessageBox.question(
+            self,"Explore additional radio stations?",
+            "Open the public Radio Browser community directory in your default "
+            "browser? Its catalog is not vetted for safe in-app playback, "
+            "publisher redistribution rights or actual availability. Continue?",
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )==QMessageBox.StandardButton.Yes
+        return bool(approved and QDesktopServices.openUrl(
+            QUrl("https://www.radio-browser.info/")
+        ))
+
+    def _advanced_scan_toggled(self, shown):
+        self.scan_controls.setVisible(bool(shown))
+        self.advanced_scan.setText(
+            "Advanced frequency scan ▾" if shown else
+            "Advanced frequency scan ▸"
+        )
+
+    def _update_ham_dial(self):
+        """Display the exact requested frequency, never assert RF/audio lock."""
+        try:
+            khz=self._requested_frequency_value(self.frequency.text())
+            display=f"{khz / 1000:.9f}"
+            integral,fraction=display.split(".")
+            fraction=fraction.rstrip("0").ljust(3,"0")
+            self.ham_frequency_display.setText(f"{integral}.{fraction} MHz")
+            self.ham_frequency_detail.setText(
+                f"{self._format_khz(khz)} kHz · {self.mode.currentText()} · "
+                "Pulse requested setting; receiver audio unverified"
+            )
+            self._sync_receiver_band(khz)
+        except (ValueError,TypeError):
+            self.ham_frequency_display.setText("— MHz")
+            self.ham_frequency_detail.setText(
+                "Enter a valid requested frequency in kHz"
+            )
+
+    def step_receiver(self, direction):
+        """Real button-driven tuning, bounded to valid user-requested kHz."""
+        if direction not in (-1,1) or self._closed:
+            return False
+        try:
+            previous=self._requested_frequency_value(self.frequency.text())
+            delta=int(self.ham_step.currentData())*direction
+            target=self._requested_frequency_value(round(previous+delta,6))
+        except (ValueError,TypeError,OverflowError):
+            self.ham_note.setText("Frequency step is outside the supported dial range.")
+            return False
+        self.stop_scan()
+        return self.tune_receiver(target)
+
+    def _selected_receiver_bands(self, receiver=None):
+        info=receiver if isinstance(receiver,dict) else {}
+        # Only the individually sourced built-in numeric bounds constrain tune
+        # requests. A remote directory label cannot inject ranges or authority.
+        curated=(curated_receiver_for_url(self.receiver_url.text())
+                 if self.receiver_type.currentData()=="websdr" else None)
+        ranges=curated["ranges_khz"] if curated else ()
+        self.ham_band.blockSignals(True)
+        try:
+            self.ham_band.clear()
+            if ranges:
+                for bounds in ranges:
+                    self.ham_band.addItem(receiver_range_label((bounds,)),tuple(bounds))
+                try:
+                    frequency=self._requested_frequency_value(self.frequency.text())
+                except ValueError:
+                    frequency=-1
+                for index,(start,end) in enumerate(ranges):
+                    if start<=frequency<=end:
+                        self.ham_band.setCurrentIndex(index)
+                        break
+                else:
+                    self.ham_band.setCurrentIndex(-1)
+            else:
+                self.ham_band.addItem("Range not listed",None)
+            self.ham_band.setEnabled(bool(ranges))
+        finally:
+            self.ham_band.blockSignals(False)
+        bands=info.get("bands")
+        if isinstance(bands,list):
+            labels=[str(item)[:30] for item in bands[:24]
+                    if isinstance(item,str) and item.strip()]
+        else:
+            labels=[]
+        if ranges:
+            self.ham_bands.setText(
+                "Listed coverage: "+receiver_range_label(ranges)+". "
+                +curated["provenance"]+". Reference: "+curated["documentation"]
+            )
+        elif labels:
+            self.ham_bands.setText(
+                "Operator-listed bands: "+" · ".join(labels)
+                +". Exact bounds/availability are not live verified."
+            )
+        elif self.receiver_url.text().startswith(OWNER_TEST_WEBDR_ORIGIN):
+            # Only the labels visibly reported by the owner's NA5B screenshot.
+            # Never infer MHz limits, availability or a universal band plan.
+            self.ham_bands.setText(
+                "NA5B band labels seen on owner's receiver page: "
+                "MW–160 · 80m · 40m · 30m · 25m · 20m · 15m · 10m. "
+                "Operator controls exact coverage."
+            )
+        else:
+            self.ham_bands.setText(
+                "Receiver band list unavailable from this directory entry. "
+                "Use the operator's receiver page to see actual coverage."
+            )
+
+    def _known_receiver_ranges(self):
+        if self.receiver_type.currentData()!="websdr":
+            return ()
+        row=curated_receiver_for_url(self.receiver_url.text())
+        return row["ranges_khz"] if row else ()
+
+    def _sync_receiver_band(self,frequency):
+        if not hasattr(self,"ham_band"):
+            return
+        ranges=self._known_receiver_ranges()
+        if not ranges:
+            return
+        index=self.ham_band.currentIndex()
+        if 0<=index<len(ranges) and ranges[index][0]<=frequency<=ranges[index][1]:
+            return  # Keep an explicitly chosen overlapping operator window.
+        index=next((i for i,(low,high) in enumerate(ranges) if low<=frequency<=high),-1)
+        self.ham_band.blockSignals(True)
+        try:
+            self.ham_band.setCurrentIndex(index)
+        finally:
+            self.ham_band.blockSignals(False)
+
+    def _check_receiver_frequency(self,frequency):
+        ranges=self._known_receiver_ranges()
+        if ranges and not any(start<=frequency<=end for start,end in ranges):
+            raise ValueError("Outside this receiver's listed coverage: "+receiver_range_label(ranges))
+        return frequency
+
+    def _choose_receiver_band(self,index):
+        """Pick a listed range locally; only Connect/Tune/step requests the page."""
+        if self._closed:
+            return False
+        ranges=self._known_receiver_ranges()
+        if not isinstance(index,int) or not 0<=index<len(ranges):
+            return False
+        start,end=ranges[index]
+        try:
+            current=self._requested_frequency_value(self.frequency.text())
+        except ValueError:
+            current=-1
+        # The existing dial lower limit is 0.1 kHz; a 0 MHz coverage label is
+        # retained as supplied, but does not silently weaken the dial contract.
+        selected=current if start<=current<=end else max(0.1,start)
+        self.stop_scan()
+        self.ham_band.setCurrentIndex(index)
+        self.frequency.setText(self._format_khz(selected))
+        self.scan_start.setText(self._format_khz(max(0.1,start)))
+        self.scan_end_edit.setText(self._format_khz(end))
+        self.ham_note.setText("Listed receiver range selected. Click Tune or Connect to request it; audio remains unverified.")
+        return True
 
     def _preset_labels(self):
         for i,control in enumerate(self.preset_buttons):
             identifier=self.presets[i]
             control.setText(str(i+1)+(" ★" if identifier else ""))
             control.setToolTip((station(identifier)["name"] if identifier else "Empty preset")+" · right-click to save")
+            if hasattr(self,"preset_slot"):
+                self.preset_slot.setItemText(i,
+                    f"Preset {i+1} — "+(station(identifier)["name"] if identifier else "Empty")
+                )
+
+    def _persist_presets(self, updated):
+        """Only acknowledge a durable setting write, never an in-memory save."""
+        try:
+            if self._closed or not callable(self._setter) or not callable(self._getter):
+                raise RuntimeError("Preset storage is not configured")
+            self._setter("internet_radio_presets_v1",list(updated))
+            persisted=self._getter("internet_radio_presets_v1",None)
+            if not isinstance(persisted,list) or persisted != updated:
+                raise RuntimeError("Preset storage did not confirm the write")
+        except (ValueError,RuntimeError,OSError,TypeError,sqlite3.Error):
+            message="Preset save was not confirmed. The displayed presets were not changed."
+            self.detail.setText(message)
+            self.preset_status.setText(message)
+            return False
+        self.presets=list(updated)
+        self._preset_labels()
+        return True
 
     def save_preset(self, index):
         if type(index) is not int or not 0<=index<5:
             return False
-        updated=list(self.presets);updated[index]=self.selector.currentData()
-        try:
-            if callable(self._setter):self._setter("internet_radio_presets_v1",updated)
-        except (ValueError,RuntimeError,OSError):
-            self.detail.setText("Preset was not saved. Your previous presets are unchanged.")
+        identifier=self.selector.currentData()
+        if not isinstance(identifier,str) or identifier not in {item["id"] for item in STATIONS}:
+            self.preset_status.setText("Choose a documented radio station before saving a preset.")
             return False
-        self.presets=updated;self._preset_labels();return True
+        updated=list(self.presets);updated[index]=identifier
+        if not self._persist_presets(updated):
+            return False
+        self.preset_slot.setCurrentIndex(index)
+        self.preset_status.setText(f"Saved preset {index+1}: {station(identifier)['name']}.")
+        return True
+
+    def clear_preset(self,index):
+        if type(index) is not int or not 0<=index<5:
+            return False
+        updated=list(self.presets);updated[index]=None
+        if not self._persist_presets(updated):
+            return False
+        self.preset_slot.setCurrentIndex(index)
+        self.preset_status.setText(f"Cleared preset {index+1}.")
+        return True
 
     def recall_preset(self,index):
-        if type(index) is not int or not 0<=index<5 or not self.presets[index]:return False
-        self.selector.setCurrentIndex(self.selector.findData(self.presets[index]));return True
+        if type(index) is not int or not 0<=index<5:return False
+        self.preset_slot.setCurrentIndex(index)
+        if not self.presets[index]:
+            self.preset_status.setText(f"Preset {index+1} is empty. Choose a station and click Save preset.")
+            return False
+        if not self.select_station_by_id(self.presets[index]):
+            return False
+        self.preset_status.setText(f"Recalled preset {index+1}: {station(self.presets[index])['name']}.")
+        return True
+
+    def select_station_by_id(self,identifier):
+        """Atomically select a reviewed ID; never power on or accept URLs."""
+        if self._closed:
+            return False
+        try:
+            station(identifier)
+        except (ValueError,TypeError):
+            return False
+        previous=self.selector.currentData()
+        selected=self.selector.findData(identifier)
+        if selected<0:
+            # Restore the full catalog with both signals blocked. A filter
+            # change must not briefly connect the first unrelated station.
+            self.broadcast_category.blockSignals(True)
+            self.selector.blockSignals(True)
+            try:
+                self.broadcast_category.setCurrentIndex(0)
+                self.selector.clear()
+                for item in STATIONS:
+                    self.selector.addItem(item["name"],item["id"])
+                selected=self.selector.findData(identifier)
+                self.selector.setCurrentIndex(selected)
+                self.broadcast_count.setText(f"{len(STATIONS)} documented streams")
+            finally:
+                self.selector.blockSignals(False)
+                self.broadcast_category.blockSignals(False)
+            if identifier!=previous:
+                self._station_changed()
+        else:
+            self.selector.setCurrentIndex(selected)
+        return True
 
     def select_relative(self,step):
-        self.selector.setCurrentIndex((self.selector.currentIndex()+(-1 if step<0 else 1))%self.selector.count())
+        if self.selector.count():
+            self.selector.setCurrentIndex(
+                (self.selector.currentIndex()+(-1 if step<0 else 1))%self.selector.count()
+            )
 
     def _sdr_state_change(self, state, message=""):
         """Visual state reflects the receiver page load, never the Connect click."""
@@ -504,6 +1052,8 @@ class RadioPanel(QWidget):
             self.receiver_type.findData("websdr")
         )
         self.receiver_url.setText(OWNER_TEST_WEBDR_ORIGIN)
+        self.ham_receiver_name.setText("NA5B · WebSDR public receiver")
+        self._selected_receiver_bands()
         self.receiver_list_note.setText(
             "NA5B selected: public operator HTTP/8901 WebSDR. "
             "Connection is unencrypted and will require explicit consent; "
@@ -516,57 +1066,197 @@ class RadioPanel(QWidget):
             item = public_receiver_url(str(text).strip())
         except ValueError:
             self.receiver_connect.setEnabled(False)
+            self.receiver_connect.show()
+            self.receiver_browser_quick.hide()
             self.receiver_external.setEnabled(False)
+            self.ham_receiver_name.setText("Enter a public receiver URL")
+            self._selected_receiver_bands()
             return
+        curated=curated_receiver_for_url(item["url"])
+        if curated:
+            self.ham_receiver_name.setText(curated["name"])
+        else:
+            self.ham_receiver_name.setText("Selected receiver · "+item["host"])
+        self._selected_receiver_bands()
         legacy = _owner_legacy_websdr(item, self.receiver_type.currentData())
-        self.receiver_connect.setEnabled(item["embedded_candidate"] or legacy)
+        in_app=item["embedded_candidate"] or legacy
+        self.receiver_connect.setEnabled(in_app)
+        self.receiver_connect.setVisible(in_app)
+        self.receiver_browser_quick.setVisible(not in_app)
         self.receiver_external.setEnabled(True)
         if legacy:
+            parsed=urlsplit(item["url"])
             self.receiver_list_note.setText(
-                "NA5B operator HTTP/8901 test: an unencrypted in-app "
+                f"{item['host']} operator HTTP/{parsed.port} test: an unencrypted in-app "
                 "connection is available after explicit consent. "
                 "Use the receiver's own Audio start control."
             )
         elif not item["embedded_candidate"]:
             self.receiver_list_note.setText(
                 "Browser-only receiver (HTTP/custom port). "
-                "Only the explicitly reviewed NA5B legacy origin is admitted "
+                "Only the individually reviewed legacy origins are admitted "
                 "for in-app HTTP tests. Open other receivers in your browser."
             )
 
     def _change_receiver_directory(self, *_):
         item = self.ham_selector.currentData() or {}
         provider = item.get("id", "")
-        cached = self.sdr_directory_cache.get(provider, [])
+        cached = list(self.sdr_directory_cache.get(provider, []))
+        if provider == "websdr":
+            pinned=[]
+            for row in curated_websdr_receivers():
+                # Keep exact operator-supplied names/band labels from an
+                # already held entry, but numeric ranges stay curated facts.
+                matched=next((r for r in cached if r.get("url")==row["url"]),None)
+                if matched:
+                    row["name"]=matched.get("name") or row["name"]
+                    row["bands"]=matched.get("bands") or row["bands"]
+                pinned.append(row)
+            pinned_urls={row["url"] for row in pinned}
+            cached=pinned+[r for r in cached if r.get("url") not in pinned_urls]
+        selected_url=self._receiver_selections.get(provider)
+        self._rebuilding_receiver_list=True
         self.receiver_picker.blockSignals(True)
-        self.receiver_picker.clear()
-        self.receiver_picker.addItem("Choose receiver — or enter URL manually", None)
-        for row in cached:
-            self.receiver_picker.addItem(row["name"] + " — " + row["host"], dict(row))
-        self.receiver_picker.blockSignals(False)
-        if cached:
+        try:
+            self.receiver_picker.clear()
+            # Row zero is an internal no-selection sentinel, never an empty
+            # entry displayed instead of actual receiver names.
+            self.receiver_picker.addItem("Choose a receiver", None)
+            model=self.receiver_picker.model()
+            if model.columnCount()<2:
+                model.insertColumn(1)
+            for row in cached:
+                ranges=row.get("ranges_khz",())
+                bands=" · ".join(str(band) for band in row.get("bands",()))
+                coverage=receiver_range_label(ranges) or bands or "Range not listed"
+                compact_coverage=(f"{len(ranges)} ranges · "+receiver_range_label(ranges[:1])
+                                  if len(ranges)>1 else coverage)
+                self.receiver_picker.addItem(row["name"],dict(row))
+                index=self.receiver_picker.count()-1
+                model.setData(model.index(index,1),compact_coverage)
+                tooltip="\n".join((row["name"],row.get("location",""),row["url"],coverage,
+                                   row.get("provenance","Directory label; not live verified")))
+                tooltip="<qt>"+escape(tooltip).replace("\n","<br>")+"</qt>"
+                for column in (0,1):
+                    model.setData(model.index(index,column),tooltip,Qt.ItemDataRole.ToolTipRole)
+            self.receiver_picker.setCurrentIndex(0)
+            self.receiver_list.clearSelection()
+            self.receiver_list.setCurrentIndex(model.index(-1,-1))
+            self.receiver_search.clear()
+        finally:
+            self.receiver_picker.blockSignals(False)
+            self._rebuilding_receiver_list=False
+        restriction=DIRECTORY_IMPORT_RESTRICTIONS.get(provider)
+        self.receiver_refresh.setText("Directory info" if restriction else "Refresh list")
+        if restriction and not self.sdr_directory_cache.get(provider):
+            self.receiver_list_note.setText(restriction)
+        elif self.sdr_directory_cache.get(provider):
             self.receiver_list_note.setText(
-                f"{len(cached)} cached public directory links. Status not verified; click Refresh to update."
+                f"{len(cached)} public receiver choices, including any pinned owner-test link. "
+                "Directory labels are unverified until the operator is opened."
             )
         else:
             self.receiver_list_note.setText(
-                "No list loaded. Refresh accesses the selected public directory on request."
+                "No live directory loaded. Refresh retrieves the selected provider's "
+                "public links on request; it does not verify receiver availability."
             )
+        self._filter_receiver_list()
+        selected=next((i for i in range(1,self.receiver_picker.count())
+                       if (self.receiver_picker.itemData(i) or {}).get("url")==selected_url),0)
+        if selected:
+            self.receiver_picker.setCurrentIndex(selected)
+        else:
+            if self.receiver_connected:
+                self._destroy_receiver()
+            self.receiver_url.clear()
+            self.receiver_connect.setEnabled(False)
+            self.receiver_external.setEnabled(False)
+            self.receiver_browser_quick.hide()
+            self.ham_receiver_name.setText("Choose a public receiver below")
+
+    def _filter_receiver_list(self, *_):
+        if getattr(self,"_rebuilding_receiver_list",False):
+            return
+        needle=self.receiver_search.text().strip().casefold()
+        model=self.receiver_picker.model()
+        self.receiver_list.setRowHidden(0,True)
+        matches=0
+        for index in range(1,self.receiver_picker.count()):
+            row=self.receiver_picker.itemData(index) or {}
+            searchable=" ".join((str(row.get("name","")),str(row.get("location","")),
+                str(row.get("url",""))," ".join(row.get("bands",())),
+                receiver_range_label(row.get("ranges_khz",())))).casefold()
+            visible=not needle or needle in searchable
+            self.receiver_list.setRowHidden(index,not visible)
+            matches+=int(visible)
+        selected=self.receiver_picker.currentIndex()
+        if selected>0 and self.receiver_list.isRowHidden(selected):
+            # Filtering never starts/stops media. It does remove a hidden
+            # catalog target from Connect, so a search cannot connect the
+            # previous invisible row by mistake. Choose a visible row next.
+            self.receiver_picker.setCurrentIndex(0)
+            self.receiver_list.clearSelection()
+            self.receiver_list.setCurrentIndex(model.index(-1,-1))
+            self.receiver_connect.setEnabled(False)
+            self.receiver_browser_quick.hide()
+        total=max(0,self.receiver_picker.count()-1)
+        if not total:
+            text="No receivers loaded · Refresh list or use the manual URL in Details."
+        elif not matches:
+            text="No matching receivers · Clear the search to show the list."
+        else:
+            text=f"{matches} of {total} receivers · Select a row, then Connect."
+        self.directory_summary.setText(text)
+        self.directory_summary.setToolTip(text+" Listed coverage is not verified live reception.")
+
+    def _receiver_list_selected(self, current, _previous):
+        if getattr(self,"_rebuilding_receiver_list",False) or not current.isValid():
+            return
+        row=current.row()
+        if row>0 and not self.receiver_list.isRowHidden(row):
+            self.receiver_picker.setCurrentIndex(row)
 
     def _select_discovered_receiver(self, *_):
         item = self.receiver_picker.currentData()
         if not isinstance(item, dict):
             return
+        if self.receiver_list.isRowHidden(self.receiver_picker.currentIndex()):
+            self.receiver_search.clear()
+        self.receiver_list.selectionModel().setCurrentIndex(
+            self.receiver_picker.model().index(self.receiver_picker.currentIndex(),0),
+            QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows,
+        )
+        self.receiver_list.scrollTo(self.receiver_list.currentIndex())
+        provider=(self.ham_selector.currentData() or {}).get("id","")
+        self._receiver_selections[provider]=item["url"]
+        parts=urlsplit(item["url"])
+        target_origin=(parts.scheme,parts.port or 443,parts.hostname)
+        if self.receiver_connected and target_origin!=self.receiver_origin:
+            # Selection does not connect. Do not leave an old receiver audible
+            # while the name and requested frequency show a different operator.
+            self._destroy_receiver()
         self.receiver_url.setText(item["url"])
         index = self.receiver_type.findData(
             "websdr" if item["provider"] == "websdr" else "kiwi"
         )
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
+        self.ham_receiver_name.setText(item["name"])
+        self.receiver_picker.setToolTip(str(self.receiver_picker.currentData(Qt.ItemDataRole.ToolTipRole) or ""))
+        self.receiver_picker.lineEdit().setCursorPosition(0)
+        self.receiver_url.setCursorPosition(0)
+        self._selected_receiver_bands(item)
+        ranges=self._known_receiver_ranges()
+        if ranges:
+            self._choose_receiver_band(max(0,self.ham_band.currentIndex()))
         self.receiver_list_note.setText(
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
-        self._receiver_url_changed(item["url"])
+        self.directory_summary.setText(
+            "Receiver selected · Connect to listen; availability and audio unverified."
+            if self.receiver_connect.isEnabled() else
+            "Browser-only receiver · Open in browser to use the operator's tuner."
+        )
 
     def refresh_receiver_directory(self):
         """One bounded, on-demand request to an official directory, never receivers."""
@@ -577,6 +1267,23 @@ class RadioPanel(QWidget):
         url = DIRECTORY_URLS.get(provider)
         if not url:
             return False
+        restriction=DIRECTORY_IMPORT_RESTRICTIONS.get(provider)
+        if restriction:
+            self.receiver_list_note.setText(restriction)
+            self.directory_summary.setText(restriction)
+            self.ham_details_toggle.setChecked(True)
+            return False
+        if provider == "websdr":
+            approved=QMessageBox.question(
+                self,"Refresh WebSDR directory over HTTP?",
+                "The WebSDR operator documents an unencrypted HTTP directory. "
+                "Network intermediaries could change the list. Pulse validates "
+                "each public candidate and does not auto-connect. Continue?",
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+            if not approved:
+                return False
         request = QNetworkRequest(QUrl(url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
@@ -589,6 +1296,7 @@ class RadioPanel(QWidget):
         self.receiver_list_note.setText(
             "Loading public receiver directory — this sends a request to the directory operator…"
         )
+        self.directory_summary.setText("Loading public receiver directory…")
         reply = self.sdr_network.get(request)
         self.sdr_directory_reply = reply
         reply.readyRead.connect(lambda r=reply: self._sdr_directory_chunk(r))
@@ -624,6 +1332,7 @@ class RadioPanel(QWidget):
             self.receiver_list_note.setText(
                 "Directory unavailable/redirected or too large. Use Open directory to choose manually."
             )
+            self.directory_summary.setText("Directory unavailable. Existing choices are kept; try later or Open directory.")
             return
         try:
             rows = parse_directory(provider, bytes(self.sdr_directory_data))
@@ -633,12 +1342,18 @@ class RadioPanel(QWidget):
             self.receiver_list_note.setText(
                 "No validated public receiver links found; directory format or access may have changed."
             )
+            self.directory_summary.setText("No valid receiver list returned. Existing choices are kept; use Open directory.")
             return
         self.sdr_directory_cache[provider] = rows
         self._change_receiver_directory()
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         self.receiver_list_note.setText(
             f"{len(rows)} receiver links listed at {stamp}; connectivity is unverified."
+        )
+        self.directory_summary.setText(
+            f"{len(rows)} valid receiver choices loaded; "
+            + (f"display limit {MAX_RECEIVERS} reached, see provider for more. " if len(rows)>=MAX_RECEIVERS else "")
+            + "Search, choose and Connect; availability is unverified."
         )
 
     def open_selected_receiver(self):
@@ -673,6 +1388,10 @@ class RadioPanel(QWidget):
         """
         if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
             return
+        sender = self.sender()
+        if sender is not None and (
+                self.receiver_view is None or sender is not self.receiver_view.page()):
+            return
         from PySide6.QtWebEngineCore import QWebEngineLoadingInfo
         if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
             return
@@ -681,6 +1400,18 @@ class RadioPanel(QWidget):
         domain = "".join(c for c in str(domain) if c.isalnum())[:40]
         self._sdr_load_error = f"{domain or 'UnknownErrorDomain'} code {int(info.errorCode())}"
 
+    def _flush_pending_tune(self):
+        """Navigate to the latest dial request only after prior completion.
+
+        This is a deferred explicit user tune, never an automatic retry.
+        Stop, receiver replacement and shutdown invalidate the queued request.
+        """
+        pending,self._pending_tune=self._pending_tune,None
+        if (pending is None or self._closed or not self.receiver_connected
+                or self.receiver_view is None or pending[1]!=self.receiver_host):
+            return False
+        return bool(self._load_receiver_url(pending[0],pending[1]))
+
     def _sdr_load_finished(self, ok):
         if self._closed or not self.receiver_connected or self.sdr_state != "CONNECTING":
             return
@@ -688,6 +1419,10 @@ class RadioPanel(QWidget):
         if sender is not None and sender is not self.receiver_view:
             return
         self.sdr_load_watch.stop()
+        # An older same-view navigation cannot defeat the newer requested
+        # frequency. Dispatch only once its own completion has arrived.
+        if self._flush_pending_tune():
+            return
         if not ok:
             reason = self._sdr_load_error
             self._destroy_receiver()
@@ -708,11 +1443,42 @@ class RadioPanel(QWidget):
             self.receiver_view.page().setAudioMuted(self.sdr_mute.isChecked())
 
     def _sdr_load_timed_out(self):
-        if self.sdr_state == "CONNECTING":
+        if self._closed or self.sdr_state != "CONNECTING":
+            return
+        pending, self._pending_tune = self._pending_tune, None
+        continue_requested_tune = False
+        if (pending is not None and self.receiver_connected
+                and self.receiver_view is not None):
+            try:
+                target, target_host = self._receiver_target()
+                current = urlsplit(target)
+                queued = urlsplit(pending[0])
+                queued_info = public_receiver_url(pending[0])
+                continue_requested_tune = (
+                    pending[1] == target_host == self.receiver_host
+                    and queued_info["host"] == pending[1] == queued.hostname
+                    and queued_info["url"] == pending[0]
+                    and (queued.scheme, queued.port or 443, pending[1])
+                    == self.receiver_origin
+                    and (current.scheme, current.port or 443, target_host)
+                    == self.receiver_origin
+                )
+            except (ValueError, TypeError):
+                pass
+        # A timeout is NOT a navigation completion. Retire the old view before
+        # a queued explicit tune: its late signals cannot own the new load.
+        # No queued user request means no retry; changed origins need consent.
+        self._destroy_receiver()
+        if continue_requested_tune:
+            try:
+                if self._load_receiver_url(pending[0], pending[1]):
+                    return
+            except (ImportError, RuntimeError, ValueError, OSError):
+                pass
             self._destroy_receiver()
-            self._sdr_state_change(
-                "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
-            )
+        self._sdr_state_change(
+            "ERROR", "Receiver page timed out. Try the external browser or another public receiver."
+        )
 
     def _sdr_mute_changed(self, muted):
         self.sdr_mute.setText("Unmute SDR" if muted else "Mute SDR")
@@ -745,9 +1511,15 @@ class RadioPanel(QWidget):
         if url not in {entry["url"] for entry in HAM_DIRECTORIES}:
             self.ham_note.setText("Receiver directory is not in the reviewed list.")
             return False
+        transport_warning = (
+            "This WebSDR directory uses unencrypted HTTP. Network intermediaries "
+            "may read or alter its page. "
+            if url.startswith("http://") else "This directory uses HTTPS. "
+        )
         approved=QMessageBox.question(
             self,"Open public ham receiver directory?",
-            "Open the selected public WebSDR/KiwiSDR directory in your browser to choose a receiver? "
+            transport_warning
+            + "Open the selected public WebSDR/KiwiSDR directory in your browser to choose a receiver? "
             "The directory provider receives your IP address. Copy one specific public HTTPS receiver URL back into Pulse "
             "to use the in-app receiver. Global Pulse does not record, retransmit, or bypass access controls.",
             QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
@@ -771,7 +1543,7 @@ class RadioPanel(QWidget):
         if not item["embedded_candidate"] and not legacy:
             raise ValueError(
                 "In-app SDR requires public HTTPS/443, except explicit "
-                "owner-test NA5B HTTP/8901 with WebSDR selected"
+                "individually reviewed HTTP origins with WebSDR selected"
             )
         return value,host
 
@@ -785,19 +1557,44 @@ class RadioPanel(QWidget):
             raise ValueError("Frequency must be between 0.1 and 500000 kHz")
         return number
 
+    def _requested_frequency_value(self,value):
+        """Retain the generic dial cap, except exact reviewed higher windows.
+
+        Only the selected built-in WebSDR origin can supply these bounds.
+        Cached directory metadata, a nearby hostname, or a different receiver
+        protocol cannot expand the generic frequency/scan-step contract.
+        """
+        try:
+            return self._frequency_value(value)
+        except ValueError as original_error:
+            try:
+                number=float(str(value).strip())
+            except (TypeError,ValueError):
+                raise ValueError("Frequency must be a number in kHz")
+            if (number>500000 and any(low<=number<=high
+                                     for low,high in self._known_receiver_ranges())):
+                return number
+            raise original_error
+
+    @staticmethod
+    def _format_khz(value):
+        """Preserve fine manual tuning instead of the six-significant-digit g default."""
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+
     def _tuned_receiver_url(self,frequency=None,mode=None):
         base,host=self._receiver_target()
-        frequency=self._frequency_value(self.frequency.text() if frequency is None else frequency)
+        frequency=self._requested_frequency_value(self.frequency.text() if frequency is None else frequency)
+        self._check_receiver_frequency(frequency)
         mode=str(mode or self.mode.currentData() or "usb").lower()
         if mode not in {"usb","lsb","am","cw"}:
             raise ValueError("Unsupported SDR mode")
         parsed=urlsplit(base)
         params=dict(parse_qsl(parsed.query,keep_blank_values=True))
         if self.receiver_type.currentData()=="websdr":
-            params["tune"]=f"{frequency:g}{mode}"
+            params["tune"]=f"{self._format_khz(frequency)}{mode}"
             params.pop("f",None)
         else:
-            params["f"]=f"{frequency:g}{mode}"
+            params["f"]=f"{self._format_khz(frequency)}{mode}"
             params["vol"]=str(self.sdr_volume.value())
             params.pop("tune",None)
         return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(params),parsed.fragment)),host
@@ -806,8 +1603,9 @@ class RadioPanel(QWidget):
         if require_consent:
             info=public_receiver_url(url)
             legacy=_owner_legacy_websdr(info,self.receiver_type.currentData())
+            parsed=urlsplit(info["url"])
             warning=(
-                " WARNING: NA5B uses unencrypted HTTP on port 8901; "
+                f" WARNING: {info['host']} uses unencrypted HTTP on port {parsed.port}; "
                 "other network parties can observe and alter the receiver page. "
                 "Use only this public operator origin, not sensitive credentials."
                 if legacy else ""
@@ -818,6 +1616,7 @@ class RadioPanel(QWidget):
                 "The operator receives your IP address and browser requests. "
                 "Pulse uses an ephemeral browser profile and denies downloads, "
                 "popups, permissions and cross-host navigation. "
+                f"Selected origin: {parsed.scheme}://{parsed.netloc}. "
                 "Provider audio must be started manually." + warning +
                 " Continue?",
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
@@ -859,12 +1658,17 @@ class RadioPanel(QWidget):
                     # Route it through the same pending/error/timeout lifecycle as
                     # initial Connect, rather than leaving ON while a fresh
                     # receiver navigation may fail silently.
-                    if not self._load_receiver_url(url, host):
+                    if self.sdr_state == "CONNECTING":
+                        # Coalesce fast Lower/Higher/Tune clicks. Replacing a
+                        # Chromium load in flight reports a spurious failure
+                        # from the canceled prior navigation on the same view.
+                        self._pending_tune=(url,host)
+                    elif not self._load_receiver_url(url, host):
                         return False
-            value=self._frequency_value(self.frequency.text() if frequency is None else frequency)
-            self.frequency.setText(f"{value:g}")
+            value=self._requested_frequency_value(self.frequency.text() if frequency is None else frequency)
+            self.frequency.setText(self._format_khz(value))
             self.ham_note.setText(
-                f"SDR TUNING · {value:g} kHz {str(self.mode.currentText())} · "
+                f"SDR TUNING · {self._format_khz(value)} kHz {str(self.mode.currentText())} · "
                 "receiver page and audio not yet verified; Off ends the session"
             )
             return True
@@ -875,8 +1679,11 @@ class RadioPanel(QWidget):
 
     def start_scan(self):
         try:
-            start=self._frequency_value(self.scan_start.text())
-            end=self._frequency_value(self.scan_end_edit.text())
+            start=self._requested_frequency_value(self.scan_start.text())
+            end=self._requested_frequency_value(self.scan_end_edit.text())
+            ranges=self._known_receiver_ranges()
+            if ranges and not any(low<=min(start,end) and max(start,end)<=high for low,high in ranges):
+                raise ValueError("Scan must stay inside one listed receiver range; choose that range first")
             step=self._frequency_value(self.scan_step_edit.text())
             dwell=float(self.scan_dwell.text().strip())
             if not 1 <= dwell <= 60:
@@ -934,6 +1741,11 @@ class RadioPanel(QWidget):
     def connect_receiver(self):
         if self._closed:
             return False
+        if self.receiver_connected and self.sdr_state == "CONNECTING":
+            # Repeated Connect is the same explicit tune intent. Reuse the
+            # same-origin queue or the changed-origin consent path, never
+            # replace an in-flight navigation on the same view.
+            return self.tune_receiver()
         try:
             url,host=self._tuned_receiver_url()
             if not self._load_receiver_url(url,host,require_consent=True):
@@ -965,7 +1777,8 @@ class RadioPanel(QWidget):
         from PySide6.QtWebEngineCore import QWebEngineProfile,QWebEnginePage,QWebEngineUrlRequestInterceptor,QWebEngineSettings
 
         # Bind the embedded session to exactly one reviewed scheme+host+port.
-        # HTTP custom ports are NOT generally admitted: only NA5B:8901,
+        # HTTP custom ports are NOT generally admitted: only the finite
+        # individually reviewed receiver origins,
         # prevalidated above by _receiver_target.
         target, _ = self._receiver_target()
         parsed=urlsplit(target)
@@ -1035,10 +1848,11 @@ class RadioPanel(QWidget):
         ):
             settings.setAttribute(flag,False)
         settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture,True)
-        self.layout().addWidget(self.receiver_view,2)
+        self.ham_layout.addWidget(self.receiver_view,2)
 
     def _destroy_receiver(self):
         self.stop_scan()
+        self._pending_tune=None
         self.sdr_load_watch.stop()
         self.sdr_volume_apply.stop()
         self.receiver_connected=False
@@ -1064,7 +1878,11 @@ class RadioPanel(QWidget):
 
     def _station_changed(self,*_):
         item=station(self.selector.currentData())
-        self.display.setText(item["name"]+"\n"+item["language"]+" · direct MP3")
+        self.frequency_display.setText(item["dial"])
+        self.display.setText(
+            item["name"]+"\n"+item["language"]+" · "+item["category"]
+            +" · publisher-documented MP3"
+        )
         if self.power.isChecked():self._start_current()
 
     def _power(self,on):
@@ -1123,6 +1941,8 @@ class RadioPanel(QWidget):
 
     def shutdown(self):
         self._closed=True
+        self.local_radio.shutdown()
         if self.sdr_directory_reply is not None:
             self.sdr_directory_reply.abort()
         self.off()
+
