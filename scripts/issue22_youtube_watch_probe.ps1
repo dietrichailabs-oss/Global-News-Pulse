@@ -29,6 +29,7 @@ using System;
 using System.Runtime.InteropServices;
 public static class PulseWatchInput {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint data,flags,time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct UNION { [FieldOffset(0)] public MOUSEINPUT mouse; }
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public UNION value; }
@@ -36,10 +37,13 @@ public static class PulseWatchInput {
     [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent,EnumChildProc cb,IntPtr extra);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
     [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent,IntPtr child);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd,int command);
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")] public static extern uint SendInput(uint count,INPUT[] values,int size);
@@ -73,6 +77,7 @@ $watchStage = 'preflight'
 $watchOwned = @{}
 $watchApp = $null
 $watchWindow = $null
+$watchTv = $null
 $watchSurface = $null
 $watchOutputCreated = $false
 $watchApprovedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -88,6 +93,7 @@ $watchReceipt = [ordered]@{
     embedded_identity_verified=$false; independent_visual_review_required=$true
     provider_consent_accepted=$false; forced_cleanup=$false; cleanup_complete=$false
     ownership_uncertainty=$false; ownership_issue_count=0; ownership_issue_reasons=@()
+    initial_failure=$null; cleanup_failures=@(); last_ui_operation='preflight'; app_scroll_actions=0
 }
 
 function Block([string]$Reason,[string]$Kind='BLOCKED_INFRA') {
@@ -161,7 +167,157 @@ function Current-Process($Record) {
     }
     return $current
 }
-function Find-Named($Root,[string[]]$Names,[int]$Owner=0) {
+function Failure-Details($ErrorRecord,[string]$Stage) {
+    $reason='harness_exception_'+$ErrorRecord.Exception.GetType().Name
+    $kind='BLOCKED_INFRA'
+    if($ErrorRecord.Exception.Data.Contains('probe_reason')){$reason=$ErrorRecord.Exception.Data['probe_reason'];$kind=$ErrorRecord.Exception.Data['probe_kind']}
+    return [ordered]@{stage=$Stage;reason=$reason;kind=$kind;operation=$watchReceipt.last_ui_operation;script_line=[int]$ErrorRecord.InvocationInfo.ScriptLineNumber}
+}
+function Record-CleanupFailure($ErrorRecord,[string]$Stage) {
+    $watchReceipt.cleanup_ui_unavailable=$true
+    if($watchReceipt.cleanup_failures.Count -lt 16){$watchReceipt.cleanup_failures+=,(Failure-Details $ErrorRecord $Stage)}
+}
+function Checkpoint-Receipt {
+    if($watchOutputCreated){$watchReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $watchOutput 'WATCH_PROBE.json') -Encoding UTF8}
+}
+function Fit-OwnedDashboard {
+    $watchReceipt.last_ui_operation='fit_owned_dashboard'
+    if($null -eq (Current-Process $watchOwned[[string]$watchApp.Id])){Block 'dashboard_owner_identity_unavailable'}
+    [uint32]$owner=0
+    [void][PulseWatchInput]::GetWindowThreadProcessId($watchApp.MainWindowHandle,[ref]$owner)
+    if($owner -ne $watchApp.Id){Block 'dashboard_hwnd_owner_mismatch'}
+    $before=$watchWindow.Current.BoundingRectangle
+    $work=[Windows.Forms.Screen]::FromHandle($watchApp.MainWindowHandle).WorkingArea
+    $watchReceipt.initial_window_rect=@($before.X,$before.Y,$before.Width,$before.Height)
+    $watchReceipt.desktop_work_area=@($work.X,$work.Y,$work.Width,$work.Height)
+    if($work.Width -lt 960 -or $work.Height -lt 640){Block 'desktop_below_app_minimum'}
+    $pattern=$null
+    if($watchWindow.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)) {
+        try {$pattern.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)} catch {}
+    }
+    # Normal owned-window maximize, not an offscreen titlebar-coordinate click
+    # and not a display-resolution/OS setting change. Win32 return is previous
+    # visibility, so actual geometry readback below is the success criterion.
+    [void][PulseWatchInput]::ShowWindow($watchApp.MainWindowHandle,3)
+    $until=$watchClock.Elapsed.TotalSeconds+4
+    do {
+        Tick
+        $r=$watchWindow.Current.BoundingRectangle
+        $fits=($r.Left -ge $work.Left-8 -and $r.Top -ge $work.Top-8 -and $r.Right -le $work.Right+8 -and $r.Bottom -le $work.Bottom+8)
+        if($fits){break}
+    } while($watchClock.Elapsed.TotalSeconds -lt $until)
+    if(-not $fits){Block 'owned_dashboard_did_not_fit_desktop'}
+    $watchReceipt.fitted_window_rect=@($r.X,$r.Y,$r.Width,$r.Height)
+    $watchReceipt.desktop_fit_verified=$true
+}
+function Visible-Rectangle($Element,$Root) {
+    if($Element.Current.IsOffscreen){return [Drawing.Rectangle]::Empty}
+    $r=$Element.Current.BoundingRectangle
+    if($r.IsEmpty -or $r.Width -lt 3 -or $r.Height -lt 3){return [Drawing.Rectangle]::Empty}
+    $desktop=[Windows.Forms.SystemInformation]::VirtualScreen
+    $clip=$Root.Current.BoundingRectangle
+    if($clip.IsEmpty){return [Drawing.Rectangle]::Empty}
+    $visible=[Drawing.Rectangle]::FromLTRB([int][Math]::Ceiling($r.Left),[int][Math]::Ceiling($r.Top),[int][Math]::Floor($r.Right),[int][Math]::Floor($r.Bottom))
+    $visible=[Drawing.Rectangle]::Intersect($visible,$desktop)
+    $visible=[Drawing.Rectangle]::Intersect($visible,[Drawing.Rectangle]::FromLTRB([int][Math]::Ceiling($clip.Left),[int][Math]::Ceiling($clip.Top),[int][Math]::Floor($clip.Right),[int][Math]::Floor($clip.Bottom)))
+    # Qt can report IsOffscreen=false for a child beyond its scroll viewport.
+    # Respect actual ancestor clipping too, not merely the desktop rectangle.
+    $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($Element)
+    for($depth=0;$depth -lt 16 -and $null -ne $ancestor;$depth++) {
+        $a=$ancestor.Current.BoundingRectangle
+        if(-not $a.IsEmpty -and $a.Width -gt 0 -and $a.Height -gt 0){$visible=[Drawing.Rectangle]::Intersect($visible,[Drawing.Rectangle]::FromLTRB([int][Math]::Ceiling($a.Left),[int][Math]::Ceiling($a.Top),[int][Math]::Floor($a.Right),[int][Math]::Floor($a.Bottom)))}
+        if($ancestor.Current.NativeWindowHandle -eq $watchApp.MainWindowHandle){break}
+        $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+    }
+    # The native HWND's UIA parent chain may skip non-native Qt viewport
+    # widgets. Its actual owned TV container supplies that app-side clip.
+    if($null -ne $watchSurface -and $null -ne $watchTv -and $Root.Current.NativeWindowHandle -eq $watchSurface.Current.NativeWindowHandle){
+        $visible=[Drawing.Rectangle]::Intersect($visible,(Visible-Rectangle $watchTv $watchWindow))
+    }
+    return $visible
+}
+function Physically-Visible($Element,$Root,[bool]$AllowAppClip=$false) {
+    if(-not $Element.Current.IsEnabled){return $false}
+    $visible=Visible-Rectangle $Element $Root
+    if($visible.Width -lt 3 -or $visible.Height -lt 3){return $false}
+    if($AllowAppClip -and $Element.Current.ProcessId -eq $watchApp.Id){return $true}
+    $r=$Element.Current.BoundingRectangle
+    # Provider controls must be wholly visible, never hidden-invokable. The
+    # one-pixel tolerance covers inward conversion of fractional UIA bounds.
+    if($visible.Left -gt $r.Left+1 -or $visible.Top -gt $r.Top+1 -or $visible.Right -lt $r.Right-1 -or $visible.Bottom -lt $r.Bottom-1){return $false}
+    return $true
+}
+function Reveal-OwnedTarget($Element,[bool]$NativeSurface=$false) {
+    $watchReceipt.last_ui_operation='reveal_owned_scroll_target'
+    if($null -eq (Current-Process $watchOwned[[string]$watchApp.Id])){Block 'scroll_owner_identity_unavailable'}
+    if($NativeSurface) {
+        if($null -eq $watchSurface -or $Element.Current.NativeWindowHandle -ne $watchSurface.Current.NativeWindowHandle -or -not [PulseWatchInput]::IsChild($watchApp.MainWindowHandle,[IntPtr]$Element.Current.NativeWindowHandle)){Block 'native_surface_reveal_identity_mismatch'}
+        [uint32]$surfaceOwner=0
+        [void][PulseWatchInput]::GetWindowThreadProcessId([IntPtr]$Element.Current.NativeWindowHandle,[ref]$surfaceOwner)
+        if(-not $watchOwned.ContainsKey([string]$surfaceOwner) -or $null -eq (Current-Process $watchOwned[[string]$surfaceOwner])){Block 'native_surface_owner_identity_unavailable'}
+    } elseif($Element.Current.ProcessId -ne $watchApp.Id){Block 'scroll_target_not_app_owned'}
+    if(-not $NativeSurface) {
+        $itemPattern=$null
+        if($Element.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$itemPattern)){try {$itemPattern.ScrollIntoView()} catch {}}
+        try {$Element.SetFocus()} catch {}
+        Tick
+    }
+    for($attempt=0;$attempt -lt 12;$attempt++) {
+        if($NativeSurface) {
+            $visible=Visible-Rectangle $Element $Element
+            if($visible.Width -ge 200 -and $visible.Height -ge 150){return $true}
+        } elseif(Physically-Visible $Element $watchWindow $true){return $true}
+        $target=$Element.Current.BoundingRectangle
+        $scrollTarget=if($NativeSurface){$watchTv}else{$Element}
+        if($null -eq $scrollTarget){Block 'owned_scroll_container_unavailable'}
+        $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($scrollTarget)
+        $scrolled=$false
+        for($depth=0;$depth -lt 12 -and $null -ne $ancestor;$depth++) {
+            if($ancestor.Current.NativeWindowHandle -eq $watchApp.MainWindowHandle){break}
+            if($ancestor.Current.ProcessId -eq $watchApp.Id) {
+                $bounds=$ancestor.Current.BoundingRectangle
+                $scroll=$null
+                if(-not $bounds.IsEmpty -and $ancestor.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll) -and $scroll.Current.VerticallyScrollable) {
+                    $above=$target.Top -lt $bounds.Top
+                    $distance=if($above){$bounds.Top-$target.Top}else{$target.Bottom-$bounds.Bottom}
+                    if($distance -gt 0) {
+                        $amount=if($above){if($distance -gt $bounds.Height){[System.Windows.Automation.ScrollAmount]::LargeDecrement}else{[System.Windows.Automation.ScrollAmount]::SmallDecrement}}else{if($distance -gt $bounds.Height){[System.Windows.Automation.ScrollAmount]::LargeIncrement}else{[System.Windows.Automation.ScrollAmount]::SmallIncrement}}
+                        $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,$amount)
+                        $scrolled=$true;break
+                    }
+                }
+                # Qt exposes a real QScrollArea vertical scrollbar on platforms
+                # without ScrollPattern. Never inspect a provider's scrollbar.
+                if($ancestor.Current.ClassName -eq 'QScrollArea') {
+                    $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ScrollBar)
+                    $bars=@($ancestor.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object {$_.Current.ProcessId -eq $watchApp.Id -and $_.Current.Orientation -eq [System.Windows.Automation.OrientationType]::Vertical -and (Physically-Visible $_ $watchWindow $true)})
+                    if($bars.Count -gt 1){Block 'ambiguous_app_scrollbar'}
+                    $range=$null
+                    if($bars.Count -eq 1 -and $bars[0].TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern,[ref]$range) -and $range.Current.Maximum -gt $range.Current.Minimum) {
+                        $direction=if($target.Top -lt $bounds.Top){-1}else{1}
+                        $distance=if($direction -lt 0){$bounds.Top-$target.Top}else{$target.Bottom-$bounds.Bottom}
+                        if($distance -gt 0) {
+                            # Qt reports LargeChange as singleStep on Windows.
+                            # Its own QScrollArea scrollbar uses pixel offsets;
+                            # bound movement by the observed viewport geometry.
+                            $change=[Math]::Min($bounds.Height,[Math]::Max(1,$distance))
+                            $next=[Math]::Max($range.Current.Minimum,[Math]::Min($range.Current.Maximum,$range.Current.Value+$direction*$change))
+                            if($next -ne $range.Current.Value){$range.SetValue($next);$scrolled=$true;break}
+                        }
+                    }
+                }
+            }
+            $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+        }
+        if(-not $scrolled){return $false}
+        $watchReceipt.app_scroll_actions++
+        Tick
+    }
+    if($NativeSurface){$visible=Visible-Rectangle $Element $Element;return ($visible.Width -ge 200 -and $visible.Height -ge 150)}
+    return (Physically-Visible $Element $watchWindow $true)
+}
+function Matching-Named($Root,[string[]]$Names,[int]$Owner=0) {
+    $watchReceipt.last_ui_operation='find_exact_accessibility_name'
     $found=@()
     foreach($name in $Names) {
         $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$name)
@@ -169,13 +325,18 @@ function Find-Named($Root,[string[]]$Names,[int]$Owner=0) {
             if($Owner -eq 0 -or $element.Current.ProcessId -eq $Owner){$found+=,$element}
         }
     }
-    $visible=@($found | Where-Object {-not $_.Current.IsOffscreen -and $_.Current.IsEnabled})
+    return ,$found
+}
+function Find-Named($Root,[string[]]$Names,[int]$Owner=0) {
+    $found=Matching-Named $Root $Names $Owner
+    $allowAppClip=($Owner -eq $watchApp.Id)
+    $visible=@($found | Where-Object {Physically-Visible $_ $Root $allowAppClip})
     if($visible.Count -gt 1){Block 'ambiguous_accessibility_target'}
     if($visible.Count -eq 1){return $visible[0]}
-    if($found.Count -eq 1) {
-        try {$found[0].SetFocus()} catch {}
-        Tick
-        if(-not $found[0].Current.IsOffscreen -and $found[0].Current.IsEnabled){return $found[0]}
+    # Discovery of provider controls is always passive. Only exact app-owned
+    # controls may receive focus/scroll actions to become physically visible.
+    if($found.Count -eq 1 -and $Owner -eq $watchApp.Id) {
+        if((Reveal-OwnedTarget $found[0]) -and (Physically-Visible $found[0] $Root $true)){return $found[0]}
     }
     return $null
 }
@@ -188,9 +349,96 @@ function Need-Named($Root,[string[]]$Names,[int]$Owner=0,[int]$Seconds=8) {
     } while($watchClock.Elapsed.TotalSeconds -lt $until)
     Block 'required_visible_control_unavailable'
 }
+function Need-TvSelector {
+    $watchReceipt.last_ui_operation='find_unique_owned_tv_selector'
+    if($null -eq $watchTv -or $watchTv.Current.ProcessId -ne $watchApp.Id){Block 'owned_tv_container_unavailable'}
+    $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ComboBox)
+    $combos=@($watchTv.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object {$_.Current.ProcessId -eq $watchApp.Id})
+    if($combos.Count -ne 1){Block 'owned_tv_selector_not_unique'}
+    if(-not (Reveal-OwnedTarget $combos[0])){Block 'owned_tv_selector_not_visible'}
+    return $combos[0]
+}
+function Resolve-FixturePopup($Element,[string]$Name) {
+    # A combo popup is a separate native window even though Qt's logical
+    # accessibility ancestry leads back through the closed ComboBox. This
+    # exception is solely for this exact app-owned saved-video ListItem.
+    $expectedName='Your video '+[char]0xB7+' '+$AuthorizedFixture
+    if($Name -ne $expectedName -or $Element.Current.ProcessId -ne $watchApp.Id -or $Element.Current.ControlType -ne [System.Windows.Automation.ControlType]::ListItem -or $Element.Current.Name -ne $Name){Block 'fixture_popup_item_identity_mismatch'}
+    if($null -eq (Current-Process $watchOwned[[string]$watchApp.Id])){Block 'fixture_popup_owner_identity_unavailable'}
+    if($Element.Current.IsOffscreen -or -not $Element.Current.IsEnabled){return $null}
+    $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($Element)
+    $list=$null
+    for($depth=0;$depth -lt 8 -and $null -ne $ancestor;$depth++) {
+        if($ancestor.Current.ProcessId -ne $watchApp.Id){Block 'fixture_popup_list_not_app_owned'}
+        if($ancestor.Current.ControlType -eq [System.Windows.Automation.ControlType]::List){$list=$ancestor;break}
+        if($ancestor.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox){break}
+        $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+    }
+    if($null -eq $list -or $list.Current.IsOffscreen){return $null}
+    $itemBounds=$Element.Current.BoundingRectangle;$listBounds=$list.Current.BoundingRectangle
+    if($itemBounds.IsEmpty -or $listBounds.IsEmpty){return $null}
+    $rect=[Drawing.Rectangle]::FromLTRB([int][Math]::Ceiling($itemBounds.Left),[int][Math]::Ceiling($itemBounds.Top),[int][Math]::Floor($itemBounds.Right),[int][Math]::Floor($itemBounds.Bottom))
+    $rect=[Drawing.Rectangle]::Intersect($rect,[Drawing.Rectangle]::FromLTRB([int][Math]::Ceiling($listBounds.Left),[int][Math]::Ceiling($listBounds.Top),[int][Math]::Floor($listBounds.Right),[int][Math]::Floor($listBounds.Bottom)))
+    $rect=[Drawing.Rectangle]::Intersect($rect,[Windows.Forms.SystemInformation]::VirtualScreen)
+    if($rect.Width -lt 3 -or $rect.Height -lt 3){return $null}
+    $point=New-Object PulseWatchInput+POINT;$point.X=[int]($rect.X+$rect.Width/2);$point.Y=[int]($rect.Y+$rect.Height/2)
+    $hit=[PulseWatchInput]::WindowFromPoint($point)
+    $popup=[PulseWatchInput]::GetAncestor($hit,2) # GA_ROOT, not root-owner (the main app).
+    if($popup -eq [IntPtr]::Zero -or $popup -eq $watchApp.MainWindowHandle){return $null}
+    [uint32]$owner=0
+    [void][PulseWatchInput]::GetWindowThreadProcessId($popup,[ref]$owner)
+    if($owner -ne $watchApp.Id){Block 'fixture_popup_not_app_owned'}
+    if(-not [PulseWatchInput]::IsWindowVisible($popup) -or -not [PulseWatchInput]::IsWindowEnabled($popup)){return $null}
+    $popupBounds=New-Object PulseWatchInput+RECT
+    if(-not [PulseWatchInput]::GetWindowRect($popup,[ref]$popupBounds)){Block 'fixture_popup_rectangle_unavailable'}
+    $rect=[Drawing.Rectangle]::Intersect($rect,[Drawing.Rectangle]::FromLTRB($popupBounds.Left,$popupBounds.Top,$popupBounds.Right,$popupBounds.Bottom))
+    if($rect.Width -lt 3 -or $rect.Height -lt 3){return $null}
+    $point.X=[int]($rect.X+$rect.Width/2);$point.Y=[int]($rect.Y+$rect.Height/2)
+    $hit=[PulseWatchInput]::WindowFromPoint($point)
+    if($hit -ne $popup -and -not [PulseWatchInput]::IsChild($popup,$hit)){Block 'fixture_popup_item_occluded'}
+    # The same process may own more than one popup. Verify the exact current
+    # accessible item at this observed point, not merely any owned HWND.
+    $hitElement=[System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point($point.X,$point.Y)))
+    $expected=($Element.GetRuntimeId() -join ',');$matched=$false
+    for($depth=0;$depth -lt 4 -and $null -ne $hitElement;$depth++) {
+        if($hitElement.Current.ProcessId -ne $watchApp.Id){break}
+        if(($hitElement.GetRuntimeId() -join ',') -eq $expected){$matched=$true;break}
+        $hitElement=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($hitElement)
+    }
+    if(-not $matched){Block 'fixture_popup_item_hit_mismatch'}
+    return [ordered]@{handle=$popup;point=$point;rectangle=$rect}
+}
+function Click-SavedFixture([string]$Name) {
+    $watchReceipt.last_ui_operation='activate_visible_owned_fixture_popup'
+    $until=[Math]::Min($MaxSeconds,$watchClock.Elapsed.TotalSeconds+8)
+    $target=$null;$item=$null;$scrolled=$false
+    do {
+        $items=@((Matching-Named ([System.Windows.Automation.AutomationElement]::RootElement) @($Name) $watchApp.Id) | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem})
+        if($items.Count -gt 1){Block 'fixture_popup_item_not_unique'}
+        if($items.Count -eq 1) {
+            $item=$items[0];$target=Resolve-FixturePopup $item $Name
+            if($null -ne $target){break}
+            $scrollItem=$null
+            if(-not $scrolled -and $item.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scrollItem)){$scrollItem.ScrollIntoView();$scrolled=$true}
+        }
+        Tick
+    } while($watchClock.Elapsed.TotalSeconds -lt $until)
+    if($null -eq $target){Block 'fixture_popup_visibility_unavailable'}
+    [void][PulseWatchInput]::SetForegroundWindow($target.handle)
+    Tick
+    $fresh=Resolve-FixturePopup $item $Name
+    if($null -eq $fresh -or $fresh.handle -ne $target.handle){Block 'fixture_popup_changed_before_click'}
+    if(-not [PulseWatchInput]::Click($fresh.point.X,$fresh.point.Y)){Block 'fixture_popup_native_click_failed'}
+    $watchReceipt.selected_fixture_popup_clicked=$true
+    Tick
+}
 function Click-Observed($Element,[IntPtr]$RootHandle) {
+    $watchReceipt.last_ui_operation='native_click_visible_app_control'
+    if($Element.Current.ProcessId -ne $watchApp.Id){Block 'native_click_not_app_owned'}
     if($Element.Current.IsOffscreen -or -not $Element.Current.IsEnabled){Block 'target_not_visible_enabled'}
-    $r=$Element.Current.BoundingRectangle
+    $root=[System.Windows.Automation.AutomationElement]::FromHandle($RootHandle)
+    if(-not (Physically-Visible $Element $root $true)){Block 'target_outside_visible_desktop_or_viewport'}
+    $r=Visible-Rectangle $Element $root
     if($r.IsEmpty -or $r.Width -lt 3 -or $r.Height -lt 3){Block 'target_rectangle_unavailable'}
     $x=[int]($r.X+$r.Width/2);$y=[int]($r.Y+$r.Height/2)
     [void][PulseWatchInput]::SetForegroundWindow($RootHandle)
@@ -208,8 +456,7 @@ function Snapshot([string]$Name,[bool]$NativeOnly=$false) {
     $rect=[Drawing.Rectangle]::Intersect([Drawing.Rectangle]::FromLTRB([int]$r.Left,[int]$r.Top,[int]$r.Right,[int]$r.Bottom),$desktop)
     if($NativeOnly) {
         if($null -eq $watchSurface){Block 'native_capture_surface_unavailable'}
-        $nativeRect=$watchSurface.Current.BoundingRectangle
-        $rect=[Drawing.Rectangle]::Intersect($rect,[Drawing.Rectangle]::FromLTRB([int]$nativeRect.Left,[int]$nativeRect.Top,[int]$nativeRect.Right,[int]$nativeRect.Bottom))
+        $rect=[Drawing.Rectangle]::Intersect($rect,(Visible-Rectangle $watchSurface $watchSurface))
     }
     if($rect.Width -lt 200 -or $rect.Height -lt 150){Block 'visible_capture_unavailable'}
     $bitmap=New-Object Drawing.Bitmap($rect.Width,$rect.Height)
@@ -220,34 +467,53 @@ function Snapshot([string]$Name,[bool]$NativeOnly=$false) {
         $bitmap.Save($path,[Drawing.Imaging.ImageFormat]::Png)
         $colors=New-Object 'System.Collections.Generic.HashSet[int]'
         for($x=10;$x -lt $bitmap.Width;$x+=37){for($y=10;$y -lt $bitmap.Height;$y+=31){[void]$colors.Add($bitmap.GetPixel($x,$y).ToArgb())}}
-        $record=[ordered]@{file=($Name+'.png');scope=$(if($NativeOnly){'owned_native_surface'}else{'app'});sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant();width=$bitmap.Width;height=$bitmap.Height;sample_colors=$colors.Count;elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2)}
+        $record=[ordered]@{file=($Name+'.png');scope=$(if($NativeOnly){'owned_native_surface'}else{'app'});sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant();width=$bitmap.Width;height=$bitmap.Height;screen_rectangle=@($rect.X,$rect.Y,$rect.Width,$rect.Height);sample_colors=$colors.Count;elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2)}
         $watchReceipt.captures+=,$record
         return $record
     } finally {$graphics.Dispose();$bitmap.Dispose()}
 }
 function Provider-Blocked($Root) {
     # Read only inside this owned player. Never export the raw accessible text.
-    $dialogs=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Window)
-    foreach($dialog in $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$dialogs)) {
-        if(-not $dialog.Current.IsOffscreen){Block 'provider_dialog_observed' 'PROVIDER_BLOCKED'}
+    # Offscreen recommendations/comments do not consume the visible prompt
+    # budget. An incomplete bounded check is infrastructure BLOCKED, not proof
+    # that prompts are absent and not a claimed provider denial.
+    $promptClock=[Diagnostics.Stopwatch]::StartNew()
+    $onscreen=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::IsOffscreenProperty,$false)
+    $dialogType=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Window)
+    $dialogs=New-Object System.Windows.Automation.AndCondition($dialogType,$onscreen)
+    $dialogCandidates=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$dialogs)
+    if($dialogCandidates.Count -gt 32){Block 'prompt_check_incomplete'}
+    foreach($dialog in $dialogCandidates) {
+        if($promptClock.Elapsed.TotalSeconds -gt 4 -or $watchClock.Elapsed.TotalSeconds -gt $MaxSeconds){Block 'prompt_check_incomplete'}
+        $visible=Visible-Rectangle $dialog $Root
+        if($visible.Width -ge 3 -and $visible.Height -ge 3){Block 'provider_dialog_observed' 'PROVIDER_BLOCKED'}
     }
-    $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text)
+    $textType=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text)
+    $condition=New-Object System.Windows.Automation.AndCondition($textType,$onscreen)
+    $candidates=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
+    if($candidates.Count -gt 640){Block 'prompt_check_incomplete'}
     $count=0
-    foreach($element in $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)) {
-        if(++$count -gt 160){Block 'provider_accessibility_tree_too_large'}
-        if($element.Current.IsOffscreen){continue}
+    foreach($element in $candidates) {
+        if($promptClock.Elapsed.TotalSeconds -gt 4 -or $watchClock.Elapsed.TotalSeconds -gt $MaxSeconds){Block 'prompt_check_incomplete'}
+        $visible=Visible-Rectangle $element $Root
+        if($visible.Width -lt 3 -or $visible.Height -lt 3){continue}
+        if(++$count -gt 160){Block 'prompt_check_incomplete'}
         $name=[string]$element.Current.Name
+        if($name.Length -gt 1600){Block 'prompt_check_incomplete'}
         if($name -match '(?i)before you continue|confirm.{0,20}(?:age|bot)|sign in to (?:watch|confirm)|not available in your country|video unavailable|error code\s*:?\s*(?:153|101|150)') {Block 'provider_prompt_or_denial_observed' 'PROVIDER_BLOCKED'}
     }
     foreach($name in @('Accept all','Reject all','I agree','Accept cookies')) {
+        if($promptClock.Elapsed.TotalSeconds -gt 4 -or $watchClock.Elapsed.TotalSeconds -gt $MaxSeconds){Block 'prompt_check_incomplete'}
         if($null -ne (Find-Named $Root @($name))){Block 'provider_consent_ui_observed' 'PROVIDER_BLOCKED'}
     }
+    if($promptClock.Elapsed.TotalSeconds -gt 4){Block 'prompt_check_incomplete'}
 }
 function Invoke-ProviderControl($Root,[string[]]$Names) {
     Provider-Blocked $Root
     $element=Need-Named $Root $Names 0 10
     Provider-Blocked $Root
     if($element.Current.IsOffscreen -or -not $element.Current.IsEnabled){Block 'provider_control_not_visible_enabled'}
+    if(-not (Physically-Visible $element $Root)){Block 'provider_control_not_fully_visible'}
     $pattern=$null
     if(-not $element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){Block 'provider_control_not_accessibly_invokable'}
     # Invoke only this exact Play/Pause control. No coordinate fallback: a
@@ -256,22 +522,39 @@ function Invoke-ProviderControl($Root,[string[]]$Names) {
     Tick
 }
 function Read-Observation {
-    $label=Find-Named $watchWindow @('TV codec and renderer diagnostics') $watchApp.Id
-    if($null -eq $label){return $null}
+    # Passive telemetry only: revealing this label would scroll the actual
+    # native player offscreen immediately before its picture is captured.
+    $watchReceipt.last_ui_operation='read_owned_telemetry_passively'
+    $labels=Matching-Named $watchTv @('TV codec and renderer diagnostics') $watchApp.Id
+    if($labels.Count -gt 1){Block 'ambiguous_owned_diagnostic_label'}
+    if($labels.Count -eq 0){return $null}
+    $label=$labels[0]
+    # This exact app label mirrors its already-displayed bounded diagnostics
+    # through Qt Help/UIA HelpText. Never inspect raw helper logs or provider
+    # HTML; keep older supported text/value patterns as bounded alternatives.
     $text=''
+    $help=[string]$label.Current.HelpText
+    if(-not [string]::IsNullOrWhiteSpace($help)) {
+        if($help.Length -gt 10000 -or -not $help.StartsWith('<pre>') -or -not $help.EndsWith('</pre>')){Block 'owned_telemetry_help_invalid'}
+        $text=[System.Net.WebUtility]::HtmlDecode($help.Substring(5,$help.Length-11))
+        if($text.Length -gt 1600){Block 'owned_telemetry_text_too_large'}
+    }
     $pattern=$null
-    if($label.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)){$text=$pattern.DocumentRange.GetText(1600)}
-    elseif($label.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$text=$pattern.Current.Value}
-    elseif($label.TryGetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,[ref]$pattern)){$text=$pattern.Current.Value}
-    $observation=[ordered]@{elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2);time=$null;frames=$null;state='unknown';provider_code=$null}
+    if([string]::IsNullOrWhiteSpace($text) -and $label.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)){$text=$pattern.DocumentRange.GetText(1600)}
+    if([string]::IsNullOrWhiteSpace($text) -and $label.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$text=[string]$pattern.Current.Value}
+    if([string]::IsNullOrWhiteSpace($text) -and $label.TryGetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,[ref]$pattern)){$text=[string]$pattern.Current.Value}
+    if($text.Length -gt 1600){$text=$text.Substring(0,1600)}
+    $available=(-not [string]::IsNullOrWhiteSpace($text))
+    $observation=[ordered]@{elapsed_seconds=[Math]::Round($watchClock.Elapsed.TotalSeconds,2);time=$null;frames=$null;state='unknown';provider_code=$null;telemetry_text_available=$available;telemetry_offscreen=(-not (Physically-Visible $label $watchWindow $true))}
+    $watchReceipt.telemetry_text_available=$available
     if($text -match 'time\s+(\d+(?:\.\d+)?)s'){$observation.time=[double]::Parse($Matches[1],[Globalization.CultureInfo]::InvariantCulture)}
     if($text -match 'decoded frames\s+(\d+)'){$observation.frames=[long]$Matches[1]}
     if($text -match '(?i)awaiting.play|press play'){$observation.state='awaiting_play'}
     if($text -match '(?i)paused'){$observation.state='paused'}
     if($text -match '(?i)buffering|stalled'){$observation.state='buffering_or_stalled'}
     if($text -match '(?i)(?:error|code)[^0-9]{0,12}(153|150|101|100|5|2)\b'){$observation.provider_code=[int]$Matches[1]}
-    if($text -match '(?i)native WebView2 error|provider.*unavailable|unapproved.*redirect') {Block 'app_reported_player_denial' 'PROVIDER_BLOCKED'}
     $watchReceipt.observations+=,$observation
+    if($text -match '(?i)Visible YouTube error|native WebView2 error|provider.*unavailable|unapproved.*redirect') {Block 'app_reported_player_denial' 'PROVIDER_BLOCKED'}
     return $observation
 }
 
@@ -326,21 +609,37 @@ try {
     if(-not $dashboardReady){Block 'actual_dashboard_window_unavailable'}
     $watchReceipt.app_token=@([PulseWatchInput]::Token($watchApp.Id))
     $watchWindow=[System.Windows.Automation.AutomationElement]::FromHandle($watchApp.MainWindowHandle)
-    $maximize=Find-Named $watchWindow @('Maximize or restore') $watchApp.Id
-    if($null -ne $maximize){Click-Observed $maximize $watchApp.MainWindowHandle}
+    $watchStage='fit_owned_dashboard'
+    Fit-OwnedDashboard
     [void](Snapshot '01-app-before-network')
     $watchStage='select_exact_fixture'
+    $tvRoots=Matching-Named $watchWindow @('Single large television player') $watchApp.Id
+    if($tvRoots.Count -ne 1){Block 'owned_tv_container_not_unique'}
+    $watchTv=$tvRoots[0]
     $edit=Need-Named $watchWindow @('Add a specific YouTube video') $watchApp.Id
     Click-Observed $edit $watchApp.MainWindowHandle
+    $watchReceipt.last_ui_operation='set_exact_fixture_url'
     $value=$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue('https://www.youtube.com/watch?v='+$AuthorizedFixture)
     Click-Observed (Need-Named $watchWindow @('Add video') $watchApp.Id) $watchApp.MainWindowHandle
-    $combo=Need-Named $watchWindow @('Television channel or saved video') $watchApp.Id
+    # Qt exposes the selected ComboBox text as its accessible name, so locate
+    # the sole ComboBox within this exact app-owned television container.
+    $combo=Need-TvSelector
     Click-Observed $combo $watchApp.MainWindowHandle
     $savedName='Your video '+[char]0xB7+' '+$AuthorizedFixture
-    $saved=Need-Named ([System.Windows.Automation.AutomationElement]::RootElement) @($savedName) $watchApp.Id
-    $saved.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-    Tick
+    # SelectionItem.Select alone only marks a popup row in Qt; it does not
+    # activate the ComboBox value. Use its actual visible owned popup item.
+    Click-SavedFixture $savedName
+    $watchReceipt.last_ui_operation='verify_selected_fixture_readback'
+    $selected=[string]$combo.Current.Name
+    $selection=$null;$comboValue=$null
+    $selectedNames=@($selected)
+    if($combo.TryGetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern,[ref]$selection)) {
+        foreach($item in $selection.GetCurrentSelection()){if($item.Current.ProcessId -eq $watchApp.Id){$selectedNames+=,[string]$item.Current.Name}}
+    }
+    if($combo.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$comboValue)){$selectedNames+=,[string]$comboValue.Current.Value}
+    if($savedName -notin $selectedNames){Block 'selected_fixture_readback_mismatch'}
+    $watchReceipt.selected_fixture_control_verified=$true
     $watchStage='actual_app_consent'
     Click-Observed (Need-Named $watchWindow @("Try the selected video in YouTube's normal watch page, with consent") $watchApp.Id) $watchApp.MainWindowHandle
     $dialog=Need-Named ([System.Windows.Automation.AutomationElement]::RootElement) @('Try official YouTube watch page inside Pulse?') $watchApp.Id
@@ -377,6 +676,11 @@ try {
     $watchSurface=[System.Windows.Automation.AutomationElement]::FromHandle($top[0])
     $watchCreatedProfiles=@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory | Where-Object {$_.Name -match '^GlobalPulse-TV-[a-f0-9]{32}$' -and $_.FullName -notin $watchPriorProfiles} | ForEach-Object {$_.FullName})
     $watchReceipt.new_private_profile_count=$watchCreatedProfiles.Count
+    $watchStage='reveal_native_surface'
+    if(-not (Reveal-OwnedTarget $watchSurface $true)){Block 'native_surface_not_physically_visible'}
+    $watchReceipt.native_surface_visible=$true
+    $visibleNative=Visible-Rectangle $watchSurface $watchSurface
+    $watchReceipt.native_surface_visible_rectangle=@($visibleNative.X,$visibleNative.Y,$visibleNative.Width,$visibleNative.Height)
     [void](Snapshot '03-native-before-play')
     Provider-Blocked $watchSurface
     # Demonstrate the new deliberate-pre-Play idle behavior without autoplay.
@@ -392,15 +696,18 @@ try {
     Invoke-ProviderControl $watchSurface @('Play','Play (k)')
     $first=$null;$second=$null;$until=$watchClock.Elapsed.TotalSeconds+35
     do {
-        Provider-Blocked $watchSurface
         $sample=Read-Observation
+        Provider-Blocked $watchSurface
         if($null -ne $sample -and $null -ne $sample.time -and $sample.frames -gt 0) {
             if($null -eq $first){$first=$sample;[void](Snapshot '05-first-progress');[void](Snapshot '05-first-progress-native' $true)}
             elseif($sample.time -gt $first.time+1 -and $sample.frames -gt $first.frames){$second=$sample;[void](Snapshot '06-later-progress');[void](Snapshot '06-later-progress-native' $true);break}
         }
         Tick
     } while($watchClock.Elapsed.TotalSeconds -lt $until)
-    if($null -eq $second){Block 'advancing_ui_telemetry_not_demonstrated'}
+    if($null -eq $second) {
+        if(-not ($watchReceipt.Contains('telemetry_text_available')) -or -not $watchReceipt.telemetry_text_available){Block 'owned_telemetry_accessibility_unavailable'}
+        Block 'advancing_ui_telemetry_not_demonstrated'
+    }
     $watchStage='pause_resume'
     Invoke-ProviderControl $watchSurface @('Pause','Pause (k)')
     [void](Snapshot '07-paused')
@@ -426,30 +733,43 @@ try {
     $watchReceipt.reason='advancing_ui_telemetry_recorded_native_captures_require_independent_review'
     $watchExit=0
 } catch {
-    $watchReceipt.outcome='BLOCKED_INFRA'
-    $watchReceipt.reason='harness_exception_'+$_.Exception.GetType().Name
-    if($_.Exception.Data.Contains('probe_reason')){$watchReceipt.reason=$_.Exception.Data['probe_reason'];$watchReceipt.outcome=$_.Exception.Data['probe_kind']}
+    $failure=Failure-Details $_ $watchStage
+    $watchReceipt.initial_failure=$failure
+    $watchReceipt.outcome=$failure.kind
+    $watchReceipt.reason=$failure.reason
+    Checkpoint-Receipt
     if($watchReceipt.outcome -eq 'PROVIDER_BLOCKED'){$watchExit=0}
     try {[void](Snapshot '09-blocked-observation')} catch {}
 } finally {
     $watchReceipt.stage=$watchStage
-    try {
-        if($null -ne $watchWindow -and $null -ne $watchApp -and -not $watchApp.HasExited) {
-            Refresh-Owned
+    if($null -ne $watchWindow -and $null -ne $watchApp -and -not $watchApp.HasExited) {
+        try {Refresh-Owned} catch {Record-CleanupFailure $_ 'cleanup_ownership_refresh'}
+        try {
             $mute=Find-Named $watchWindow @('Mute television audio') $watchApp.Id
             $toggle=$null
             if($null -ne $mute -and $mute.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern,[ref]$toggle)) {
                 if($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off){Click-Observed $mute $watchApp.MainWindowHandle}
                 $watchReceipt.remuted_before_stop=($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
             }
+        } catch {Record-CleanupFailure $_ 'cleanup_remute'}
+        try {
             $stop=Find-Named $watchWindow @('Stop selected media source') $watchApp.Id
             if($null -ne $stop){Click-Observed $stop $watchApp.MainWindowHandle;$watchReceipt.stop_control_clicked=$true}
+        } catch {Record-CleanupFailure $_ 'cleanup_stop_media'}
+        # A missing/offscreen Stop before any media was opened must not skip
+        # independent navigation to the app's normal full-exit action.
+        try {
             $settings=Find-Named $watchWindow @('Settings') $watchApp.Id
-            if($null -ne $settings){Click-Observed $settings $watchApp.MainWindowHandle}
+            if($null -eq $settings){Block 'graceful_exit_settings_unavailable'}
+            Click-Observed $settings $watchApp.MainWindowHandle
+        } catch {Record-CleanupFailure $_ 'cleanup_open_settings'}
+        try {
             $exit=Find-Named $watchWindow @('Exit Completely') $watchApp.Id
-            if($null -ne $exit){Click-Observed $exit $watchApp.MainWindowHandle}
-        }
-    } catch {$watchReceipt.cleanup_ui_unavailable=$true}
+            if($null -eq $exit){Block 'graceful_exit_control_unavailable'}
+            Click-Observed $exit $watchApp.MainWindowHandle
+        } catch {Record-CleanupFailure $_ 'cleanup_exit_completely'}
+    }
+    Checkpoint-Receipt
     $cleanupUntil=[Diagnostics.Stopwatch]::StartNew()
     do {
         $alive=@($watchOwned.Values | ForEach-Object {Current-Process $_} | Where-Object {$null -ne $_})

@@ -4,6 +4,7 @@ No radio receiver directories or external-only sites enter the playback lineup.
 Builtin TV admission is intentionally separate from user-added specific videos.
 """
 from __future__ import annotations
+import html
 import json
 import math
 import sys
@@ -13,6 +14,25 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QTabWidget,QLineEdit,QSlider,QMessageBox,QCheckBox
 from .media_widget import _MediaTile, youtube_id, media_identity
 from .internet_radio import RadioPanel
+
+
+class _PlaybackDiagnosticsLabel(QLabel):
+    """Expose the same bounded UI receipt without changing its fixed name.
+
+    Qt's Windows provider maps Description to UIA FullDescription and Help
+    to UIA HelpText. Keep both available for assistive clients; the latter
+    comes from whatsThis and uses an escaped, noninteractive literal block.
+    This is only a mirror of displayed text, never an extra diagnostic source.
+    """
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setText(text)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setAccessibleDescription(text)
+        self.setWhatsThis("<pre>"+html.escape(text)+"</pre>")
 
 
 class Television(_MediaTile):
@@ -53,7 +73,7 @@ class Television(_MediaTile):
         # Keep status above the large video surface, visible without scrolling.
         self.layout_.insertWidget(2,self.tv_status)
         # The one-line channel note cannot display 320-character decode receipts.
-        self.tv_diagnostics=QLabel("Decoder diagnostics appear after Watch")
+        self.tv_diagnostics=_PlaybackDiagnosticsLabel("Decoder diagnostics appear after Watch")
         self.tv_diagnostics.setObjectName("TVPlaybackDiagnostics")
         self.tv_diagnostics.setAccessibleName("TV codec and renderer diagnostics")
         self.tv_diagnostics.setWordWrap(True)

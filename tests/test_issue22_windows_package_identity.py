@@ -2,9 +2,13 @@
 
 Offline tests deliberately do not contact YouTube or claim actual playback.
 """
+import html
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAccessible, QTextDocument
 from PySide6.QtWidgets import QApplication, QLabel
 
 from global_pulse.single_media import Television
@@ -103,4 +107,95 @@ def test_no_package_identity_is_reported_without_invented_google_acceptance():
     finally:
         receipt.tv_status.deleteLater()
         receipt.tv_diagnostics.deleteLater()
+        app.processEvents()
+
+
+def _assert_accessible_diagnostics(label):
+    """Exercise Qt's real accessibility adapter, not just widget properties."""
+    accessible = QAccessible.queryAccessibleInterface(label)
+    assert accessible is not None
+    assert accessible.text(QAccessible.Text.Name) == "TV codec and renderer diagnostics"
+    displayed = label.text()
+    assert label.textFormat() == Qt.TextFormat.PlainText
+    assert accessible.text(QAccessible.Text.Description) == displayed
+    help_text = accessible.text(QAccessible.Text.Help)
+    assert help_text == "<pre>" + html.escape(displayed) + "</pre>"
+    # Qt's Windows UIA HelpText property receives the controlled envelope.
+    # A client can decode the exact body; a help popup renders literal text.
+    assert html.unescape(help_text[5:-6]) == displayed
+    document = QTextDocument()
+    document.setHtml(help_text)
+    assert document.toPlainText() == displayed
+
+
+@pytest.mark.parametrize("terminal", ["error", "ended", "stopped"])
+def test_actual_accessible_diagnostics_follow_visible_receipts_and_terminal_state(terminal):
+    app = QApplication.instance() or QApplication([])
+    tv = Television()
+    try:
+        _assert_accessible_diagnostics(tv.tv_diagnostics)
+        assert tv.tv_diagnostics.text() == "Decoder diagnostics appear after Watch"
+        tv._requested = True
+        tv._native_tv_active = True
+        tv._native_mode = "watch"
+        for receipt in (
+            {"type": "installed_package_identity", "state": "absent"},
+            {"type": "web_request_identity", "referer_present": False},
+            {"type": "exact_video_http_response", "http_status": 200},
+            {"type": "waiting", "state": "awaiting_play", "frames": 0},
+            {"type": "advancing", "current_time": 12.25, "decoded_frames": 245,
+             "h264": "probably"},
+        ):
+            tv._native_tv_receipt(receipt)
+            _assert_accessible_diagnostics(tv.tv_diagnostics)
+        assert "time 12.25s" in tv.tv_diagnostics.text()
+        assert "decoded frames 245" in tv.tv_diagnostics.text()
+
+        tv._native_tv_receipt({
+            "type": terminal, "reason": "youtube_unavailable",
+            "youtube_error_code": 153, "observation": "visible_dom",
+        })
+        _assert_accessible_diagnostics(tv.tv_diagnostics)
+        final_text = tv.tv_diagnostics.text()
+        final_status = tv.tv_status.text()
+        assert not tv._requested and not tv._native_tv_active
+        if terminal == "error":
+            assert "Visible YouTube error code 153" in final_text
+            assert "Mode: official watch page" in final_text
+        elif terminal == "ended":
+            assert "HTMLMediaElement ended" in final_text
+        else:
+            assert final_text == "TV OFF · no active media diagnostics"
+        for late in ({"type": "stopped"}, {"type": "page_loaded", "success": True},
+                     {"type": "advancing", "current_time": 99, "decoded_frames": 999}):
+            tv._native_tv_receipt(late)
+            _assert_accessible_diagnostics(tv.tv_diagnostics)
+            assert tv.tv_diagnostics.text() == final_text
+            assert tv.tv_status.text() == final_status
+    finally:
+        tv.stop()
+        tv.deleteLater()
+        app.processEvents()
+
+
+def test_diagnostic_help_renders_markup_as_literal_noninteractive_text():
+    app = QApplication.instance() or QApplication([])
+    tv = Television()
+    try:
+        # Adversarial setter fixture, not a new provider-text admission path.
+        displayed = '<a href="https://invalid.example/">not a link</a> & <b>not bold</b>\nsecond line'
+        tv.tv_diagnostics.setText(displayed)
+        _assert_accessible_diagnostics(tv.tv_diagnostics)
+        document = QTextDocument()
+        document.setHtml(tv.tv_diagnostics.whatsThis())
+        block = document.begin()
+        while block.isValid():
+            fragment = block.begin()
+            while not fragment.atEnd():
+                assert not fragment.fragment().charFormat().isAnchor()
+                fragment += 1
+            block = block.next()
+    finally:
+        tv.stop()
+        tv.deleteLater()
         app.processEvents()

@@ -82,6 +82,55 @@ The hosted runner's actual token/desktop state is recorded; an administrator
 runner is not standard-user or owner-PC acceptance. No new runtime dependency,
 account, OS permission, package registration, or trust change is added.
 
+### First exact native attempt: offline PASS, live harness HOLD
+
+Source `5449d656f2f3117491a3ac27365c6a01ed65caff`, tree
+`9b8e78e55b88c8dfeb711cc1780cee3e014ff731`, completed Windows run
+`44933709575` attempt 1 / job `136935670463`. The full native suite passed
+2,132 tests with 14 unchanged deselections and 10 subtests in 332.07 seconds.
+Actual PowerShell 5.1 parsing, 66 native policy cases including 20 playback
+cases, private H.264 capability, all eight offline package phases and the
+single-EXE ZIP check passed. Distinct byte QA verified every one of the 3,357
+manifested portable files, both package hashes and the clean source binding.
+The Windows checkout source fingerprint was
+`1425abbaf2c2393065751647d3bc0744f0be0be26aa228e907555492ef96f3be` (393 files).
+
+The overall job nevertheless **failed** in the separate live diagnostic:
+`BLOCKED_INFRA`, stage `select_exact_fixture`, final reason
+`owned_process_cleanup_not_clean`. The two 1024x768 captures are identical,
+show a clipped dashboard with TV OFF, and contain no YouTube player. There
+were zero playback observations and no app-network-consent action. Tracked
+processes were ultimately cleared, but only after forced cleanup; this is not
+successful graceful Stop/Exit. The cleanup reason replaced the primary
+failure reason, so the precise original exception is not recoverable.
+
+The app's default 1440x940 frameless window exceeded that runner's desktop.
+The harness did not require successful maximize/fit readback and relied on
+UI Automation's IsOffscreen flag instead of physical containment. Offline
+actual Qt inspection also found that narrow media controls can be partly
+clipped, selector accessibility follows the selected item rather than its
+configured label, and the fixed-name diagnostics QLabel exposes no current
+text through its Qt Value/Text interfaces. Focus alone did not scroll those
+controls into view. These observations do not reconstruct the lost exception.
+
+The bounded successor fits the same owned window using normal window
+controls, reveals exact app-owned controls through real scrolling, intersects
+app input/capture rectangles with their actual viewports, keeps provider Play
+fully visible, preserves primary failure separately from cleanup, and
+independently attempts graceful Exit even if pre-playback Stop is unavailable.
+The only additional product correction exposes the identical, already bounded
+displayed diagnostic text through its accessible Description and literal-safe
+Qt Help, retaining the fixed accessible Name and plain-text display. The Qt
+Windows bridge maps UIA HelpText to Qt Help, not Description; the harness must
+read the actual mapped property instead of assuming the two are synonyms.
+This correction does not invent telemetry or
+substitute a status-only assertion for increasing time and decoded frames.
+No native-player policy, radio/tray code, hidden provider click, autoplay,
+broader process ownership or display/trust/identity change is introduced.
+Forced or uncertain cleanup still fails the diagnostic. Do not silently rerun
+unchanged bytes or promote the earlier offline PASS into live/owner-ready
+approval.
+
 ### Required evidence before any success claim
 
 Execute the actual observation script against inert adversarial fixtures,
