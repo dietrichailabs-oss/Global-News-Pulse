@@ -34,7 +34,7 @@ def test_native_package_identity_is_os_backed_not_a_publisher_website():
     assert 'referer_matches_registered_app_id = registeredAppReferer != null' in src
     assert 'provider_acceptance_verified = false' in src
     assert 'request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);' in src
-    assert 'string? registeredAppReferer = offlineProbe ? null : RegisteredWindowsAppReferer();' in src
+    assert 'string? registeredAppReferer = offlineProbe || fullWatch ? null : RegisteredWindowsAppReferer();' in src
     assert src.index('type = "installed_package_identity"') < src.index(
         'web.NavigateWithWebResourceRequest(request);')
     # Identity values, user folder and registry state must never be logged.

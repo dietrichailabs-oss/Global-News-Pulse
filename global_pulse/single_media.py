@@ -31,6 +31,11 @@ class Television(_MediaTile):
         self._last_native_status_at=0.0
         self._native_identity_note=""
         self._native_package_note=""
+        self._native_mode="embed"
+        self._native_state="off"
+        self._native_identity_state="unknown"
+        self._native_referer_state="unknown"
+        self._native_http_status=0
         super().__init__(parent)
         self.setAccessibleName("Single large television player")
         self.display.setMinimumHeight(180)
@@ -393,6 +398,11 @@ class Television(_MediaTile):
         self._native_identity_note=""
         self._native_package_note=""
         self._native_http_note=""
+        self._native_mode="watch" if full_watch else "embed"
+        self._native_state="connecting"
+        self._native_identity_state="unknown"
+        self._native_referer_state="unknown"
+        self._native_http_status=0
         self.tv_status.setText("CONNECTING · native Windows video decoder")
         self.tv_diagnostics.setText("Edge WebView2 selected · codec and frame verification pending")
         started=self.native_tv.play(video,full_watch=full_watch)
@@ -404,16 +414,105 @@ class Television(_MediaTile):
             return False
         self.display.hide()
         self.note.setText(
-            "Official YouTube player in isolated Windows video process · "
-            "press Play in the video · initially muted"
+            ("Official YouTube watch page" if full_watch else "Official YouTube embedded player")+
+            " in isolated Windows video process · press Play in the video · initially muted"
         )
         return True
+
+    def _native_failure_evidence(self):
+        """Compact enums/numbers survive Stop; never copy page text into Qt."""
+        mode=("official watch page" if getattr(self,"_native_mode","")=="watch"
+              else "embedded player")
+        identity=getattr(self,"_native_identity_state","unknown")
+        if not isinstance(identity,str) or identity not in {"present","absent","unknown"}:
+            identity="unknown"
+        referer_state=getattr(self,"_native_referer_state","unknown")
+        if not isinstance(referer_state,str):referer_state="unknown"
+        referer={
+            "registered_app":"registered Windows app ID observed",
+            "publisher":"publisher URL observed (not an app ID)",
+            "present_unknown":"present, identity unknown",
+            "missing_unknown":"missing/unknown",
+            "browser_present":"browser-managed, present",
+            "browser_missing":"browser-managed, missing/unknown",
+        }.get(referer_state,"unknown")
+        code=getattr(self,"_native_http_status",0)
+        if type(code) is not int or not 100<=code<=599:code=0
+        return (
+            "Mode: "+mode+" · Windows package identity: "+identity+
+            " · pre-send Referer: "+referer+
+            " · exact video HTTP: "+(str(code) if code else "unknown")+
+            " · provider acceptance and picture/audio NOT verified"
+        )
+
+    @staticmethod
+    def _native_error_readout(event):
+        """Only known error codes/enums enter the visible failure receipt.
+
+        A number parsed from YouTube's visible DOM is not an IFrame API event;
+        HTMLMediaElement errors are a separate namespace entirely.
+        """
+        reason=event.get("reason")
+        if not isinstance(reason,str):reason=""
+        provenance=event.get("observation")
+        if reason=="youtube_unavailable":
+            code=event.get("youtube_error_code")
+            meanings={2:"invalid parameter",5:"HTML5 player failure",
+                      100:"video unavailable",101:"embedding disallowed",
+                      150:"embedding disallowed",153:"client identification missing"}
+            if provenance=="visible_dom":
+                if type(code) is int and code in meanings:
+                    return (
+                        "YOUTUBE ERROR "+str(code)+" · "+meanings[code],
+                        "Visible YouTube error code "+str(code)+
+                        " · DOM observation, not an IFrame API event."
+                    )
+                return ("UNAVAILABLE · visible YouTube player error",
+                        "Visible YouTube error; numeric code unrecognized. "
+                        "DOM observation, not an IFrame API event.")
+            return ("UNAVAILABLE · YouTube player",
+                    "Helper reported provider unavailability; error provenance unreported.")
+        if reason=="html_media_error":
+            code=event.get("media_error_code")
+            meanings={1:"aborted",2:"network",3:"decoder",4:"unsupported media"}
+            if provenance=="html_media_element" and type(code) is int and code in meanings:
+                return ("VIDEO ERROR · "+meanings[code],
+                        "HTMLMediaElement error "+str(code)+
+                        " · not a YouTube/IFrame API error code.")
+            return ("VIDEO ERROR · media element",
+                    "Media error code/provenance unknown; no provider denial inferred.")
+        messages={
+            "video_document_timeout_45s":("VIDEO DOCUMENT TIMEOUT",
+                "The selected video document did not load within 45 seconds."),
+            "video_element_missing_45s":("VIDEO ELEMENT MISSING",
+                "No video element was observed for 45 seconds."),
+            "telemetry_timeout_45s":("PLAYER OBSERVATION TIMEOUT",
+                "No valid player observation arrived for 45 seconds."),
+            "no_media_progress_45s":("VIDEO STALLED · no media progress",
+                "Unpaused player supplied no advancing frame evidence for 45 seconds."),
+            "renderer_exited":("RENDERER EXITED · video unavailable",
+                "The isolated Windows video renderer exited."),
+            "oversized_tv_status":("VIDEO ERROR · invalid player receipt",
+                "The isolated player exceeded the bounded receipt limit."),
+            "native_window_attach_failed":("VIDEO ERROR · window attachment failed",
+                "The exact owned player window could not be attached."),
+            "private_window_not_ready":("VIDEO ERROR · private player not ready",
+                "The isolated player did not provide a valid private window."),
+            "native_process_start_failed":("VIDEO ERROR · player startup failed",
+                "The isolated Windows video process did not start."),
+        }
+        if isinstance(reason,str) and reason.startswith("startup_"):
+            return ("VIDEO ERROR · player startup failed",
+                    "The isolated player failed during startup.")
+        return messages.get(reason,("VIDEO ERROR · unclassified player failure",
+                                    "Native player failure category unrecognized."))
 
     def _native_tv_receipt(self, event):
         if not self._native_tv_active or not self._requested:
             return
         kind=event.get("type")
         if kind=="ready":
+            self._native_state="ready"
             self.tv_status.setText("WINDOWS PLAYER READY · press Play")
             self.tv_diagnostics.setText(
                 "Native Edge WebView2 active · InPrivate profile · "
@@ -425,8 +524,13 @@ class Television(_MediaTile):
             # OS-owned Win32 package query, not a publisher-site assumption.
             # The helper never emits the actual registered name or publisher.
             state=event.get("state")
+            self._native_identity_state=(state if isinstance(state,str) and
+                state in {"absent","present","unknown"} else "unknown")
             registered=event.get("referer_matches_registered_app_id") is True
             self._native_package_note=(
+                "Windows package identity: "+self._native_identity_state+
+                "; normal watch page uses browser-managed headers, not embed identity"
+                if getattr(self,"_native_mode","embed")=="watch" else
                 "Windows package identity: absent for this process; "
                 "publisher URL is not a registered package ID"
                 if state=="absent" else
@@ -446,7 +550,18 @@ class Television(_MediaTile):
             present=event.get("referer_present") is True
             match=event.get("publisher_url_match") is True
             app_id_match=event.get("registered_app_id_match") is True
+            watch=getattr(self,"_native_mode","embed")=="watch"
+            self._native_referer_state=(
+                ("browser_present" if present else "browser_missing") if watch else
+                "registered_app" if present and app_id_match else
+                "publisher" if present and match else
+                "present_unknown" if present else "missing_unknown"
+            )
             self._native_identity_note=(
+                "Normal watch-page pre-send Referer: browser-managed, "+
+                ("present" if present else "missing/unknown")+
+                " · not an embedded app-ID assertion · playback NOT verified"
+                if watch else
                 "WebView2 pre-send Referer: "+
                 ("registered Windows app ID observed" if present and app_id_match else
                  "publisher URL observed (not an app ID)" if present and match else
@@ -460,8 +575,9 @@ class Television(_MediaTile):
         elif kind=="exact_video_http_response":
             # Even HTTP 200 does not show Google accepted our app identity.
             try: code=int(event.get("http_status",0))
-            except (ValueError,TypeError): code=0
+            except (ValueError,TypeError,OverflowError): code=0
             if not 100<=code<=599: code=0
+            self._native_http_status=code
             self._native_http_note=(
                 "Exact video URL HTTP "+str(code) if code
                 else "Exact video URL HTTP status unknown"
@@ -482,19 +598,36 @@ class Television(_MediaTile):
                     self._native_identity_note)
         elif kind=="page_loaded":
             success=event.get("success") is True
+            self._native_state="page_loaded" if success else "page_error"
             self.tv_status.setText(
                 "PAGE LOADED · video not yet verified" if success
                 else "PAGE ERROR · video not loaded"
             )
         elif kind=="waiting":
+            state=event.get("state")
+            states={
+                "awaiting_play":"AWAITING PLAY · press Play in the video",
+                "paused":"PAUSED · press Play to resume",
+                "missing_player":"WAITING · video element not yet observed",
+                "buffering":"BUFFERING · no advancing frame evidence yet",
+                "stalled":"STALLED · video progress not advancing",
+            }
+            if not isinstance(state,str) or state not in states:state="waiting"
+            changed=getattr(self,"_native_state","")!=state
+            self._native_state=state
+            if changed:
+                self.tv_status.setText(states.get(state,"WAITING · video not yet verified"))
             now=time.monotonic()
-            if now-self._last_native_status_at<5.0:
+            if not changed and now-self._last_native_status_at<5.0:
                 return
             self._last_native_status_at=now
-            codec=str(event.get("h264") or "unknown")
+            codec=event.get("h264")
+            if codec not in ("probably","maybe"):codec="unknown"
+            frames=event.get("frames",0)
+            if type(frames) is not int or not 0<=frames<=2147483647:frames=0
             self.tv_diagnostics.setText(
                 "Windows decoder H.264: "+codec+
-                " · decoded frames "+str(event.get("frames",0))+
+                " · decoded frames "+str(frames)+
                 " · picture/audio not confirmed"+
                 (" · "+self._native_identity_note if self._native_identity_note else "")+
                 (" · "+getattr(self,"_native_http_note","")
@@ -503,6 +636,12 @@ class Television(_MediaTile):
                  if getattr(self,"_native_package_note","") else "")
             )
         elif kind=="advancing":
+            frames=event.get("decoded_frames",0)
+            current=event.get("current_time")
+            if (type(frames) is not int or not 0<frames<=2147483647 or
+                type(current) not in (int,float) or not 0<=current<=1e12 or
+                not math.isfinite(current)):
+                return  # Malformed counters are not advancing-frame evidence.
             self._had_playback=True
             now=time.monotonic()
             self._progress_at=now
@@ -510,14 +649,19 @@ class Television(_MediaTile):
             # every receipt forced Qt's scroll-area/native-child geometry to
             # change while frames were being composited. Telemetry remains
             # live; only the visible diagnostic label is rate-limited.
-            if now-self._last_native_status_at<5.0:
+            changed=getattr(self,"_native_state","")!="advancing"
+            self._native_state="advancing"
+            if changed:
+                self.tv_status.setText("VIDEO TIME ADVANCING · decoded frames reported")
+            if not changed and now-self._last_native_status_at<5.0:
                 return
             self._last_native_status_at=now
-            self.tv_status.setText("VIDEO TIME ADVANCING · decoded frames reported")
+            codec=event.get("h264")
+            if codec not in ("probably","maybe"):codec="unknown"
             self.tv_diagnostics.setText(
-                "Native Edge H.264 "+str(event.get("h264") or "unknown")+
-                " · time "+str(event.get("current_time"))+
-                "s · decoded frames "+str(event.get("decoded_frames"))+
+                "Native Edge H.264 "+codec+
+                " · time "+str(current)+
+                "s · decoded frames "+str(frames)+
                 " · picture and audio require owner verification"+
                 (" · "+self._native_identity_note if self._native_identity_note else "")+
                 (" · "+getattr(self,"_native_http_note","")
@@ -526,13 +670,18 @@ class Television(_MediaTile):
                  if getattr(self,"_native_package_note","") else "")
             )
         elif kind=="error":
-            reason=str(event.get("reason") or "unknown")[:80]
+            evidence=Television._native_failure_evidence(self)
+            title,detail=Television._native_error_readout(event)
             self.stop()
-            self.tv_status.setText("VIDEO ERROR · "+reason)
+            self.tv_status.setText(title)
             self.tv_diagnostics.setText(
-                "Native WebView2 error: "+reason+
-                ". No successful video playback is claimed."
+                detail+" · "+evidence+". No successful video playback is claimed."
             )
+        elif kind=="ended":
+            evidence=Television._native_failure_evidence(self)
+            self.stop()
+            self.tv_status.setText("ENDED · video element reported completion")
+            self.tv_diagnostics.setText("HTMLMediaElement ended · "+evidence)
         elif kind=="stopped":
             self.stop()
             self.tv_status.setText("WINDOWS PLAYER EXITED")
@@ -704,6 +853,7 @@ class Television(_MediaTile):
         self._generation=getattr(self,"_generation",0)+1
         self._requested=False;self._poll_pending=False
         self._native_tv_active=False
+        self._native_state="off"
         if self._poll_timer:self._poll_timer.stop()
         self._player_loaded=False
         self._had_playback=False

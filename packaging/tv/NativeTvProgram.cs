@@ -181,13 +181,74 @@ internal sealed class TvForm : Form
     private bool pollPending;
     private bool identityObservationSent;
     private int exactVideoHttpResponseCount;
-    private bool played;
+    private readonly Stopwatch playbackClock = new();
+    private readonly PlaybackObservation playback = new();
     // Commands may arrive before YouTube creates its <video> element.
     // Native WebView2 starts muted before navigation, independent of HTML.
     private bool desiredMuted = true;
     private int desiredVolume = 60;
-    private double previousTime = -1;
-    private DateTime started = DateTime.UtcNow;
+
+    // Waiting for the user's deliberate Play gesture is not a playback
+    // failure. Keep that separate from an absent document/player, a lost
+    // script callback, and an actually unpaused player that cannot progress.
+    // All deadlines use one monotonic clock; none extend callback liveness.
+    private sealed class PlaybackObservation
+    {
+        internal bool DocumentLoaded;
+        internal bool Played { get; private set; }
+        internal string State { get; private set; } = "loading";
+        private double lastObservationAt;
+        private double lastProgressAt;
+        private double? missingSince;
+        private double previousTime = -1;
+        private int previousFrames = -1;
+
+        internal string? ExpiredReason(double now)
+        {
+            if (!DocumentLoaded && now > 45) return "video_document_timeout_45s";
+            if (now - lastObservationAt > 45) return "telemetry_timeout_45s";
+            if (missingSince.HasValue && now - missingSince.Value > 45)
+                return "video_element_missing_45s";
+            if ((State is "buffering" or "stalled") && now - lastProgressAt > 45)
+                return "no_media_progress_45s";
+            return null;
+        }
+
+        internal string Observe(double now, bool present, bool paused, bool ended,
+                                double? current, int frames, int width, int ready)
+        {
+            lastObservationAt = now;
+            if (!present)
+            {
+                missingSince ??= now;
+                previousTime = -1;
+                previousFrames = -1;
+                return State = "missing_player";
+            }
+            if (State is "loading" or "missing_player") lastProgressAt = now;
+            missingSince = null;
+            bool advancing = current.HasValue && double.IsFinite(current.Value)
+                && current.Value > previousTime && previousTime >= 0
+                && !paused && ready >= 2 && width > 0
+                && frames > previousFrames && previousFrames >= 0;
+            if (current.HasValue && double.IsFinite(current.Value))
+                previousTime = current.Value;
+            previousFrames = frames;
+            if (ended) return State = "ended";
+            if (paused)
+            {
+                lastProgressAt = now;
+                return State = Played ? "paused" : "awaiting_play";
+            }
+            if (advancing)
+            {
+                Played = true;
+                lastProgressAt = now;
+                return State = "advancing";
+            }
+            return State = Played && ready >= 2 ? "stalled" : "buffering";
+        }
+    }
 
     internal TvForm(string videoId, IntPtr parentHwnd, bool fullWatch,
                     bool offlineProbe, bool visibleOfflineProbe)
@@ -365,12 +426,61 @@ internal sealed class TvForm : Form
         if (PackageNameFromFullName("malicious.example_1.2.3.4_x64__abc123") != "malicious.example") failures++;
         if (PackageNameFromFullName("DietrichAI.GlobalPulse_1.2.3.4_x64__abc123\r\nX-Injected:yes") != null) failures++;
         if (PackageNameFromFullName("Fake_1.2.3.4_x64__") != null) failures++;
+        failures += PlaybackPolicySelfTest(out int playbackCases);
         Console.WriteLine(JsonSerializer.Serialize(new {
-            type="policy_self_test", cases=exact.Length * 2 + 16,
+            type="policy_self_test", cases=exact.Length * 2 + 16 + playbackCases,
+            playback_cases=playbackCases,
             passed=failures==0, failures, network="none",
             os_package_identity_state=installedPackageState
         }));
         return failures==0 ? 0 : 1;
+    }
+
+    private static int PlaybackPolicySelfTest(out int cases)
+    {
+        int failures = 0;
+        int count = 0;
+        void Check(bool condition) { count++; if (!condition) failures++; }
+        var absentDocument = new PlaybackObservation();
+        Check(absentDocument.ExpiredReason(46) == "video_document_timeout_45s");
+        var lostCallback = new PlaybackObservation { DocumentLoaded = true };
+        Check(lostCallback.ExpiredReason(46) == "telemetry_timeout_45s");
+        var idle = new PlaybackObservation { DocumentLoaded = true };
+        bool idleConnected = true;
+        for (int second = 1; second <= 120; second++)
+        {
+            idleConnected &= idle.ExpiredReason(second) == null;
+            idle.Observe(second, true, true, false, 0, 0, 0, 0);
+        }
+        Check(idleConnected && idle.State == "awaiting_play" && !idle.Played);
+        Check(idle.ExpiredReason(166) == "telemetry_timeout_45s");
+        Check(idle.Observe(121, true, false, false, 0, 1, 640, 4) == "buffering");
+        Check(idle.Observe(122, true, false, false, 1, 2, 640, 4) == "advancing");
+        Check(idle.Played);
+        Check(idle.Observe(123, true, true, false, 1, 2, 640, 4) == "paused");
+        idle.Observe(200, true, true, false, 1, 2, 640, 4);
+        Check(idle.ExpiredReason(200) == null);
+        Check(idle.ExpiredReason(246) == "telemetry_timeout_45s");
+        Check(idle.Observe(201, true, false, false, 1, 2, 640, 4) == "stalled");
+        idle.Observe(246, true, false, false, 1, 2, 640, 4);
+        Check(idle.ExpiredReason(246) == "no_media_progress_45s");
+        Check(idle.Observe(247, true, false, true, 2, 3, 640, 4) == "ended");
+        var missing = new PlaybackObservation { DocumentLoaded = true };
+        Check(missing.Observe(1, false, true, false, null, 0, 0, 0) == "missing_player");
+        missing.Observe(46, false, true, false, null, 0, 0, 0);
+        Check(missing.ExpiredReason(46) == null);
+        missing.Observe(47, false, true, false, null, 0, 0, 0);
+        Check(missing.ExpiredReason(47) == "video_element_missing_45s");
+        var buffering = new PlaybackObservation { DocumentLoaded = true };
+        Check(buffering.Observe(1, true, false, false, 0, 0, 0, 0) == "buffering");
+        buffering.Observe(47, true, false, false, 0, 0, 0, 0);
+        Check(buffering.ExpiredReason(47) == "no_media_progress_45s");
+        var clockOnly = new PlaybackObservation { DocumentLoaded = true };
+        clockOnly.Observe(1, true, false, false, 0, 3, 640, 4);
+        Check(clockOnly.Observe(2, true, false, false, 1, 3, 640, 4) == "buffering");
+        Check(!clockOnly.Played);
+        cases = count;
+        return failures;
     }
 
     private static void RejectWebView2Overrides()
@@ -403,7 +513,7 @@ internal sealed class TvForm : Form
         try
         {
             RejectWebView2Overrides();
-            string? registeredAppReferer = offlineProbe ? null : RegisteredWindowsAppReferer();
+            string? registeredAppReferer = offlineProbe || fullWatch ? null : RegisteredWindowsAppReferer();
             var environmentOptions = new CoreWebView2EnvironmentOptions {
                 ExclusiveUserDataFolderAccess = true,
                 AllowSingleSignOnUsingOSPrimaryAccount = false,
@@ -464,6 +574,7 @@ internal sealed class TvForm : Form
                         // A failed inspection is UNKNOWN, never a passed identity gate.
                     }
                     Reply(new { type = "web_request_identity", stage = "pre_network",
+                        mode = fullWatch ? "watch" : "embed",
                         referer_present = present, publisher_url_match = publisherMatch,
                         registered_app_id_match = registeredMatch,
                         os_app_identity_verified = registeredMatch, network_delivery_verified = false });
@@ -503,12 +614,16 @@ internal sealed class TvForm : Form
             web.ServerCertificateErrorDetected += (_, e) => e.Action = CoreWebView2ServerCertificateErrorAction.Cancel;
             web.BasicAuthenticationRequested += (_, e) => e.Cancel = true;
             web.NavigationCompleted += (_, e) => {
-                if (e.IsSuccess) ApplyElementAudio();
+                if (e.IsSuccess) {
+                    playback.DocumentLoaded = true;
+                    ApplyElementAudio();
+                }
                 Reply(new {type="page_loaded", success=e.IsSuccess});
             };
             web.ProcessFailed += (_, e) => { Reply(new {type="error",reason="renderer_exited"}); Close(); };
             initialized = true;
-            Reply(new { type="ready", hwnd=Handle.ToInt64(), in_private=web.Profile.IsInPrivateModeEnabled });
+            Reply(new { type="ready", hwnd=Handle.ToInt64(), in_private=web.Profile.IsInPrivateModeEnabled,
+                mode=fullWatch ? "watch" : "embed" });
             if (offlineProbe)
             {
                 var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -550,12 +665,23 @@ internal sealed class TvForm : Form
             Reply(new { type = "installed_package_identity",
                 state = InstalledPackageIdentityState(),
                 source = "GetCurrentPackageFullName",
+                mode = fullWatch ? "watch" : "embed",
                 referer_matches_registered_app_id = registeredAppReferer != null,
                 provider_acceptance_verified = false });
-            var request = environment.CreateWebResourceRequest(url, "GET", null, "");
-            request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);
-            web.NavigateWithWebResourceRequest(request);
-            started = DateTime.UtcNow;
+            playbackClock.Restart();
+            if (fullWatch)
+            {
+                // Normal top-level navigation, not an iframe identity workaround.
+                // Browser-managed headers, exact-video guards, consent and manual
+                // Play remain. Success here would not prove an embed-153 fix.
+                web.Navigate(url);
+            }
+            else
+            {
+                var request = environment.CreateWebResourceRequest(url, "GET", null, "");
+                request.Headers.SetHeader("Referer", registeredAppReferer ?? PublisherReferer);
+                web.NavigateWithWebResourceRequest(request);
+            }
             telemetry.Start();
         }
         catch (Exception ex)
@@ -595,51 +721,118 @@ internal sealed class TvForm : Form
         if (initialized) BrowserScript(AudioScript());
     }
 
+    // Read only the rendered provider error area and standard media properties.
+    // A visible DOM message is NOT an IFrame API onError/autoplay event. The
+    // text stays inside the page: only recognized numbers/booleans cross IPC.
+    // Keep this actual probe independently executable in offline JS fixtures.
+    private const string PlaybackProbe = @"(()=>{
+        function visible(e) {
+            if (!e || !e.isConnected) return false;
+            const rects=Array.from(e.getClientRects()).slice(0,16).filter(r=>r.width>0&&r.height>0);
+            if (!rects.length || !(window.innerWidth>0&&window.innerHeight>0)) return false;
+            let left=0,top=0,right=window.innerWidth,bottom=window.innerHeight;
+            let depth=0;
+            for (let n=e;n;n=n.parentElement) {
+                if (++depth>64) return false;
+                const s=getComputedStyle(n);
+                if (s.display==='none' || s.visibility==='hidden' ||
+                    s.visibility==='collapse' || s.contentVisibility==='hidden' ||
+                    Number(s.opacity)===0) return false;
+                const clipX=['hidden','clip','scroll','auto'].includes(s.overflowX);
+                const clipY=['hidden','clip','scroll','auto'].includes(s.overflowY);
+                if (clipX||clipY) {
+                    const box=n.getBoundingClientRect();
+                    const x=box.left+n.clientLeft,y=box.top+n.clientTop;
+                    if (clipX) {left=Math.max(left,x);right=Math.min(right,x+n.clientWidth);}
+                    if (clipY) {top=Math.max(top,y);bottom=Math.min(bottom,y+n.clientHeight);}
+                }
+            }
+            return rects.some(r=>Math.min(right,r.right)>Math.max(left,r.left)&&
+                                 Math.min(bottom,r.bottom)>Math.max(top,r.top));
+        }
+        let providerError=false,providerCode=0;
+        for (const e of Array.from(document.querySelectorAll('.ytp-error-content-wrap,.ytp-error-message')).slice(0,16)) {
+            if (!visible(e)) continue;
+            const message=(e.innerText||'').slice(0,512).trim();
+            if (!message) continue;
+            providerError=true;
+            const match=message.match(/\berror(?:\s+code)?\s*[:#]?\s*(2|5|100|101|150|153)\b/i);
+            providerCode=match?Number(match[1]):0;
+            break;
+        }
+        const v=document.querySelector('video'),d=document.createElement('video');
+        const mediaCode=v&&v.error&&[1,2,3,4].includes(v.error.code)?v.error.code:0;
+        return JSON.stringify({present:!!v,time:v?v.currentTime:null,
+            paused:v?v.paused:true,ended:v?v.ended:false,ready:v?v.readyState:0,
+            frames:v&&v.getVideoPlaybackQuality?v.getVideoPlaybackQuality().totalVideoFrames:0,
+            width:v?v.videoWidth:0,h264:d.canPlayType('video/mp4; codecs=""avc1.42E01E,mp4a.40.2""'),
+            provider_error_visible:providerError,provider_error_code:providerCode,
+            media_error_code:mediaCode});
+    })()";
+
     private async Task InspectVideoAsync()
     {
-        if (!initialized || pollPending || browser.CoreWebView2 == null) return;
-        if (!played && (DateTime.UtcNow - started).TotalSeconds > 45)
+        if (!initialized || browser.CoreWebView2 == null) return;
+        // Check liveness even while a previous ExecuteScriptAsync is pending.
+        // A paused player does not reset this independent callback deadline.
+        string? timeout = playback.ExpiredReason(playbackClock.Elapsed.TotalSeconds);
+        if (timeout != null)
         {
-            Reply(new { type="error", reason="no_media_progress_45s" });
+            Reply(new { type="error", reason=timeout, observation="local_deadline",
+                mode=fullWatch ? "watch" : "embed", state=playback.State });
             Close();
             return;
         }
+        if (pollPending) return;
         pollPending = true;
         try
         {
             // Re-apply desired controls during polling: YouTube often
             // replaces the <video> element after NavigationCompleted.
-            string volume = (desiredVolume / 100d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            string muted = desiredMuted ? "true" : "false";
-            string query = @"(()=>{let v=document.querySelector('video');if(v){v.muted=" + muted
-                + ";v.volume=" + volume + @";}let d=document.createElement('video');let e=document.querySelector('.ytp-error-content-wrap,.ytp-error-message');return JSON.stringify({time:v?v.currentTime:null,paused:v?v.paused:true,ready:v?v.readyState:0,frames:v&&v.getVideoPlaybackQuality?v.getVideoPlaybackQuality().totalVideoFrames:0,width:v?v.videoWidth:0,muted:v?v.muted:null,volume:v?v.volume:null,h264:d.canPlayType('video/mp4; codecs=""avc1.42E01E,mp4a.40.2""'),provider_error:e&&e.textContent?e.textContent.slice(0,120):null});})()";
+            string query = AudioScript() + ";" + PlaybackProbe;
             var encoded = await browser.CoreWebView2.ExecuteScriptAsync(query);
+            if (IsDisposed || Disposing) return;
             using var outer = JsonDocument.Parse(encoded);
             var innerJson = outer.RootElement.GetString();
             if (innerJson == null) return;
             using var inner = JsonDocument.Parse(innerJson);
             var root = inner.RootElement;
             var codec = root.GetProperty("h264").GetString() ?? "";
+            if (codec is not ("probably" or "maybe")) codec = "unknown";
             var clock = root.GetProperty("time");
             var frames = root.GetProperty("frames").GetInt32();
             var width = root.GetProperty("width").GetInt32();
+            var ready = root.GetProperty("ready").GetInt32();
             double? current = clock.ValueKind == JsonValueKind.Number ? clock.GetDouble() : null;
+            bool present = root.GetProperty("present").GetBoolean();
             bool paused = root.GetProperty("paused").GetBoolean();
-            var providerError = root.GetProperty("provider_error");
-            if (providerError.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(providerError.GetString()))
+            bool ended = root.GetProperty("ended").GetBoolean();
+            int providerCode = root.GetProperty("provider_error_code").GetInt32();
+            if (providerCode is not (2 or 5 or 100 or 101 or 150 or 153)) providerCode = 0;
+            if (root.GetProperty("provider_error_visible").GetBoolean())
             {
-                Reply(new {type="error",reason="youtube_unavailable"});
+                Reply(new {type="error", reason="youtube_unavailable", observation="visible_dom",
+                    youtube_error_code=providerCode, mode=fullWatch ? "watch" : "embed"});
                 Close(); return;
             }
-            if (current != null && current > previousTime && previousTime >= 0
-                && !paused && frames > 0 && width > 0)
+            int mediaCode = root.GetProperty("media_error_code").GetInt32();
+            if (mediaCode is >= 1 and <= 4)
             {
-                played = true;
-                Reply(new {type="advancing", current_time=current, decoded_frames=frames, h264=codec});
+                Reply(new {type="error", reason="html_media_error", observation="html_media_element",
+                    media_error_code=mediaCode, mode=fullWatch ? "watch" : "embed"});
+                Close(); return;
             }
-            else if (!played)
-                Reply(new {type="waiting", h264=codec, frames, video_width=width});
-            if (current != null) previousTime = current.Value;
+            string state = playback.Observe(playbackClock.Elapsed.TotalSeconds,
+                present, paused, ended, current, frames, width, ready);
+            if (state == "advancing")
+                Reply(new {type="advancing", current_time=current, decoded_frames=frames, h264=codec});
+            else if (state == "ended")
+            {
+                Reply(new {type="ended", observation="html_media_element"});
+                Close();
+            }
+            else
+                Reply(new {type="waiting", state, h264=codec, frames, video_width=width});
         }
         catch (Exception ex)
         {

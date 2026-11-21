@@ -1,8 +1,104 @@
 # R20 digital radio and owner-feedback corrections — bounded QA handoff
 
-Status: **DRAFT / owner physical feedback FAIL / corrective QA pending**. Based on exact
+Status: **DRAFT / bounded YouTube correction under review / no new playback PASS**. Based on exact
 R19 integration parent `76b8164308dd2c8ca6da465e0df729c102715124`.
 Do not merge, publish or reuse streams commercially from this draft.
+
+## November 21 priority: YouTube playback and truthful player state
+
+The owner's latest feedback is **"much better now try and get youtube working"**.
+This records improvement of the recent tray/shutdown candidate, not blanket
+physical acceptance. Preserve the working tray path and the owner's earlier
+scoped HAM audio/tuning result. The exact accepted baseline for this bounded
+successor is `18127060ba64aef506f5614e27507837ea1ad34a`, tree
+`7723c57319bee4f4692c795d46224193a166a772`. Its native/package evidence remains
+historical evidence for those bytes, not approval of this change.
+
+### Demonstrated defects and separate identity dependency
+
+An offline execution of the actual native observation JavaScript demonstrates
+that a hidden YouTube error element can be returned as a fatal error while the
+video reports advancing time and decoded frames. The native helper also starts
+a 45-second no-progress deadline at navigation despite `autoplay=0` and the
+instruction to press Play manually. Finally, its error receipt collapses all
+provider failures into one generic reason and the UI discards earlier identity
+and HTTP observations on Stop. These are reproducible source/fixture defects;
+none establishes the cause of the owner's particular live Error 153.
+
+[Google's required minimum functionality](https://developers.google.com/youtube/terms/required-minimum-functionality)
+requires embedded-player identification and specifies the installed package
+identity's Name component for non-store Windows distribution. The current
+classic installer does not register such an identity; the real publisher URL
+fallback is not a substitute. Do not invent an identity, import a certificate,
+change trust stores, add signing/registration, or call an HTTP 200 response proof
+that YouTube accepted the application. Those installation changes require a
+separate owner decision if the embedded route needs them.
+
+### Bounded correction contract
+
+- Keep the existing, separately consented **Try YouTube watch page in Pulse**
+  path. Use normal WebView2 navigation for that exact official watch URL, without
+  injecting the embed Referer. Do not add automatic embed-to-watch fallback or
+  claim normal-watch success is an embedded Error 153 fix.
+- Treat only visibly displayed provider errors as fatal. Preserve recognized
+  numeric error codes and bounded error classes, not raw page text, URLs,
+  cookies, headers, or arbitrary HTML. Label DOM observations as observations,
+  not fabricated IFrame API events.
+- Distinguish awaiting manual Play, paused, buffering, advancing, stalled and
+  ended states. A deliberate pause must not become a false playback failure.
+  Retain separate finite deadlines for missing document/video, a lost callback,
+  and actual unpaused no-progress; a pending JavaScript reply must not defeat
+  the liveness deadline. Use monotonic elapsed time.
+- Preserve the safe backend/mode, package-identity, pre-send Referer and HTTP
+  observations in the final error readout. Show state changes promptly while
+  retaining the existing rate limit for repeated numeric telemetry.
+- Keep explicit exact-video consent, muted initial state, manual Play, private
+  profile, native child ownership, Stop/Exit, sandbox, host/frame/redirect,
+  permission and download restrictions. Do not broaden hosts speculatively or
+  accept provider sign-in, cookie, age, geo, or bot prompts automatically.
+
+The cumulative workflow source allowlist expands from 31 to 37 paths solely
+for `global_pulse/single_media.py`, `packaging/tv/NativeTvProgram.cs`,
+`tests/test_issue22_windows_package_identity.py`, and the new
+`tests/test_issue22_youtube_playback_observation.py`, plus the opt-in diagnostic
+`scripts/issue22_youtube_watch_probe.ps1` and its offline contract tests in
+`tests/test_issue22_youtube_watch_probe.py`. The existing 14 deselections,
+two ignored historical modules, tray latency thresholds, all eight offline
+package checks, and distinct downloaded-byte QA remain unchanged.
+The exact packaged native policy/playback cases and private codec probe now
+also run offline before the installer smoke checks; neither contacts YouTube.
+
+An additional live watch-page diagnostic is opt-in only: a push carrying
+`[r20-youtube-live-qa]` in its commit message or the explicit workflow-dispatch
+boolean. It runs after artifact creation against the actual frozen app with
+a new disposable data directory. Its only authorized fixture is the existing
+public Blender video `YE7VzlLtp-4`. Automation must interact with the real app
+network-consent dialog and a currently observed native Play control, without
+monkeypatching the dialog, starting the helper directly, guessing click
+coordinates, or autoaccepting any provider prompt. Bounded app screenshots and
+a separate `DIAGNOSTIC_ONLY` receipt must distinguish picture-progress
+observations, provider denial, infrastructure failure, and unverified audio.
+The hosted runner's actual token/desktop state is recorded; an administrator
+runner is not standard-user or owner-PC acceptance. No new runtime dependency,
+account, OS permission, package registration, or trust change is added.
+
+### Required evidence before any success claim
+
+Execute the actual observation script against inert adversarial fixtures,
+including hidden ancestors, an earlier hidden error followed by a visible one,
+visible recognized/unknown errors, valid progressing video, deliberate idle,
+pause/resume, frozen playback and a lost callback. Verify bounded plain-text
+diagnostics, terminal-state preservation and stale-session rejection. Run the
+full local/native suites and fresh exact-source package verification before
+describing a replacement installer as owner-test ready.
+
+Live Windows acceptance remains separate: the selected official video must be
+visibly playing with advancing decoded frames, audible after explicit unmute,
+and responsive to pause/resume and Stop/Exit. A disposable CI playback attempt,
+if separately recorded, is not owner-PC acceptance; lack of an interactive
+desktop or audio device is not a PASS. Provider restrictions remain an honest
+blocked result. Offline tests and successful document loading do not establish
+live picture/audio. Public release remains on hold.
 
 ## Latest November 20 follow-up: visible receiver list and tray exit
 
