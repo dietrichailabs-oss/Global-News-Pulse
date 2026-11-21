@@ -831,7 +831,7 @@ def test_late_bootstrap_and_native_callbacks_are_noops_after_exit(app, tmp_path)
     _exit_spin(app, lambda: shutdown.completed)
     # Execute the actual nested production callbacks, not a duplicated guard.
     from global_pulse import __main__ as entrypoint
-    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    tree = ast.parse(Path(entrypoint.__file__).read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     env = {"controller": c}
     for name, args in (("begin", ()), ("apply_native_preference", (True,)),
@@ -847,7 +847,7 @@ def test_late_bootstrap_and_native_callbacks_are_noops_after_exit(app, tmp_path)
 
 def _bind_production_exit_warning(window, coordinator):
     from global_pulse import __main__ as entrypoint
-    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    tree = ast.parse(Path(entrypoint.__file__).read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     show = next(n for n in main.body if isinstance(n, ast.FunctionDef) and n.name == "show_exit_problem")
     wrapper = ast.parse(
@@ -1097,7 +1097,7 @@ def _bind_production_tray_callbacks(controller, menu, tray, timer, activations):
     from global_pulse import __main__ as entrypoint
     from PySide6.QtGui import QCursor
     from PySide6.QtWidgets import QSystemTrayIcon
-    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    tree = ast.parse(Path(entrypoint.__file__).read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     nodes = {n.name: n for n in main.body if isinstance(n, ast.FunctionDef)}
     wrapper = ast.parse(
@@ -1454,7 +1454,7 @@ def test_actual_close_to_tray_uses_saved_policy_and_keeps_qt_free_during_layout_
     window.setting_close = SimpleNamespace(isChecked=lambda: False)
     window.show()
     app.processEvents()
-    tree = ast.parse(Path(entrypoint.__file__).read_text())
+    tree = ast.parse(Path(entrypoint.__file__).read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     nodes = {n.name: n for n in main.body if isinstance(n, ast.FunctionDef)}
     wrapper = ast.parse(
@@ -1535,4 +1535,39 @@ def test_tray_layout_error_after_qobject_retirement_releases_worker(app, tmp_pat
         if writer._worker:
             writer._worker.join(2)
         c.close()
+
+
+def test_bootstrap_ast_readers_preserve_utf8_source_independently_of_windows_locale():
+    from global_pulse import __main__ as entrypoint
+    source_bytes = Path(entrypoint.__file__).read_bytes()
+    correct = ast.parse(source_bytes)
+    main = next(n for n in correct.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    update = next(n for n in main.body if isinstance(n, ast.FunctionDef) and n.name == "update_tray")
+    prefix = next(n.value for n in ast.walk(update)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                  and n.value.startswith("Global Pulse"))
+    assert prefix == "Global Pulse \u00b7 "
+    # Model the Windows ANSI locale deterministically on every test platform.
+    # Source import uses UTF-8, whereas Path.read_text() without an encoding
+    # used cp1252 on the failing native runner and introduced a second codepoint.
+    assert prefix.encode("utf-8").decode("cp1252") == "Global Pulse \u00c2\u00b7 "
+    assert prefix.encode("utf-8").decode("cp1252") != prefix
+    readers = {
+        "test_late_bootstrap_and_native_callbacks_are_noops_after_exit",
+        "_bind_production_exit_warning",
+        "_bind_production_tray_callbacks",
+        "test_actual_close_to_tray_uses_saved_policy_and_keeps_qt_free_during_layout_save",
+    }
+    tests = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    checked = set()
+    for function in tests.body:
+        if not isinstance(function, ast.FunctionDef) or function.name not in readers:
+            continue
+        calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr == "read_text"]
+        assert len(calls) == 1
+        assert any(keyword.arg == "encoding" and isinstance(keyword.value, ast.Constant)
+                   and keyword.value.value == "utf-8" for keyword in calls[0].keywords)
+        checked.add(function.name)
+    assert checked == readers
 

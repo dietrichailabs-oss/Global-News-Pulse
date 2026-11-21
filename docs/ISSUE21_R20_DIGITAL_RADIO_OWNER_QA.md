@@ -491,3 +491,44 @@ Qt writer while a disk error is returning. Existing latency thresholds, test
 functions, workflow exclusions, native-backend and package smoke gates remain
 unchanged. Independent/full/native/package acceptance must be recorded against
 the new immutable source, not borrowed from `84a98bdb`.
+
+### Native 931c97d8 HOLD and explicit UTF-8 fixture correction
+
+The first exact native run for the tray/shutdown correction,
+`44852569456` attempt 1 / job `136687120303`, failed on source
+`931c97d84c22674a3640cb35861e08da01418b1c`, tree
+`803989dd5ac6cb865aca62dbd5c18e45f039aa7a`: **2,058 passed, 1 failed,
+14 historical deselections, 10 subtests in 439.30 seconds**. Qt teardown was
+1,557 to zero and the test command exited 1. Installer smoke, ZIP checks and
+uploads were skipped; there were zero artifacts. The separate local 2,059
+passes and independent 248 passes do not override this native HOLD.
+
+The only failed assertion compared the new tray test's tooltip text. Its
+preceding less-than-150-ms menu response, visible first-click menu, enabled
+Exit action, deferred refresh and retained last-real icon checks all passed.
+The bootstrap source is UTF-8, but its AST test helpers used locale-default
+`Path.read_text()`. Independent codepoint reproduction established that the
+middle-dot literal U+00B7 becomes U+00C2 followed by U+00B7 when those UTF-8
+bytes are decoded as Windows CP1252. Normal Python source import decodes it
+correctly. The connector-decoded Windows console log is itself lossy for
+these characters, so this diagnosis is based on source bytes and codepoints,
+not the rendered replacement glyphs.
+
+The bounded child fixes all four bootstrap AST readers in the existing
+latency test module to use `encoding="utf-8"`, and appends one deterministic
+regression for the codepoints and every reader's explicit encoding. Product
+code, tooltip text, thresholds, assertions, exclusions, workflow and build
+scripts are unchanged from `931c97d8`. Two reads are inside test-function
+bodies, including one test predating this correction: their decoding call
+changes are explicit exceptions to prior whole-function AST identity claims.
+All of their assertions and acceptance thresholds remain unchanged.
+
+The failed run is preserved at
+[native HOLD evidence](https://github.com/dietrichailabs-oss/Global-News-Pulse/pull/182#issuecomment-7055585629).
+Its connector-decoded/LF-normalized log SHA-256 is
+`47aa48bbcb5cec43f0216c64e0423920b2ecec8539db8a4cb6dcb840bd613919`;
+independent failed-run metadata SHA-256 is
+`684218dfe22852697094aa6cf39b71497fb7c93dad5d41c5782694a85f0abeb1`.
+Do not rerun the failed source until green or publish an old package. The
+explicit-encoding child requires its own exact-source full local/native
+gates, eight offline package phases and distinct downloaded-byte QA.
