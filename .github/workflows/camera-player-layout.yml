@@ -19,7 +19,6 @@ jobs:
     env:
       CI: 'true'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-      GP_CAMERA_LAYOUT_OUTPUT: ${{ runner.temp }}/camera-player-layout-${{ github.sha }}
     defaults:
       run:
         shell: pwsh
@@ -33,6 +32,8 @@ jobs:
         id: runtime
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:GP_CAMERA_LAYOUT_OUTPUT = Join-Path $env:RUNNER_TEMP "camera-player-layout-$env:GITHUB_SHA"
+          "GP_CAMERA_LAYOUT_OUTPUT=$env:GP_CAMERA_LAYOUT_OUTPUT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           New-Item -ItemType Directory -Force -Path $env:GP_CAMERA_LAYOUT_OUTPUT | Out-Null
           $runtime = [ordered]@{
             source_sha = $env:GITHUB_SHA
