@@ -6,8 +6,10 @@ with only OS tray/notifier/single-instance and application-exit surfaces stubbed
 """
 import ast
 import sqlite3
+import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -566,6 +568,18 @@ def test_exit_latest_layout_wins_over_deferred_tray_save(app, tmp_path, monkeypa
 
     writer = threading.Thread(target=save_older, daemon=True)
     finalizer = threading.Thread(target=exit_archive, daemon=True)
+
+    def shutdown_thread_diagnostics():
+        # Evaluated only if the unchanged completion assertion fails. Capture
+        # only these two workers, allowing either to exit during the snapshot.
+        frames = sys._current_frames()
+        stacks = {}
+        for thread in (writer, finalizer):
+            frame = frames.get(thread.ident)
+            stacks[thread.name] = ("".join(traceback.format_stack(frame))
+                                   if frame is not None else "Thread has already exited")
+        return {"worker_stacks": stacks, "errors": [repr(error) for error in errors]}
+
     try:
         writer.start()
         if already_admitted:
@@ -586,7 +600,7 @@ def test_exit_latest_layout_wins_over_deferred_tray_save(app, tmp_path, monkeypa
         release.set()
         writer.join(2)
         finalizer.join(2)
-        assert not writer.is_alive() and not finalizer.is_alive() and not errors
+        assert not writer.is_alive() and not finalizer.is_alive() and not errors, shutdown_thread_diagnostics()
         assert saved == [already_admitted]
         assert controller._store_closed
         with Store(tmp_path / "synthetic.sqlite3", mode="synthetic") as reopened:

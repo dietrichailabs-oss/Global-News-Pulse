@@ -194,7 +194,8 @@ def test_camera_bank_is_available_manually_without_event_match(app):
         ids={panel.camera.selector.itemData(i).get("id") for i in range(panel.camera.selector.count())
              if isinstance(panel.camera.selector.itemData(i),dict)}
         assert {item["id"] for item in reviewed} <= ids
-        assert "available manually" in panel.camera_status.text()
+        assert panel.camera_status.text() == "17 / 17 cameras · 3 live · 14 snapshots"
+        assert "available manually" in panel.camera_status.toolTip()
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
