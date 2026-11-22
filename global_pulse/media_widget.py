@@ -12,13 +12,42 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QPushBu
 
 from .security import safe_url
 
+def _retired_receiver_record(item):
+    """Recognize retired provider metadata/hosts, not arbitrary word matches.
+
+    A custom hostname alone cannot establish its receiver software. Only
+    explicit old provider/type identifiers and the known service family are
+    retired here; unrelated records and on-disk preferences stay intact.
+    """
+    if not isinstance(item, dict):
+        return False
+    for key in ("id", "provider", "type", "receiver_type", "protocol"):
+        value = str(item.get(key, "")).strip().casefold()
+        if ((key in {"type", "receiver_type", "protocol"} and value == "kiwi")
+                or re.search(r"(?:^|[^a-z0-9])kiwi[\s_-]*sdr(?:$|[^a-z0-9])", value)):
+            return True
+    for key in ("url", "original_url", "receiver"):
+        try:
+            host = (urlsplit(str(item.get(key, ""))).hostname or "")
+            # Match the browser's canonical host, including fullwidth and
+            # zero-width IDNA aliases, before checking the retired family.
+            host = host.encode("idna").decode("ascii").lower().rstrip(".")
+        except (TypeError, ValueError):
+            continue
+        if host == "kiwisdr.com" or host.endswith(".kiwisdr.com"):
+            return True
+    return False
+
+
 def _supported_media(item):
-    """Keep retired video records out of every media connection/shortcut.
+    """Keep retired video/receiver records out of connections and shortcuts.
 
     Historical events and saved settings can still contain old records. They
     stay intact on disk, but must not recreate a removed player or its links.
     """
     if not isinstance(item, dict):
+        return False
+    if _retired_receiver_record(item):
         return False
     if str(item.get("type", "")).casefold() in {"video", "youtube"}:
         return False
@@ -46,7 +75,12 @@ def _supported_media(item):
 
 
 def media_identity(item):
-    """Keep separate tuned stations even when they share one public receiver URL."""
+    """Keep distinct approved cameras/stations that share a provider page."""
+    if item.get("snapshot_url"):
+        from .camera_context import approved_camera
+        camera = approved_camera(item)
+        if camera:
+            return ("camera", camera["id"], camera["snapshot_url"])
     url = str(item.get("url", item.get("original_url", "")))
     receiver = item.get("receiver")
     frequency = item.get("frequency")
@@ -264,7 +298,7 @@ class _MediaTile(QFrame):
     def _connect_radio_receiver(self, receiver_url):
         receiver_url = safe_url(receiver_url)
         if not _supported_media({"url": receiver_url, "type": "radio"}):
-            raise ValueError("Video services are not public radio receivers")
+            raise ValueError("This service is not a supported public radio receiver")
         if os.environ.get("QTWEBENGINE_DISABLE_SANDBOX", "").lower() not in {"", "0", "false"} or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""):
             raise RuntimeError("The embedded receiver requires Chromium sandboxing to remain enabled")
         if hasattr(os, "geteuid") and os.geteuid() == 0:
@@ -277,6 +311,8 @@ class _MediaTile(QFrame):
 
     def _ensure_radio_player(self, receiver_url):
         receiver_url = safe_url(receiver_url)
+        if not _supported_media({"url": receiver_url, "type": "radio"}):
+            raise ValueError("This service is not a supported public radio receiver")
         host = (urlsplit(receiver_url).hostname or "").lower()
         if not host:
             raise ValueError("A public receiver host is required")
@@ -499,7 +535,9 @@ class MediaPanel(QWidget):
         saved = getter("radio_presets", [None] * 5) if callable(getter) else [None] * 5
         if not isinstance(saved, list):
             saved = [None] * 5
-        normalized = [dict(item) if isinstance(item, dict) else None for item in saved[:5]]
+        normalized = [dict(item) if isinstance(item, dict)
+                      and not _retired_receiver_record(item) else None
+                      for item in saved[:5]]
         self.radio_presets = (normalized + [None] * 5)[:5]
 
         saved_stations = getter("radio_stations", []) if callable(getter) else []
@@ -667,6 +705,8 @@ class MediaPanel(QWidget):
 
     @classmethod
     def _normalize_radio_station(cls, item):
+        if _retired_receiver_record(item):
+            raise ValueError("This receiver provider is no longer supported")
         name = cls._radio_text(item.get("name", item.get("title", "")), "station name", 120)
         frequency = cls._radio_text(item.get("frequency"), "frequency", 40)
         mode = cls._radio_text(item.get("mode"), "mode", 20).upper()
@@ -676,7 +716,7 @@ class MediaPanel(QWidget):
             raise ValueError("Invalid radio mode")
         url = safe_url(item.get("url", item.get("receiver", "")))
         if not _supported_media({"url": url, "type": "radio"}):
-            raise ValueError("Video services are not public radio receivers")
+            raise ValueError("This service is not a supported public radio receiver")
         identity = hashlib.sha256((url + "\0" + frequency + "\0" + mode).encode("utf-8")).hexdigest()[:20]
         return {
             "id": "user_radio_" + identity,
@@ -913,7 +953,7 @@ class MediaPanel(QWidget):
         return self._same_station(tile._current(), item)
 
     def _select_radio_preset_record(self, preset):
-        if not preset:
+        if not preset or _retired_receiver_record(preset):
             return False
         candidates = []
         for raw in self.media + self.radio_stations + self.catalog:

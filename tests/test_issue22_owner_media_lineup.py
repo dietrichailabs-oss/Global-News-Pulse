@@ -1,6 +1,6 @@
 """Owner-observed media lineup regressions for the physical Windows candidate.
 
-Offline only: no stream, YouTube, camera, WebSDR or KiwiSDR connection occurs.
+Offline only: no stream, camera or WebSDR connection occurs.
 """
 import os
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
@@ -39,8 +39,8 @@ def test_direct_radio_lineup_is_genre_sorted_and_documented():
 def test_ham_sdr_receiver_directories_are_visible_without_starting_audio(app):
     panel=RadioPanel(confirm=lambda:False)
     try:
-        assert panel.ham_selector.count()==len(HAM_DIRECTORIES)==2
-        assert {panel.ham_selector.itemData(i)["id"] for i in range(panel.ham_selector.count())}=={"websdr","kiwisdr"}
+        assert panel.ham_selector.count()==len(HAM_DIRECTORIES)==1
+        assert {panel.ham_selector.itemData(i)["id"] for i in range(panel.ham_selector.count())}=={"websdr"}
         assert panel.status.text()=="OFF"
         assert panel._session is None
     finally:
@@ -78,7 +78,7 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
         panel.receiver_url.setText("https://receiver.example.org/")
         assert panel.connect_receiver()
         assert panel.receiver_connected
-        assert fake.loaded==["https://receiver.example.org/?f=7100usb&vol=40"]
+        assert fake.loaded==["https://receiver.example.org/?tune=7100usb"]
         assert fake.shown
 
         panel.disconnect_receiver()
@@ -95,9 +95,9 @@ def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatc
         panel.receiver_url.setText("https://receiver.example.org/rx")
         panel.frequency.setText("14200.5")
         panel.mode.setCurrentIndex(panel.mode.findData("usb"))
-        kiwi,host=panel._tuned_receiver_url()
+        websdr,host=panel._tuned_receiver_url()
         assert host=="receiver.example.org"
-        assert kiwi=="https://receiver.example.org/rx?f=14200.5usb&vol=40"
+        assert websdr=="https://receiver.example.org/rx?tune=14200.5usb"
 
         panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
         panel.mode.setCurrentIndex(panel.mode.findData("lsb"))

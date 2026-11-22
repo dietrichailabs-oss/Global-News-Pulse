@@ -16,13 +16,19 @@ The current source includes:
 - a radio-first media panel with separate reviewed-camera access;
 - documented direct Internet radio stations;
 - an explicit in-app public SDR receiver path using an isolated memory-only browser session;
-- reviewed manual webcam access;
+- a selectable worldwide bank of reviewed public landscape cameras;
 - Windows installer and portable packaging.
 
 YouTube playback has been removed at the owner's request. There is no YouTube/TV
 tab, saved-video control, or bundled native TV helper. AM/FM/Internet radio,
 HAM/SDR, reviewed cameras, and news source links remain. Existing saved-video
 preferences and historical reports are left untouched but do not launch a player.
+
+The current media expansion retires KiwiSDR and keeps WebSDR as the HAM receiver
+type. Receiver links are checked with individual operators; the restricted
+WebSDR.org directory dataset is not imported or mirrored. Camera entries are
+periodically refreshed still images, not continuous video. Provider attribution,
+connection consent, and availability/freshness limitations remain visible.
 
 ## CI
 

@@ -83,10 +83,26 @@ and **HAM / SDR** controls. Choose a station or public receiver, connect, and us
 its available tuning controls. Local broadcast listings use Internet streams;
 receiving over-the-air radio requires compatible receiver hardware.
 
-The **Cameras** tab offers reviewed public cameras, with matching area cameras
-shown for selected events. Automatic camera connections require your explicit
-permission. **Stop all media** ends media playback without pausing source
-monitoring. Switching tabs stops the media from the previous tab.
+HAM now uses **WebSDR** only; the KiwiSDR directory, tuning protocol and controls
+have been retired. The receiver bank includes links checked against individual
+operators, with published bands or exact ranges where available. Selecting or
+filtering a receiver does not connect it. Use **Connect** explicitly; some
+unreviewed or incompatible endpoints remain browser-only. **Open directory**
+still opens the operator's full WebSDR directory, but Pulse does not copy its
+permission-restricted maintained dataset. A listed or loaded receiver is not a
+guarantee of reception or current availability.
+
+The **Cameras** tab offers a worldwide bank of reviewed public cameras even
+without a selected news event. Matching area cameras are shown for selected
+events, but they are area context, not evidence that a camera witnessed the
+story. Connect a camera explicitly, or enable **Auto cameras** after its consent
+prompt. Native camera views are silent, periodically refreshed JPEG/PNG stills,
+not continuous live video. Refresh is no faster than every 15 minutes; check
+the image's capture time and provider status, not just Pulse's download time.
+An endpoint working when reviewed is not an uptime guarantee. Images stay in
+process memory without a recording archive. **Stop all media** ends media
+playback without pausing source monitoring. Switching tabs stops the media from
+the previous tab.
 
 YouTube playback and the TV tab have been removed. There are no video test,
 saved-video, watch-page, or floating YouTube controls, and new packages do not

@@ -55,19 +55,19 @@ def test_websdr_directory_html_is_bounded_and_deduplicated():
     assert rows[0]["name"] == "Ontario amateur receiver"
 
 
-def test_kiwi_directory_json_and_empty_handling():
+def test_receiver_directory_json_and_empty_handling():
     import json
     raw = json.dumps({"receivers": [
-        {"url": "https://kiwi.example.org/", "name": "Example Kiwi"},
-        {"url": "http://remote.example.org:8073/", "name": "Remote Kiwi"},
+        {"url": "https://radio.example.org/", "name": "Example receiver"},
+        {"url": "http://remote.example.org:8901/", "name": "Remote receiver"},
         {"url": "https://127.0.0.1/", "name": "Forbidden"}]}).encode()
-    rows = parse_directory("kiwisdr", raw)
+    rows = parse_directory("websdr", raw)
     assert len(rows) == 2
-    assert rows[0]["name"] == "Example Kiwi"
+    assert rows[0]["name"] == "Example receiver"
     assert rows[1]["embedded_candidate"] is False
-    assert parse_directory("kiwisdr", b"<html><h1>Access gate</h1></html>") == []
+    assert parse_directory("websdr", b"<html><h1>Access gate</h1></html>") == []
     with pytest.raises(ValueError):
-        parse_directory("kiwisdr", b"x" * 1_000_001)
+        parse_directory("websdr", b"x" * 1_000_001)
 
 
 def test_receiver_picker_populates_url_and_flags_browser_only(app):
@@ -255,7 +255,7 @@ def test_receiver_state_is_not_green_until_load_success(app):
         panel._sdr_load_finished(True)
         assert "ON" in panel.sdr_status.text()
         assert panel.sdr_mute.isEnabled()
-        assert panel.sdr_volume.isEnabled()
+        assert not hasattr(panel, "sdr_volume")
         panel.sdr_mute.setChecked(True)
         assert panel.receiver_view.page().muted is True
         panel.disconnect_receiver()
@@ -265,17 +265,17 @@ def test_receiver_state_is_not_green_until_load_success(app):
         _cleanup(panel, app)
 
 
-def test_kiwi_volume_is_explicit_and_websdr_cannot_fake_volume(app):
+def test_websdr_uses_operator_volume_and_removes_stale_protocol_parameters(app):
     panel = RadioPanel(confirm=lambda: False)
     try:
-        panel.receiver_url.setText("https://radio.example.org/")
-        assert panel._tuned_receiver_url()[0].endswith("?f=7100usb&vol=40")
-        panel.sdr_volume.setValue(25)
-        assert panel._tuned_receiver_url()[0].endswith("?f=7100usb&vol=25")
-        assert panel.sdr_volume_value.text() == "25%"
-        panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
+        panel.receiver_url.setText("https://radio.example.org/?f=7200am&vol=25&view=compact#rx")
         panel._sdr_state_change("ON")
-        assert not panel.sdr_volume.isEnabled()
-        assert panel._tuned_receiver_url()[0].endswith("?tune=7100usb")
+        assert panel.receiver_type.currentData() == "websdr"
+        assert not hasattr(panel, "sdr_volume")
+        assert not hasattr(panel, "sdr_volume_apply")
+        assert "operator's volume control" in panel.sdr_audio_help.text()
+        # Existing public-URL normalization strips fragments; unrelated query
+        # values survive while retired protocol parameters do not.
+        assert panel._tuned_receiver_url()[0] == "https://radio.example.org/?view=compact&tune=7100usb"
     finally:
         _cleanup(panel, app)

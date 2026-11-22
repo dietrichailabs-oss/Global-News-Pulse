@@ -1,7 +1,7 @@
 """One native broadcast-radio connection plus an explicit in-app public SDR receiver.
 
 Only publisher-documented MP3 addresses can be passed to the native audio backend.
-A user may explicitly connect one specific public HTTPS WebSDR/KiwiSDR receiver
+A user may explicitly connect one specific public HTTPS WebSDR receiver
 or a separately consented, finite reviewed HTTP WebSDR origin inside an isolated
 memory-only WebEngine session. Feed/event content and saved
 settings cannot silently supply playback or receiver URLs. No recording: decoded
@@ -62,13 +62,18 @@ BROADCAST_CATEGORIES = ("All stations", "News & Talk", "Music", "Classical", "Cu
 # No general-purpose HTTP/any-port WebEngine access is enabled.
 OWNER_TEST_WEBDR_ORIGIN = "http://na5b.com:8901/"
 
+def _receiver_effective_port(parts):
+    """Use the URL's actual transport default, never an allowlist port."""
+    return parts.port if parts.port is not None else (80 if parts.scheme == "http" else 443)
+
+
 def _owner_legacy_websdr(info, kind):
     if kind != "websdr":
         return False
     from urllib.parse import urlsplit
     url=urlsplit(str((info or {}).get("url") or ""))
     return (url.scheme == "http"
-            and (url.hostname, url.port) in CURATED_WEBDR_HTTP_ORIGINS
+            and (url.hostname, _receiver_effective_port(url)) in CURATED_WEBDR_HTTP_ORIGINS
             and not url.username and not url.password)
 
 def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
@@ -90,7 +95,6 @@ def _receiver_origin_matches(url, host, scheme, ws_scheme, port, *, main=False):
 
 HAM_DIRECTORIES = (
     {"id":"websdr","name":"WebSDR public receivers","url":"http://www.websdr.org/","note":"The provider documents an HTTP-only public directory; no automatic connection."},
-    {"id":"kiwisdr","name":"KiwiSDR public receivers","url":"https://kiwisdr.com/public/","note":"Manual ham/shortwave tuning on public receiver pages; provider controls availability."},
 )
 
 
@@ -251,9 +255,6 @@ class RadioPanel(QWidget):
         self.sdr_load_watch = QTimer(self)
         self.sdr_load_watch.setSingleShot(True)
         self.sdr_load_watch.timeout.connect(self._sdr_load_timed_out)
-        self.sdr_volume_apply = QTimer(self)
-        self.sdr_volume_apply.setSingleShot(True)
-        self.sdr_volume_apply.timeout.connect(self._apply_sdr_volume)
         self.scan_timer = QTimer(self)
         self.scan_timer.timeout.connect(self._scan_next)
         self.scan_frequency = None
@@ -523,7 +524,7 @@ class RadioPanel(QWidget):
 
         receiver_row=QHBoxLayout()
         self.receiver_url=QLineEdit()
-        self.receiver_url.setPlaceholderText("Specific public HTTPS WebSDR/KiwiSDR receiver URL")
+        self.receiver_url.setPlaceholderText("Specific public HTTPS WebSDR receiver URL")
         self.receiver_url.setAccessibleName("Specific public SDR receiver URL")
         self.receiver_connect=QPushButton("Connect in Pulse")
         self.receiver_connect.setAccessibleName("Connect selected public SDR receiver inside Global Pulse")
@@ -557,27 +558,16 @@ class RadioPanel(QWidget):
         self.sdr_mute.setEnabled(False)
         self.sdr_mute.setAccessibleName("Mute HAM SDR receiver only")
         self.sdr_mute.toggled.connect(self._sdr_mute_changed)
-        self.sdr_volume=QSlider(Qt.Orientation.Horizontal)
-        self.sdr_volume.setRange(0,100)
-        self.sdr_volume.setValue(40)
-        self.sdr_volume.setEnabled(False)
-        self.sdr_volume.setAccessibleName("HAM SDR volume for KiwiSDR receivers")
-        self.sdr_volume.valueChanged.connect(self._sdr_volume_changed)
-        self.sdr_volume.sliderReleased.connect(self._apply_sdr_volume)
-        self.sdr_volume_value=QLabel("40%")
-        self.sdr_volume_help=QLabel("Kiwi volume reloads receiver; WebSDR uses its own volume slider")
-        self.sdr_volume_help.setWordWrap(True)
-        self.sdr_volume_help.setObjectName("Muted")
+        self.sdr_audio_help=QLabel("Use the WebSDR operator's volume control; Mute SDR silences this receiver only.")
+        self.sdr_audio_help.setWordWrap(True)
+        self.sdr_audio_help.setObjectName("Muted")
         audio_row.addWidget(self.sdr_mute)
-        audio_row.addWidget(QLabel("SDR volume"))
-        audio_row.addWidget(self.sdr_volume,1)
-        audio_row.addWidget(self.sdr_volume_value)
+        audio_row.addStretch()
         layout.addLayout(audio_row)
-        layout.addWidget(self.sdr_volume_help)
+        layout.addWidget(self.sdr_audio_help)
 
         tuner_row=QHBoxLayout()
         self.receiver_type=QComboBox()
-        self.receiver_type.addItem("KiwiSDR","kiwi")
         self.receiver_type.addItem("WebSDR","websdr")
         self.receiver_type.setAccessibleName("SDR receiver type")
         self.receiver_type.currentIndexChanged.connect(
@@ -692,7 +682,7 @@ class RadioPanel(QWidget):
             layout.removeItem(detail_row)
             details_layout.addLayout(detail_row)
         details_layout.addWidget(self.receiver_external)
-        for detail_widget in (self.sdr_volume_help,self.advanced_scan,
+        for detail_widget in (self.sdr_audio_help,self.advanced_scan,
                               self.scan_controls,self.ham_note):
             layout.removeWidget(detail_widget)
             details_layout.addWidget(detail_widget)
@@ -1040,9 +1030,6 @@ class RadioPanel(QWidget):
             "color:" + colors.get(state, "#aeb7c5") + ";font-weight:700;"
         )
         self.sdr_mute.setEnabled(state == "ON")
-        self.sdr_volume.setEnabled(
-            state == "ON" and self.receiver_type.currentData() == "kiwi"
-        )
         if message:
             self.ham_note.setText(message)
 
@@ -1063,6 +1050,8 @@ class RadioPanel(QWidget):
 
     def _receiver_url_changed(self, text):
         try:
+            if self.receiver_type.currentData() != "websdr":
+                raise ValueError("Unsupported receiver type")
             item = public_receiver_url(str(text).strip())
         except ValueError:
             self.receiver_connect.setEnabled(False)
@@ -1087,7 +1076,7 @@ class RadioPanel(QWidget):
         if legacy:
             parsed=urlsplit(item["url"])
             self.receiver_list_note.setText(
-                f"{item['host']} operator HTTP/{parsed.port} test: an unencrypted in-app "
+                f"{item['host']} operator HTTP/{_receiver_effective_port(parsed)} test: an unencrypted in-app "
                 "connection is available after explicit consent. "
                 "Use the receiver's own Audio start control."
             )
@@ -1101,7 +1090,18 @@ class RadioPanel(QWidget):
     def _change_receiver_directory(self, *_):
         item = self.ham_selector.currentData() or {}
         provider = item.get("id", "")
-        cached = list(self.sdr_directory_cache.get(provider, []))
+        # Historical/late provider data never restores a retired integration.
+        # Revalidate URLs and transport flags rather than trusting cached flags.
+        cached = []
+        if provider == "websdr":
+            for row in self.sdr_directory_cache.get(provider, []):
+                if not isinstance(row, dict) or row.get("provider") != "websdr":
+                    continue
+                try:
+                    checked = public_receiver_url(row.get("url", ""))
+                except (TypeError, ValueError):
+                    continue
+                cached.append(dict(row, **checked))
         if provider == "websdr":
             pinned=[]
             for row in curated_websdr_receivers():
@@ -1220,6 +1220,22 @@ class RadioPanel(QWidget):
         item = self.receiver_picker.currentData()
         if not isinstance(item, dict):
             return
+        provider=(self.ham_selector.currentData() or {}).get("id","")
+        if provider != "websdr" or item.get("provider") != "websdr":
+            self._destroy_receiver()
+            self.receiver_url.clear()
+            self.receiver_connect.setEnabled(False)
+            self.receiver_external.setEnabled(False)
+            self.receiver_browser_quick.hide()
+            self.directory_summary.setText("Unsupported receiver entry ignored.")
+            return False
+        try:
+            public_receiver_url(item.get("url", ""))
+        except (TypeError, ValueError):
+            self._destroy_receiver()
+            self.receiver_url.clear()
+            self.directory_summary.setText("Invalid receiver entry ignored.")
+            return False
         if self.receiver_list.isRowHidden(self.receiver_picker.currentIndex()):
             self.receiver_search.clear()
         self.receiver_list.selectionModel().setCurrentIndex(
@@ -1227,18 +1243,15 @@ class RadioPanel(QWidget):
             QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows,
         )
         self.receiver_list.scrollTo(self.receiver_list.currentIndex())
-        provider=(self.ham_selector.currentData() or {}).get("id","")
         self._receiver_selections[provider]=item["url"]
         parts=urlsplit(item["url"])
-        target_origin=(parts.scheme,parts.port or 443,parts.hostname)
+        target_origin=(parts.scheme,_receiver_effective_port(parts),parts.hostname)
         if self.receiver_connected and target_origin!=self.receiver_origin:
             # Selection does not connect. Do not leave an old receiver audible
             # while the name and requested frequency show a different operator.
             self._destroy_receiver()
         self.receiver_url.setText(item["url"])
-        index = self.receiver_type.findData(
-            "websdr" if item["provider"] == "websdr" else "kiwi"
-        )
+        index = self.receiver_type.findData("websdr")
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
         self.ham_receiver_name.setText(item["name"])
@@ -1265,7 +1278,7 @@ class RadioPanel(QWidget):
         item = self.ham_selector.currentData() or {}
         provider = item.get("id")
         url = DIRECTORY_URLS.get(provider)
-        if not url:
+        if provider != "websdr" or not url:
             return False
         restriction=DIRECTORY_IMPORT_RESTRICTIONS.get(provider)
         if restriction:
@@ -1328,6 +1341,11 @@ class RadioPanel(QWidget):
         reply.deleteLater()
         if self._closed:
             return
+        if (provider != "websdr"
+                or (self.ham_selector.currentData() or {}).get("id") != provider):
+            self.sdr_directory_data.clear()
+            self.directory_summary.setText("Unsupported or outdated receiver directory result ignored.")
+            return
         if error != QNetworkReply.NetworkError.NoError or status != 200:
             self.receiver_list_note.setText(
                 "Directory unavailable/redirected or too large. Use Open directory to choose manually."
@@ -1359,6 +1377,8 @@ class RadioPanel(QWidget):
     def open_selected_receiver(self):
         raw = self.receiver_url.text().strip()
         try:
+            if self.receiver_type.currentData() != "websdr":
+                raise ValueError("Unsupported receiver type")
             info = public_receiver_url(raw)
         except ValueError:
             self.receiver_list_note.setText("Select or paste a valid public receiver URL first.")
@@ -1458,9 +1478,9 @@ class RadioPanel(QWidget):
                     pending[1] == target_host == self.receiver_host
                     and queued_info["host"] == pending[1] == queued.hostname
                     and queued_info["url"] == pending[0]
-                    and (queued.scheme, queued.port or 443, pending[1])
+                    and (queued.scheme, _receiver_effective_port(queued), pending[1])
                     == self.receiver_origin
-                    and (current.scheme, current.port or 443, target_host)
+                    and (current.scheme, _receiver_effective_port(current), target_host)
                     == self.receiver_origin
                 )
             except (ValueError, TypeError):
@@ -1485,30 +1505,10 @@ class RadioPanel(QWidget):
         if self.receiver_view is not None:
             self.receiver_view.page().setAudioMuted(bool(muted))
 
-    def _sdr_volume_changed(self, value):
-        self.sdr_volume_value.setText(f"{value}%")
-        if self.sdr_state == "ON" and self.receiver_type.currentData() == "kiwi":
-            self.sdr_volume_apply.start(600)
-
-    def _apply_sdr_volume(self):
-        """KiwiSDR documents vol= URL control; reload once after slider settles."""
-        self.sdr_volume_apply.stop()
-        if self.sdr_state != "ON" or self.receiver_type.currentData() != "kiwi":
-            return
-        try:
-            url, host = self._tuned_receiver_url()
-            if host == self.receiver_host:
-                self._load_receiver_url(url, host)
-                self.ham_note.setText(
-                    "Applying KiwiSDR volume by reloading receiver; audio may need Play again."
-                )
-        except (ImportError, RuntimeError, ValueError, OSError) as exc:
-            self.ham_note.setText("Volume could not be applied: " + str(exc)[:100])
-
     def open_ham_directory(self):
         item=self.ham_selector.currentData() or {}
         url=str(item.get("url",""))
-        if url not in {entry["url"] for entry in HAM_DIRECTORIES}:
+        if item.get("id") != "websdr" or url not in {entry["url"] for entry in HAM_DIRECTORIES}:
             self.ham_note.setText("Receiver directory is not in the reviewed list.")
             return False
         transport_warning = (
@@ -1519,7 +1519,7 @@ class RadioPanel(QWidget):
         approved=QMessageBox.question(
             self,"Open public ham receiver directory?",
             transport_warning
-            + "Open the selected public WebSDR/KiwiSDR directory in your browser to choose a receiver? "
+            + "Open the public WebSDR directory in your browser to choose a receiver? "
             "The directory provider receives your IP address. Copy one specific public HTTPS receiver URL back into Pulse "
             "to use the in-app receiver. Global Pulse does not record, retransmit, or bypass access controls.",
             QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
@@ -1535,6 +1535,8 @@ class RadioPanel(QWidget):
         return bool(opened)
 
     def _receiver_target(self):
+        if self.receiver_type.currentData() != "websdr":
+            raise ValueError("Only WebSDR receivers are supported")
         item=public_receiver_url(self.receiver_url.text().strip())
         value=item["url"]
         parsed=urlsplit(value)
@@ -1590,13 +1592,10 @@ class RadioPanel(QWidget):
             raise ValueError("Unsupported SDR mode")
         parsed=urlsplit(base)
         params=dict(parse_qsl(parsed.query,keep_blank_values=True))
-        if self.receiver_type.currentData()=="websdr":
-            params["tune"]=f"{self._format_khz(frequency)}{mode}"
-            params.pop("f",None)
-        else:
-            params["f"]=f"{self._format_khz(frequency)}{mode}"
-            params["vol"]=str(self.sdr_volume.value())
-            params.pop("tune",None)
+        params["tune"]=f"{self._format_khz(frequency)}{mode}"
+        # Old pasted tune URLs cannot revive the retired receiver protocol.
+        params.pop("f",None)
+        params.pop("vol",None)
         return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(params),parsed.fragment)),host
 
     def _load_receiver_url(self,url,host, *, require_consent=False):
@@ -1605,7 +1604,7 @@ class RadioPanel(QWidget):
             legacy=_owner_legacy_websdr(info,self.receiver_type.currentData())
             parsed=urlsplit(info["url"])
             warning=(
-                f" WARNING: {info['host']} uses unencrypted HTTP on port {parsed.port}; "
+                f" WARNING: {info['host']} uses unencrypted HTTP on port {_receiver_effective_port(parsed)}; "
                 "other network parties can observe and alter the receiver page. "
                 "Use only this public operator origin, not sensitive credentials."
                 if legacy else ""
@@ -1648,7 +1647,7 @@ class RadioPanel(QWidget):
                     return False
             else:
                 parts=urlsplit(url)
-                origin=(parts.scheme,parts.port or 443,host)
+                origin=(parts.scheme,_receiver_effective_port(parts),host)
                 if host != self.receiver_host or origin != self.receiver_origin:
                     self._destroy_receiver()
                     if not self._load_receiver_url(url,host,require_consent=True):
@@ -1767,7 +1766,7 @@ class RadioPanel(QWidget):
             raise RuntimeError("The embedded receiver requires a standard user session")
         target, _ = self._receiver_target()
         origin_parts = urlsplit(target)
-        origin = (origin_parts.scheme, origin_parts.port or 443, host)
+        origin = (origin_parts.scheme, _receiver_effective_port(origin_parts), host)
         if (self.receiver_view is not None and
                 self.receiver_host==host and self.receiver_origin==origin):
             return
@@ -1785,7 +1784,7 @@ class RadioPanel(QWidget):
         legacy=(parsed.scheme=="http")
         allowed_scheme="http" if legacy else "https"
         allowed_ws_scheme="ws" if legacy else "wss"
-        allowed_port=parsed.port or 443
+        allowed_port=_receiver_effective_port(parsed)
 
         class ReceiverInterceptor(QWebEngineUrlRequestInterceptor):
             def __init__(self,allowed_host,scheme,ws_scheme,port,parent=None):
@@ -1854,7 +1853,6 @@ class RadioPanel(QWidget):
         self.stop_scan()
         self._pending_tune=None
         self.sdr_load_watch.stop()
-        self.sdr_volume_apply.stop()
         self.receiver_connected=False
         self._sdr_load_error = ""
         self._sdr_state_change("OFF")

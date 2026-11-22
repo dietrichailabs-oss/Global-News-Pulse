@@ -227,7 +227,8 @@ def test_bundled_catalogs_remove_youtube_but_preserve_non_youtube_sources():
                        "weather_channel", "un_video"):
         assert indexed[identifier]["type"] == "link"
         assert "no in-app video playback" in indexed[identifier]["availability"].lower()
-    assert {"websdr", "kiwisdr", "nps_air", "nps_oceans"} <= indexed.keys()
+    assert {"websdr", "nps_air", "nps_oceans"} <= indexed.keys()
+    assert "kiwisdr" not in indexed
     doj = next(item for item in catalog if "justice.gov/news/rss?" in item.get("url", ""))
     assert "youtube_video" in doj["url"]  # A provider's RSS filter, not a player.
 

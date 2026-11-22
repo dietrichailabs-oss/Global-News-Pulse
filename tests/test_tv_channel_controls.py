@@ -65,8 +65,8 @@ def test_provider_catalog_keeps_nonvideo_links_and_worldwide_radio_sources():
         "nps_air",
         "nps_oceans",
         "websdr",
-        "kiwisdr",
     } <= ids
+    assert "kiwisdr" not in ids
     assert not ids.intersection({"associated_press", "bbc_news", "nbc_news_now",
                                  "france24_en", "dw_news", "trt_world", "schwab_network"})
 
@@ -171,7 +171,7 @@ def test_receiver_identity_metadata_survives_but_retired_service_url_is_rejected
     assert panel._radio_current_item()["id"] == "ordinary"
     with pytest.raises(ValueError, match="HTTPS"):
         panel.tiles[0]._connect_radio_receiver("rx-a")
-    with pytest.raises(ValueError, match="Video services"):
+    with pytest.raises(ValueError, match="not a supported public radio receiver"):
         panel.tiles[0]._connect_radio_receiver(retired["receiver"])
     assert panel.tiles[0].radio_view is None
     panel.close()

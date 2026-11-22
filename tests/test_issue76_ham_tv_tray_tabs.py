@@ -38,9 +38,7 @@ def test_exact_public_na5b_origin_has_consent_only_embedded_test(app):
         assert url=="http://na5b.com:8901/?tune=7100usb"
         assert host=="na5b.com"
         assert receiver.sdr_state=="OFF"
-        receiver.receiver_type.setCurrentIndex(
-            receiver.receiver_type.findData("kiwi")
-        )
+        receiver.receiver_type.setCurrentIndex(-1)  # No supported protocol.
         assert not receiver.receiver_connect.isEnabled()
         with pytest.raises(ValueError):
             receiver._receiver_target()

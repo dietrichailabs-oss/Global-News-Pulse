@@ -1,6 +1,6 @@
 """Explicit receiver links plus bounded, untrusted public SDR directory parsing.
 
-The small curated list records individual owner-supplied/operator-documented
+The curated list records individual owner-supplied/operator-documented
 links. It is not an import or copy of WebSDR.org's maintained directory feed.
 Neither curated records nor parsed candidates imply live reception or rights.
 """
@@ -19,7 +19,6 @@ DIRECTORY_URLS = {
     # live operator list. It is opened only in the external browser; in-app
     # dataset import is permission-blocked below. Never autoconnect its links.
     "websdr": "http://www.websdr.org/",
-    "kiwisdr": "https://kiwisdr.com/public/",
 }
 # Verified November 20, 2026: WebSDR's public home is a frameset; its
 # official frame loads a JSON receiver dataset whose response expressly
@@ -32,7 +31,7 @@ DIRECTORY_IMPORT_RESTRICTIONS = {
               "Use Open directory for the provider's full live list."
 }
 # Individual receiver facts supplied by the owner or checked on that receiver's
-# own operator page, November 20, 2026. Do not infer bounds from ham band names,
+# own operator page, November 20–21, 2026. Do not infer bounds from ham band names,
 # rounded public-directory thumbnails or a different receiver at the same site.
 # Numeric ranges are kHz. A listed range is not proof of current coverage/audio.
 CURATED_WEBDR_RECEIVERS = (
@@ -199,6 +198,180 @@ CURATED_WEBDR_RECEIVERS = (
         "provenance": "Operator lists 40m with center 7100 kHz, checked 2026-11-20; a center frequency does not establish lower/upper limits or live reception",
         "documentation": "https://websdr2.republicaoa6.com/",
     },
+    # Independently checked operator links; no central directory import.
+    # See docs/WEBDR_OPERATOR_LINKS_20261121.md for sources and exclusions.
+    # Static page/configuration availability is not proof of active audio.
+    {
+        "id": "kfs3", "name": "KFS #3 · Southeast Array",
+        "location": "Half Moon Bay, California, USA",
+        "url": "http://websdr3.kfsdr.com:8903/", "ranges_khz": (),
+        "bands": ("80/75m", "60m", "40m", "30m", "20m", "17m", "15m", "10m-Lo"),
+        "checked_date": "2026-11-21",
+        "provenance": "KFS operator news and receiver HTML/config checked 2026-11-21; operator reports ongoing stability testing; exact edges and live audio unverified",
+        "documentation": "https://www.kfsdr.com/news",
+    },
+    {
+        "id": "kfs4", "name": "KFS #4 · Southeast Array",
+        "location": "Half Moon Bay, California, USA",
+        "url": "http://websdr4.kfsdr.com:8904/", "ranges_khz": (),
+        "bands": ("12m", "10m-Mid", "10m-Hi"),
+        "checked_date": "2026-11-21",
+        "provenance": "KFS operator news and receiver HTML/config checked 2026-11-21; operator reports ongoing stability testing; exact edges and live audio unverified",
+        "documentation": "https://www.kfsdr.com/news",
+    },
+    {
+        "id": "hackgreen_hf", "name": "Hack Green · HF",
+        "location": "Nantwich, Cheshire, United Kingdom",
+        "url": "http://hackgreensdr.org:8901/", "ranges_khz": (),
+        "bands": ("160m", "80m", "60m", "40m", "20m", "17m"),
+        "checked_date": "2026-11-21",
+        "provenance": "RAF Hack Green operator page and its band configuration retrieved 2026-11-21; exact edges and live audio unverified",
+        "documentation": "http://hackgreensdr.org:8901/",
+    },
+    {
+        "id": "hackgreen_vhf", "name": "Hack Green · VHF / UHF",
+        "location": "Nantwich, Cheshire, United Kingdom",
+        "url": "http://hackgreensdr.org:8902/", "ranges_khz": (),
+        "bands": ("70cm", "2m", "4m", "10m", "6m"),
+        "checked_date": "2026-11-21",
+        "provenance": "RAF Hack Green operator page and its band configuration retrieved 2026-11-21; exact edges and live audio unverified",
+        "documentation": "http://hackgreensdr.org:8902/",
+    },
+    {
+        "id": "sk4ko", "name": "SK4KO · Mora",
+        "location": "Mora, Sweden",
+        "url": "http://websdr.sk4ko.com:8901/", "ranges_khz": (),
+        "bands": ("160m", "80m", "40m", "20m", "15m", "10m"),
+        "checked_date": "2026-11-21",
+        "provenance": "SK4KO club announcement and HF receiver HTML/config checked 2026-11-21; separate offline VHF service not included; exact edges and live audio unverified",
+        "documentation": "https://www.sk4ko.com/new/index.php/home/nyheter/196-new-hf-websdr-online",
+    },
+    {
+        "id": "k3fef", "name": "K3FEF / W3TKP · Radio Ranch",
+        "location": "Milford, Pennsylvania, USA",
+        "url": "http://k3fef.com:8901/", "ranges_khz": (),
+        "bands": ("HF",),
+        "checked_date": "2026-11-21",
+        "provenance": "K3FEF operator page and its HF configuration retrieved 2026-11-21; separate UberSDR is not this endpoint; exact edges and live audio unverified",
+        "documentation": "http://k3fef.com:8901/",
+    },
+    {
+        "id": "so8oo", "name": "SO8OO · Southeastern Poland",
+        "location": "Southeastern Poland · KN09vw",
+        "url": "https://sdr.so8oo.net/", "ranges_khz": (),
+        "bands": ("VLF", "160m", "80m", "60m", "40m", "20m", "10m", "QO-100"),
+        "checked_date": "2026-11-21",
+        "provenance": "Location and band labels on the SO8OO operator page checked 2026-11-21; exact edges and live audio unverified",
+        "documentation": "https://sdr.so8oo.net/",
+    },
+    {
+        "id": "dk0te", "name": "DK0TE · Lake Constance",
+        "location": "Friedrichshafen, Germany · JN47RP",
+        "url": "http://dk0te.dhbw-ravensburg.de:8901/", "ranges_khz": (),
+        "bands": ("160m", "80m-CW", "80m", "40m", "30m", "20m", "15m", "10m"),
+        "checked_date": "2026-11-21",
+        "provenance": "DK0TE operator page and its current band configuration retrieved 2026-11-21; separate narrow windows, not full ham-band coverage; exact edges and live audio unverified",
+        "documentation": "http://dk0te.dhbw-ravensburg.de:8901/",
+    },
+    {
+        "id": "dk1ml", "name": "DK1ML · Frankfurt / Main",
+        "location": "Near Frankfurt / Main, Germany",
+        "url": "http://websdr.homeip.net:8901/", "ranges_khz": (),
+        "bands": ("160m", "80m", "60m", "40m", "20m", "6m", "2m", "70cm", "23cm", "QO-100"),
+        "checked_date": "2026-11-21",
+        "provenance": "DK1ML operator announcement on F05 club site and receiver HTML checked 2026-11-21; operator-published labels only; exact edges and live audio unverified",
+        "documentation": "https://f05.de/2025/11/05/das-neue-websdr-von-dk1ml/",
+    },
+    {
+        "id": "itapeva", "name": "Itapeva · Fazenda São Francisco",
+        "location": "Itapeva, São Paulo, Brazil",
+        "url": "http://itapeva.websdr.com.br:8901/", "ranges_khz": (),
+        "bands": ("160m", "80m", "40m", "30m", "20m", "15m", "12m", "10m"),
+        "checked_date": "2026-11-21",
+        "provenance": "Independent Brazilian operator network identifies this station; receiver HTML/config retrieved 2026-11-21; current config labels supersede older network summary; exact edges and live audio unverified",
+        "documentation": "http://itapeva.websdr.com.br:8901/",
+    },
+    {
+        "id": "itajai_vhf", "name": "Itajaí · VHF",
+        "location": "Itajaí, Santa Catarina, Brazil",
+        "url": "http://itajai.sdr.net.br:8083/", "ranges_khz": (),
+        "bands": ("VHF LO", "VHF HI"),
+        "checked_date": "2026-11-21",
+        "provenance": "Itajaí operator page and its two-window VHF configuration retrieved 2026-11-21; separate unresponsive HF endpoint not included; exact edges and live audio unverified",
+        "documentation": "http://itajai.sdr.net.br:8083/",
+    },
+    {
+        "id": "orlandia", "name": "Orlândia · HF",
+        "location": "Orlândia, São Paulo, Brazil",
+        "url": "http://orlandia.sdr.net.br:9001/", "ranges_khz": (),
+        "bands": ("40m", "80m"),
+        "checked_date": "2026-11-21",
+        "provenance": "Orlândia WebSDR HTML/config retrieved 2026-11-21; operator announces a future UberSDR migration, not yet treated as supported here; exact edges and live audio unverified",
+        "documentation": "http://orlandia.sdr.net.br:9001/",
+    },
+    {
+        "id": "paraibuna", "name": "Paraibuna · HF",
+        "location": "Paraibuna, São Paulo, Brazil",
+        "url": "http://paraibuna.websdr.com.br:8901/", "ranges_khz": (),
+        "bands": ("80m", "40m"),
+        "checked_date": "2026-11-21",
+        "provenance": "Independent Brazilian operator network identifies this station; receiver HTML/config retrieved 2026-11-21; two configured bands only, not older template buttons; exact edges and live audio unverified",
+        "documentation": "http://paraibuna.websdr.com.br:8901/",
+    },
+    {
+        "id": "py7nm", "name": "PY7NM · Caruaru",
+        "location": "Caruaru, Pernambuco, Brazil",
+        "url": "http://py7nmcaruarupe.ddns.net:81/", "ranges_khz": (),
+        "bands": ("40m", "30m", "VHF", "11m"),
+        "checked_date": "2026-11-21",
+        "provenance": "PY7NM receiver HTML/config retrieved 2026-11-21; location corroborated by its independent operator network; config labels only, not generic buttons; exact edges and live audio unverified",
+        "documentation": "http://py7nmcaruarupe.ddns.net:81/",
+    },
+    {
+        "id": "pu3alk", "name": "PU3ALK · Porto Lucena",
+        "location": "Porto Lucena, Rio Grande do Sul, Brazil",
+        "url": "http://pu3alk.com.br:9001/", "ranges_khz": (),
+        "bands": ("80m", "40m", "10m"),
+        "checked_date": "2026-11-21",
+        "provenance": "PU3ALK operator page and its band configuration retrieved 2026-11-21; exact edges and live audio unverified",
+        "documentation": "http://pu3alk.com.br:9001/",
+    },
+    {
+        "id": "volta_redonda", "name": "Volta Redonda · HF / VHF",
+        "location": "Volta Redonda, Rio de Janeiro, Brazil · GG77XM",
+        "url": "http://websdr.dynv6.net:8901/", "ranges_khz": (),
+        "bands": ("40m", "15m", "2m-L", "2m-H"),
+        "checked_date": "2026-11-21",
+        "provenance": "Volta Redonda WebSDR operator HTML/config retrieved 2026-11-21; separate OpenWebRX link is not included; exact edges and live audio unverified",
+        "documentation": "http://websdr.dynv6.net:8901/",
+    },
+    {
+        "id": "pocos_caldas", "name": "CRAPOCA · Poços de Caldas",
+        "location": "Poços de Caldas, Minas Gerais, Brazil",
+        "url": "http://crapoca.websdr.com.br:8901/", "ranges_khz": (),
+        "bands": ("40m", "10/11m"),
+        "checked_date": "2026-11-21",
+        "provenance": "Independent Brazilian operator network identifies this station; receiver HTML/config retrieved 2026-11-21; current two-band configuration only; exact edges and live audio unverified",
+        "documentation": "http://crapoca.websdr.com.br:8901/",
+    },
+    {
+        "id": "lz2kac", "name": "LZ2KAC · Gabrovo",
+        "location": "Gabrovo, Bulgaria",
+        "url": "http://websdr.lz2kac.org:8901/", "ranges_khz": (),
+        "bands": ("2m",),
+        "checked_date": "2026-11-21",
+        "provenance": "LZ2KAC operator page and its single-band configuration retrieved 2026-11-21; no extra bands inferred from the station name; exact edges and live audio unverified",
+        "documentation": "http://websdr.lz2kac.org:8901/",
+    },
+    {
+        "id": "sv8fxn", "name": "SV8FXN · Naxos Island",
+        "location": "Naxos Island, Greece",
+        "url": "http://sv8fxn-naxos.ddns.net:8901/", "ranges_khz": (),
+        "bands": ("40m", "80m", "160m", "MW"),
+        "checked_date": "2026-11-21",
+        "provenance": "Naxos operator page and its four-band configuration retrieved 2026-11-21; exact edges and live audio unverified",
+        "documentation": "http://sv8fxn-naxos.ddns.net:8901/",
+    },
 )
 # Curating an arbitrary discovery result never grants HTTP/WebEngine admission.
 # This immutable allowlist contains only the exact individually reviewed origins.
@@ -217,6 +390,24 @@ CURATED_WEBDR_HTTP_ORIGINS = frozenset({
     ("websdr2.kfsdr.com", 8902),
     ("g0xbuwebsdr.ddns.net", 8901),
     ("g0xbuwebsdr.ddns.net", 8902),
+    ("websdr3.kfsdr.com", 8903),
+    ("websdr4.kfsdr.com", 8904),
+    ("hackgreensdr.org", 8901),
+    ("hackgreensdr.org", 8902),
+    ("websdr.sk4ko.com", 8901),
+    ("k3fef.com", 8901),
+    ("dk0te.dhbw-ravensburg.de", 8901),
+    ("websdr.homeip.net", 8901),
+    ("itapeva.websdr.com.br", 8901),
+    ("itajai.sdr.net.br", 8083),
+    ("orlandia.sdr.net.br", 9001),
+    ("paraibuna.websdr.com.br", 8901),
+    ("py7nmcaruarupe.ddns.net", 81),
+    ("pu3alk.com.br", 9001),
+    ("websdr.dynv6.net", 8901),
+    ("crapoca.websdr.com.br", 8901),
+    ("websdr.lz2kac.org", 8901),
+    ("sv8fxn-naxos.ddns.net", 8901),
 })
 _IGNORED_HOSTS = {
     "websdr.org", "www.websdr.org", "kiwisdr.com", "www.kiwisdr.com",
@@ -261,6 +452,8 @@ def public_receiver_url(value):
         ):
             raise ValueError("Public DNS name required")
         host = ascii_host
+    if host == "kiwisdr.com" or host.endswith(".kiwisdr.com"):
+        raise ValueError("KiwiSDR receivers have been removed")
     try:
         port = parts.port
     except ValueError as exc:
@@ -293,9 +486,9 @@ def curated_websdr_receivers():
                 "audio and availability unverified"
             )
         elif (parsed.scheme == "http"
-              and (parsed.hostname, parsed.port) in CURATED_WEBDR_HTTP_ORIGINS):
+              and (parsed.hostname, parsed.port or 80) in CURATED_WEBDR_HTTP_ORIGINS):
             row["reason"] = (
-                f"Operator HTTP/{parsed.port}; in-app only after specific "
+                f"Operator HTTP/{parsed.port or 80}; in-app only after specific "
                 "unencrypted transport consent; audio and availability unverified"
             )
         else:
@@ -418,11 +611,7 @@ def parse_directory(provider, content):
             continue
         host=info["host"]
         if (host in _IGNORED_HOSTS or host.endswith(".websdr.org")
-                or (host.endswith(".kiwisdr.com")
-                    and not host.endswith(".proxy.kiwisdr.com"))):
-            # Kiwi publishes receiver proxy hostnames at
-            # <id>.proxy.kiwisdr.com; they are real candidate receivers, not
-            # directory navigation links. Transport admission is unchanged.
+                or host.endswith(".kiwisdr.com")):
             continue
         if info["url"] in seen:
             continue

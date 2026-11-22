@@ -214,11 +214,11 @@ def test_directory_search_keeps_all_valid_returned_choices_including_browser_onl
         {"url":f"https://receiver{i}.example.org/","name":f"Receiver {i}"}
         for i in range(75)
     ]+[{"url":"http://browser.example.org:8073/","name":"Browser only"}]}).encode()
-    panel.sdr_directory_cache["kiwisdr"]=parse_directory("kiwisdr",content)
-    panel.ham_selector.setCurrentIndex(1)
-    assert panel.receiver_picker.count()==77
+    panel.sdr_directory_cache["websdr"]=parse_directory("websdr",content)
+    panel._change_receiver_directory()
+    assert panel.receiver_picker.count()==len(curated_websdr_receivers())+77
     assert panel.receiver_picker.isEditable()
-    panel.receiver_picker.setCurrentIndex(76)
+    panel.receiver_picker.setCurrentIndex(panel.receiver_picker.count()-1)
     assert not panel.receiver_connect.isEnabled()
     assert panel.receiver_external.isEnabled()
     assert not panel.receiver_browser_quick.isHidden()
@@ -348,16 +348,16 @@ def test_reviewed_high_windows_do_not_expand_generic_receiver_or_scan_step_limit
         panel._tuned_receiver_url(1296000)
     panel.receiver_url.setText("https://vhf-goonhilly.batc.org.uk:443/")
     assert panel._tuned_receiver_url(2321000)[0].endswith("?tune=2321000usb")
-    panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("kiwi"))
+    panel.receiver_type.setCurrentIndex(-1)  # Unsupported protocol has no authority.
     with pytest.raises(ValueError):
         panel._tuned_receiver_url(2321000)
 
 
 def test_curated_receiver_facts_are_individual_links_not_a_central_feed_copy():
     rows={row["id"]:row for row in curated_websdr_receivers()}
-    assert set(rows)=={"na5b","twente","georgia","utah1","utah2","utah4","utah5",
+    assert {"na5b","twente","georgia","utah1","utah2","utah4","utah5",
                       "maasbree_low","maasbree_high","maasbree_2m","kfs1","kfs2",
-                      "g0xbu1","g0xbu2","df0hte","goonhilly","pardinho","oa6dxv"}
+                      "g0xbu1","g0xbu2","df0hte","goonhilly","pardinho","oa6dxv"} <= set(rows)
     assert rows["twente"]["url"]=="http://websdr.ewi.utwente.nl:8901/"
     assert rows["twente"]["name"]=="University of Twente"
     assert rows["twente"]["ranges_khz"]==((0.0,29160.0),)

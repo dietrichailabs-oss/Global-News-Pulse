@@ -1,4 +1,20 @@
-# R20 owner-directed YouTube removal — 2026-11-21
+# R20 WebSDR and worldwide camera expansion — 2026-11-21
+
+KiwiSDR support is retired at the owner's request. WebSDR receiver links are
+individually sourced; this is not a complete copy of WebSDR.org's maintained
+directory, whose reuse requires operator permission. The full original
+directory remains an explicit external link. Published bands and successful
+page checks do not prove current audio, waterfall or continuous uptime.
+
+The expanded public camera bank uses consented periodic still images. A
+successful source check is time-specific, not proof that every later frame is
+fresh or every camera is continuously available. Pulse's fetch time is separate
+from the provider's capture time. No private-camera discovery, recording archive,
+continuous-video player or YouTube integration is added. Exact source review and
+Windows package checks are required for this successor; earlier package passes
+do not approve changed bytes. Public release remains a separate decision.
+
+# Preserved owner-directed YouTube removal — 2026-11-21
 
 YouTube playback, the TV tab, saved-video controls and bundled native TV helper
 are removed. Radio/HAM and reviewed cameras remain. Earlier YouTube/Tousi TV

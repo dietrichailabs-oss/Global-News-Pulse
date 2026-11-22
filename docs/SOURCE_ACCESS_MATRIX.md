@@ -70,7 +70,21 @@ The YouTube/Tousi TV integration is retired. Historical reports and old saved-vi
 
 [ReliefWeb](https://apidoc.reliefweb.int/) now requires an approved appname for read/search; none was supplied. [BBC terms](https://downloads.bbc.co.uk/usingthebbc/bbc_terms_of_use_19September2022english.pdf) require permission for business RSS use. [UN terms](https://www.un.org/en/about-us/terms-of-use) restrict redistribution and derivatives. [EBC's current terms](https://www.ebc.com.br/termos-de-uso-e-condicoes-gerais-do-portal-da-ebc) have personal/noncommercial scope; older CC notices cannot silently override them. Those adapters remain disabled pending the stated review or approval.
 
-Public camera entries link to [NPS air-quality cameras](https://www.nps.gov/features/ard/webcams/) and [coastal webcams](https://www.nps.gov/subjects/oceans/webcams.htm). The air-quality network describes delayed images rather than continuous live video. Radio entries point to [WebSDR](https://websdr.org/) and [KiwiSDR's public directory](https://kiwisdr.com/public/). Directory inclusion does not assert every receiver is currently online or grant recording/redistribution rights. The user opens a provider's receiver page, and the application performs no audio recording, retransmission, private-camera discovery, private-account collection, or precise individual/tactical tracking.
+Public camera entries use individually reviewed operator pages and attributed
+JPEG/PNG landscape snapshots. See [the worldwide camera review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WORLD_CAMERA_SOURCES_20261121.md)
+for exact endpoints, reuse terms and bounded availability observations. These
+are periodically refreshed stills, not continuous video or guaranteed current
+incident views. Provider pages may offer other viewing modes outside Pulse.
+
+Radio now supports [WebSDR](https://websdr.org/) only; KiwiSDR is retired. See
+[the individual receiver review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WEBDR_OPERATOR_LINKS_20261121.md) for the expanded
+curated links. The central WebSDR.org maintained dataset explicitly requires
+permission for reuse in another website or automated system, so it is neither
+imported nor mirrored. Independently sourced operator links do not grant blanket
+recording or redistribution rights. Directory inclusion or an HTTP response
+does not verify live reception. The application performs no audio recording,
+retransmission, private-camera discovery, private-account collection, or precise
+individual/tactical tracking.
 
 ## Network and catalog boundaries
 

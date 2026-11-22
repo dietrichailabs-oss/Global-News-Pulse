@@ -1,12 +1,46 @@
 # R20 digital radio and owner-feedback corrections — bounded QA handoff
 
-Status: **DRAFT / owner-directed YouTube removal / regression and package QA**.
-This successor is based on exact investigation head
-`10dd8c883242c9d3f8f545dc928d67711abdea77`, with the original R19 integration
+Status: **DRAFT / owner-approved WebSDR and camera expansion / fresh QA pending**.
+This successor is based on the exact YouTube-free head
+`87371db43236c4e223bd95249e243130bee7f1f8`, with the original R19 integration
 ancestor `76b8164308dd2c8ca6da465e0df729c102715124` preserved.
 Do not merge or publish this draft as a public binary release.
 
-## Current November 21 owner decision: remove YouTube
+## Current November 21 owner decision: expand receivers and active webcams
+
+The owner requested removal of KiwiSDR, more worldwide public cameras and a
+larger HAM receiver list. After the central WebSDR dataset's prior-permission
+notice was explained, the owner approved **individually sourced receiver links**
+instead: "yes and get more active webcams added in". This is not permission from
+the WebSDR operator and does not lift the central dataset restriction.
+
+The bounded successor removes Kiwi-specific controls, directory/provider paths
+and tuning protocol; keeps the working WebSDR tuner, consent and origin checks;
+and expands the selectable camera bank with reviewed public landscape images.
+The receiver bank grows from 18 to **37 individual links**; all 19 additions
+carry operator provenance and do not claim verified audio. The camera bank
+grows from 2 to **14 views across four countries/four continents**. Thirteen
+returned recent decoded images at review; the existing USGS V1 entry returned
+403 and is visibly marked unavailable, not counted as active. The 12 additions
+are six GeoNet, five DWD and one ESO camera, with visible source/credit links.
+Known retired-provider saved entries cannot restart a Kiwi session, while
+unrelated preferences and broadcast presets are preserved. Existing source,
+news/archive, tray/shutdown and YouTube-removal behavior must remain intact.
+
+Camera source checks distinguish a successfully retrieved image from its actual
+capture freshness and from continuous live video. The native view remains a
+memory-only periodic still with the existing size, time, refresh, cookie and
+redirect limits. No endpoint or image supplied by a news event can bypass the
+bundled reviewed registry. Matching an area never claims incident verification.
+
+Per-provider evidence is in [the receiver review](WEBDR_OPERATOR_LINKS_20261121.md)
+and [the camera review](WORLD_CAMERA_SOURCES_20261121.md). Fresh full local and
+Windows regression, exact package/lifecycle checks and distinct independent QA
+are required before handing over a new installer. The existing 14 historical
+deselections/two ignored modules and every unrelated performance/safety assertion
+remain unchanged. No merge, tag, signing/trust change or public binary release.
+
+## Preserved November 21 owner decision: remove YouTube
 
 The owner explicitly directed: **"fine then strip youtube out, it clearly is
 being a pain in the ass"**. This supersedes all YouTube repair, live playback,

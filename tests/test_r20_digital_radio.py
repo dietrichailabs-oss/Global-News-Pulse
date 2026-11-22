@@ -112,10 +112,9 @@ def test_fractional_ham_tune_preserves_exact_requested_dial_and_provider_url(pan
     assert "7100.123 kHz" in panel.ham_frequency_detail.text()
     url, _ = panel._tuned_receiver_url()
     assert url.endswith("?tune=7100.123usb"), url
-    panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("kiwi"))
     panel.receiver_url.setText("https://radio.example.org/")
-    kiwi_url, _ = panel._tuned_receiver_url()
-    assert kiwi_url.endswith("?f=7100.123usb&vol=40"), kiwi_url
+    https_url, _ = panel._tuned_receiver_url()
+    assert https_url.endswith("?tune=7100.123usb"), https_url
     assert not panel.receiver_connected
 
 
@@ -124,13 +123,15 @@ def test_operator_bands_are_only_reported_when_directory_supplies_them(panel):
         {"url": "https://radio.example.org/", "name": "Example SDR",
          "bands": ["20 m", "40 m", "6 m", "20 m", "\nUnsafe"]},
     ]}).encode()
-    rows = parse_directory("kiwisdr", data)
+    rows = parse_directory("websdr", data)
     assert len(rows) == 1
     assert rows[0]["bands"] == ["20 m", "40 m", "6 m"]
-    panel.sdr_directory_cache["kiwisdr"] = rows
-    panel.ham_selector.setCurrentIndex(1)
+    panel.sdr_directory_cache["websdr"] = rows
     panel._change_receiver_directory()
-    panel.receiver_picker.setCurrentIndex(1)
+    panel.receiver_picker.setCurrentIndex(next(
+        i for i in range(panel.receiver_picker.count())
+        if (panel.receiver_picker.itemData(i) or {}).get("name") == "Example SDR"
+    ))
     assert panel.ham_receiver_name.text() == "Example SDR"
     assert "20 m · 40 m · 6 m" in panel.ham_bands.text()
     assert "Exact bounds/availability" in panel.ham_bands.text()
@@ -173,15 +174,14 @@ def test_open_directory_warns_about_plaintext_http_and_requires_separate_consent
     assert panel.open_ham_directory() is True
     assert opened == ["http://www.websdr.org/"]
 
-    panel.ham_selector.setCurrentIndex(panel.ham_selector.findData(
-        next(row for row in (panel.ham_selector.itemData(i)
-                             for i in range(panel.ham_selector.count()))
-             if row["id"] == "kiwisdr")
-    ))
-    assert panel.open_ham_directory() is True
-    assert "uses HTTPS" in prompts[-1]
-    assert "unencrypted HTTP" not in prompts[-1]
-    assert opened[-1] == "https://kiwisdr.com/public/"
+    # A stale restored directory record cannot create an external shortcut.
+    panel.ham_selector.addItem("Retired directory", {
+        "id": "kiwisdr", "url": "https://kiwisdr.com/public/",
+    })
+    panel.ham_selector.setCurrentIndex(1)
+    assert panel.open_ham_directory() is False
+    assert len(prompts) == 2
+    assert opened == ["http://www.websdr.org/"]
 
 
 def test_rapid_ham_buttons_coalesce_while_receiver_is_connecting(panel, monkeypatch):
@@ -312,7 +312,6 @@ def test_pending_ham_tune_does_not_survive_receiver_change(panel, monkeypatch):
     assert panel.connect_receiver()
     panel.ham_forward.click()
     assert panel._pending_tune is not None
-    panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("kiwi"))
     panel.receiver_url.setText("https://rx.example.org/")
     assert panel.tune_receiver()
     assert views[0].deleted
@@ -395,17 +394,13 @@ def test_directory_malformed_link_deep_json_and_kiwi_proxy_are_isolated():
             b'<a href="http://[">Malformed IPv6</a>')
     rows = parse_directory("websdr", html)
     assert [row["host"] for row in rows] == ["good.example.org"]
-    assert parse_directory("kiwisdr", b"[" * 10000 + b"]" * 10000) == []
+    assert parse_directory("websdr", b"[" * 10000 + b"]" * 10000) == []
     kiwi = json.dumps({"receivers": [
         {"url": "https://12345.proxy.kiwisdr.com/", "name": "Kiwi proxy HTTPS"},
         {"url": "http://12345.proxy.kiwisdr.com:8073/", "name": "Kiwi proxy HTTP"},
         {"url": "https://www.kiwisdr.com/public/", "name": "Directory, not receiver"},
     ]}).encode()
-    parsed = parse_directory("kiwisdr", kiwi)
-    assert len(parsed) == 2
-    assert parsed[0]["embedded_candidate"] is True
-    assert parsed[1]["embedded_candidate"] is False
-    assert "Browser only" in parsed[1]["reason"]
+    assert parse_directory("websdr", kiwi) == []
 
 
 @pytest.fixture
@@ -463,7 +458,8 @@ def asynchronous_sdr(panel, monkeypatch):
         assert target_host == host
         parts = urlsplit(target)
         panel.receiver_host = host
-        panel.receiver_origin = (parts.scheme, parts.port or 443, host)
+        port = parts.port if parts.port is not None else (80 if parts.scheme == "http" else 443)
+        panel.receiver_origin = (parts.scheme, port, host)
 
     def consent(*args, **kwargs):
         prompts.append(args[2])
@@ -475,6 +471,58 @@ def asynchronous_sdr(panel, monkeypatch):
     assert panel.connect_receiver()
     assert len(views) == 1 and len(views[0].loaded) == 1
     return panel, views, prompts
+
+
+def test_reviewed_default_http_port_is_exact_not_an_arbitrary_port_exception(panel, monkeypatch):
+    from PySide6.QtCore import QUrl
+    from global_pulse import internet_radio
+    from global_pulse.internet_radio import _owner_legacy_websdr, _receiver_origin_matches
+    from global_pulse.sdr_directory import public_receiver_url
+
+    host = "reviewed.example.org"
+    monkeypatch.setattr(internet_radio, "CURATED_WEBDR_HTTP_ORIGINS",
+                        internet_radio.CURATED_WEBDR_HTTP_ORIGINS | {(host, 80)})
+    for url in (f"http://{host}/", f"http://{host}:80/"):
+        assert _owner_legacy_websdr(public_receiver_url(url), "websdr")
+        panel.receiver_url.setText(url)
+        assert panel.receiver_connect.isEnabled()
+        assert "HTTP/80" in panel.receiver_list_note.text()
+        assert panel._tuned_receiver_url()[0].endswith("?tune=7100usb")
+        assert _receiver_origin_matches(QUrl(url), host, "http", "ws", 80, main=True)
+    for url in (f"http://{host}:443/", f"http://{host}:8901/", "http://other.example.org/"):
+        assert not _owner_legacy_websdr(public_receiver_url(url), "websdr")
+        panel.receiver_url.setText(url)
+        with pytest.raises(ValueError):
+            panel._receiver_target()
+    assert _receiver_origin_matches(QUrl(f"ws://{host}/rx"), host, "http", "ws", 80)
+    assert not _receiver_origin_matches(QUrl(f"ws://{host}:443/rx"), host, "http", "ws", 80)
+    assert not _receiver_origin_matches(QUrl(f"https://{host}/"), host, "http", "ws", 80)
+
+
+def test_reviewed_http_default_port_retune_and_timeout_keep_exact_consent(asynchronous_sdr, monkeypatch):
+    from global_pulse import internet_radio
+
+    panel, views, prompts = asynchronous_sdr
+    host = "reviewed.example.org"
+    monkeypatch.setattr(internet_radio, "CURATED_WEBDR_HTTP_ORIGINS",
+                        internet_radio.CURATED_WEBDR_HTTP_ORIGINS | {(host, 80)})
+    panel.disconnect_receiver()
+    panel.receiver_url.setText(f"http://{host}/")
+    assert panel.connect_receiver()
+    current = views[-1]
+    assert panel.receiver_origin == ("http", 80, host)
+    assert len(prompts) == 2 and "HTTP on port 80" in prompts[-1]
+    # Explicit :80 is the same origin, not another receiver or extra consent.
+    panel.receiver_url.setText(f"http://{host}:80/")
+    assert panel.tune_receiver(7105)
+    assert panel.receiver_view is current and not current.deleted
+    assert len(prompts) == 2 and panel._pending_tune is not None
+    panel._sdr_load_timed_out()
+    assert current.deleted and panel.receiver_view is not current
+    assert panel.receiver_origin == ("http", 80, host)
+    assert panel._pending_tune is None
+    assert views[-1].loaded == [f"http://{host}:80/?tune=7105usb"]
+    assert len(prompts) == 2, "Only the same exact consented HTTP/80 origin may continue"
 
 
 def test_timeout_dispatches_queued_tune_on_new_view_and_ignores_old_signals(asynchronous_sdr):

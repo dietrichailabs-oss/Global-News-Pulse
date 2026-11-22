@@ -1,4 +1,4 @@
-name: Issue21 R20 digital radio tuner — private owner-test artifacts
+name: Issue21 R20 curated global media — owner-test artifacts
 
 on:
   push:
@@ -64,92 +64,45 @@ jobs:
           $dotnetVersion = (& dotnet --version).Trim()
           Write-Host "SELECTED_DOTNET_SDK=$dotnetVersion"
           if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') { throw 'Pinned SDK10 selection failed before package tests' }
-      - name: Require exact R20 parent and bounded YouTube retirement
+      - name: Require exact R20 parent and bounded curated media expansion
         run: |
           $ErrorActionPreference = 'Stop'
           git merge-base --is-ancestor 76b8164308dd2c8ca6da465e0df729c102715124 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Expected R20 original integration ancestor not found' }
           $parent = (& git rev-parse HEAD^).Trim()
-          if ($parent -ne '10dd8c883242c9d3f8f545dc928d67711abdea77') { throw 'Unexpected YouTube-removal parent' }
-          $actual = @(git diff --name-only 10dd8c883242c9d3f8f545dc928d67711abdea77 HEAD)
+          if ($parent -ne '87371db43236c4e223bd95249e243130bee7f1f8') { throw 'Unexpected curated-media expansion parent' }
+          $actual = @(git diff --name-only 87371db43236c4e223bd95249e243130bee7f1f8 HEAD)
           $expected = @(
             '.github/workflows/ci.yml',
             '.github/workflows/issue21-r20-digital-radio-owner-package.yml',
-            '.github/workflows/issue22-nws-conflict-integration-ci.yml',
-            '.github/workflows/issue22-pr7-qa-remediation-ci.yml',
-            '.github/workflows/issue22-registered-app-referer-ci.yml',
-            '.github/workflows/issue22-webview2-http-observation-ci.yml',
-            '.github/workflows/issue22-webview2-identity-observation-ci.yml',
-            '.github/workflows/issue22-windows-package-identity-ci.yml',
-            '.github/workflows/issue31-tv-basic-ci.yml',
-            '.github/workflows/issue31-tv-owner-package.yml',
-            '.github/workflows/issue37-interaction-engineering-ci.yml',
-            '.github/workflows/issue76-ham-tray-tv-ci.yml',
-            '.github/workflows/issue76-unified-quit-ci.yml',
-            '.github/workflows/issue82-ham-load-receipt-ci.yml',
-            '.github/workflows/issue82-ham-manual-tune-qt-ci.yml',
-            '.github/workflows/issue82-ham-retune-state-ci.yml',
-            '.github/workflows/issue82-ham-scan-pending-ci.yml',
-            '.github/workflows/issue82-na5b-effective-port-ci.yml',
-            '.github/workflows/issue82-native-v2-qa.yml',
-            '.github/workflows/issue82-owner-win11-optin-sources-tabs-ci.yml',
-            '.github/workflows/issue82-r11-notify-async-integration.yml',
-            '.github/workflows/issue82-startup-video-ci.yml',
-            '.github/workflows/issue82-tv-error-readout-ci.yml',
-            '.github/workflows/issue82-tv-visible-diagnostics-ci.yml',
-            '.github/workflows/owner-night-canonical-category-filter-ci.yml',
-            '.github/workflows/owner-night-category-drilldown-ci.yml',
-            '.github/workflows/owner-night-stability-map-ci.yml',
             'README.md',
             'docs/ISSUE21_R20_DIGITAL_RADIO_OWNER_QA.md',
             'docs/KNOWN_LIMITATIONS.md',
-            'docs/PRIVATE_TEST_GUIDE.md',
             'docs/SOURCE_ACCESS_MATRIX.md',
-            'docs/THIRD_PARTY_NOTICES.md',
             'docs/USER_GUIDE.md',
+            'docs/WEBDR_OPERATOR_LINKS_20261121.md',
+            'docs/WORLD_CAMERA_SOURCES_20261121.md',
+            'global_pulse/camera_context.py',
+            'global_pulse/camera_snapshot.py',
+            'global_pulse/internet_radio.py',
             'global_pulse/media_widget.py',
-            'global_pulse/native_tv.py',
+            'global_pulse/resources/context_cameras.json',
             'global_pulse/resources/media_catalog.json',
-            'global_pulse/resources/sources.json',
-            'global_pulse/resources/tv_playback_verified.json',
+            'global_pulse/sdr_directory.py',
             'global_pulse/single_media.py',
-            'global_pulse/sources.py',
-            'global_pulse/ui.py',
-            'packaging/tv/GlobalPulse.TV.csproj',
-            'packaging/tv/NativeTvProgram.cs',
-            'packaging/tv/packages.lock.json',
-            'scripts/build_windows.ps1',
-            'scripts/collect_dotnet_notices.py',
-            'scripts/issue22_youtube_watch_probe.ps1',
-            'scripts/issue82_native_embed_probe.py',
-            'scripts/package_manifest.py',
-            'tests/test_dotnet_notices.py',
-            'tests/test_e2_workstation_layout.py',
-            'tests/test_issue22_media_map_composition.py',
+            'tests/test_camera_payload_admission.py',
+            'tests/test_global_camera_expansion.py',
+            'tests/test_issue21_sdr_owner_controls.py',
             'tests/test_issue22_owner_media_lineup.py',
-            'tests/test_issue22_source_composition.py',
-            'tests/test_issue22_webview2_http_observation.py',
-            'tests/test_issue22_webview2_identity_observation.py',
-            'tests/test_issue22_windows_package_identity.py',
-            'tests/test_issue22_youtube_playback_observation.py',
-            'tests/test_issue22_youtube_watch_probe.py',
-            'tests/test_issue31_tv_basic_player.py',
-            'tests/test_issue37_country_owner_video.py',
-            'tests/test_issue64_gui_latency_profile.py',
             'tests/test_issue76_ham_tv_tray_tabs.py',
-            'tests/test_issue82_native_tv_policy.py',
-            'tests/test_issue82_startup_video_diagnostics.py',
-            'tests/test_issue82_tv_error_readout.py',
-            'tests/test_issue82_tv_visible_diagnostics.py',
-            'tests/test_packaging.py',
-            'tests/test_single_media.py',
-            'tests/test_sources.py',
+            'tests/test_kiwi_removal.py',
+            'tests/test_r20_digital_radio.py',
+            'tests/test_r20_owner_radio_feedback.py',
             'tests/test_tv_channel_controls.py',
-            'tests/test_tv_package_manifest_gate.py',
-            'tests/test_tv_pending_timeout.py',
+            'tests/test_websdr_expansion.py',
             'tests/test_youtube_removal.py'
           )
-          if (Compare-Object $expected $actual) { throw 'Unexpected source delta for owner-directed YouTube removal' }
+          if (Compare-Object $expected $actual) { throw 'Unexpected source delta for owner-approved curated media expansion' }
       - name: Prepare reviewed Inno compiler
         run: |
           $ErrorActionPreference = 'Stop'

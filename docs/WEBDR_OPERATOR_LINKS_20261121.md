@@ -1,0 +1,51 @@
+# Independently sourced WebSDR operator expansion
+
+Checked **November 21, 2026 (America/New_York)**. This adds **19 individual receiver links**, taking the built-in curated catalog from 18 to **37**. It is not a complete worldwide inventory and is not an import, mirror, or secondary copy of WebSDR.org's maintained dataset. Its existing automatic-import restriction remains in place.
+
+## Scope and evidence
+
+Only public individual operator pages, their linked static receiver configurations, and operator/club announcements were used. The independent Brazilian operator network at [websdr.com.br](https://websdr.com.br/) supplied its own station names/locations and initial links; each selected receiver's own HTML/configuration was then checked. Its list was not imported into the application.
+
+The checks were bounded public HTML/static-configuration requests: no audio/WebSocket receiver session, recording, account login, bandwidth-heavy stream sweep, or port scan was performed. A successful HTML/configuration request establishes that the named page/configuration responded at check time, **not** that audio is active or that a given transmission can be received. No new entry is advertised as audio-verified. Reachability can change after this snapshot.
+
+The new records retain the operator's band labels. Generic UI template buttons, old directory summaries, advertised satellite allocations, and configuration center/sample-rate fields are not promoted into exact usable-frequency bounds. `ranges_khz` therefore remains empty for these new entries. Operators' own tuning controls remain available; a label is not a promise of full coverage of that ham band. In particular, the QO-100 labels on SO8OO and DK1ML do not establish a new high-frequency digital-tuner range.
+
+## Added links and directly observed sources
+
+All rows below have a `checked_date` of `2026-11-21` in source. “HTTP 200” refers to the public metadata request, never to audio playback.
+
+| ID / location | Canonical individual receiver | Bands and source evidence |
+| --- | --- | --- |
+| `kfs3` — Half Moon Bay, California, USA | [KFS #3](http://websdr3.kfsdr.com:8903/) | 80/75m, 60m, 40m, 30m, 20m, 17m, 15m, 10m-Lo. Receiver HTML and linked [band configuration](http://websdr3.kfsdr.com:8903/tmp/bandinfo.js): HTTP 200. [KFS operator news](https://www.kfsdr.com/news) identifies the Southeast Array endpoints and reports ongoing stability testing/dropout/restart risk; [operator home](https://www.kfsdr.org/) identifies the location. |
+| `kfs4` — Half Moon Bay, California, USA | [KFS #4](http://websdr4.kfsdr.com:8904/) | 12m, 10m-Mid, 10m-Hi. Receiver HTML and [configuration](http://websdr4.kfsdr.com:8904/tmp/bandinfo.js): HTTP 200. Same operator news and stability caveat as #3. The observed configuration is used instead of older inconsistent test-page summaries. |
+| `hackgreen_hf` — Nantwich, Cheshire, UK | [Hack Green HF](http://hackgreensdr.org:8901/) | 160m, 80m, 60m, 40m, 20m, 17m. Own page identifies the former RAF Hack Green site; page and [configuration](http://hackgreensdr.org:8901/tmp/bandinfo.js): HTTP 200. |
+| `hackgreen_vhf` — Nantwich, Cheshire, UK | [Hack Green VHF/UHF](http://hackgreensdr.org:8902/) | 70cm, 2m, 4m, 10m, 6m. Own page and [configuration](http://hackgreensdr.org:8902/tmp/bandinfo.js): HTTP 200. The HF and VHF services are distinct exact ports, not duplicate links. |
+| `sk4ko` — Mora, Sweden | [SK4KO HF](http://websdr.sk4ko.com:8901/) | 160m, 80m, 40m, 20m, 15m, 10m. [Club announcement](https://www.sk4ko.com/new/index.php/home/nyheter/196-new-hf-websdr-online), own page, and [configuration](http://websdr.sk4ko.com:8901/tmp/bandinfo.js). HTML/configuration: HTTP 200. No separate offline VHF/UHF endpoint added. |
+| `k3fef` — Milford, Pennsylvania, USA | [K3FEF / W3TKP Radio Ranch](http://k3fef.com:8901/) | HF. Own page names Milford; page and [configuration](http://k3fef.com:8901/tmp/bandinfo.js): HTTP 200. The operator also links a separate UberSDR service; that different protocol is not imported. |
+| `so8oo` — Southeastern Poland, KN09vw | [SO8OO](https://sdr.so8oo.net/) | VLF, 160m, 80m, 60m, 40m, 20m, 10m, QO-100. Own public operator page retrieved through web lookup explicitly lists these labels and location. No numeric band edges or audio test claimed. |
+| `dk0te` — Friedrichshafen, Germany, JN47RP | [DK0TE](http://dk0te.dhbw-ravensburg.de:8901/) | 160m, 80m-CW, 80m, 40m, 30m, 20m, 15m, 10m. Own page and [configuration](http://dk0te.dhbw-ravensburg.de:8901/tmp/bandinfo.js): HTTP 200. Configuration includes separate narrow windows and an additional 160m label beyond older introductory prose. |
+| `dk1ml` — Near Frankfurt/Main, Germany | [DK1ML](http://websdr.homeip.net:8901/) | 160m, 80m, 60m, 40m, 20m, 6m, 2m, 70cm, 23cm, QO-100. [Operator's announcement on F05 club site](https://f05.de/2025/11/05/das-neue-websdr-von-dk1ml/) identifies these labels and the endpoint. The receiver HTML returned HTTP 200 and identifies DK1ML/Frankfurt. |
+| `itapeva` — Fazenda São Francisco, Itapeva, São Paulo, Brazil | [Itapeva](http://itapeva.websdr.com.br:8901/) | 160m, 80m, 40m, 30m, 20m, 15m, 12m, 10m. Independent operator-network location; individual HTML and [configuration](http://itapeva.websdr.com.br:8901/tmp/bandinfo.js): HTTP 200. Current configuration labels, not the network's older shorter band summary, are retained. |
+| `itajai_vhf` — Itajaí, Santa Catarina, Brazil | [Itajaí VHF](http://itajai.sdr.net.br:8083/) | VHF LO, VHF HI. Own page explicitly names Itajaí/SC/Brazil; page and [configuration](http://itajai.sdr.net.br:8083/tmp/bandinfo.js): HTTP 200. Only this responsive VHF endpoint is added. |
+| `orlandia` — Orlândia, São Paulo, Brazil | [Orlândia](http://orlandia.sdr.net.br:9001/) | 40m, 80m. Own page and [configuration](http://orlandia.sdr.net.br:9001/tmp/bandinfo.js): HTTP 200. The operator announces a future move to UberSDR; that future service is not presumed compatible. This current WebSDR entry needs re-review if the endpoint changes protocol. |
+| `paraibuna` — Paraibuna, São Paulo, Brazil | [Paraibuna](http://paraibuna.websdr.com.br:8901/) | 80m, 40m. Independent operator-network location; individual HTML and [configuration](http://paraibuna.websdr.com.br:8901/tmp/bandinfo.js): HTTP 200. Generic template buttons for additional bands are deliberately not represented as coverage. |
+| `py7nm` — Caruaru, Pernambuco, Brazil | [PY7NM](http://py7nmcaruarupe.ddns.net:81/) | 40m, 30m, VHF, 11m. Page identifies PY7NM; location corroborated by its independent operator network. HTML and [configuration](http://py7nmcaruarupe.ddns.net:81/tmp/bandinfo.js): HTTP 200. Exact reviewed HTTP port is **81**, not 80 or 8901. |
+| `pu3alk` — Porto Lucena, Rio Grande do Sul, Brazil | [PU3ALK](http://pu3alk.com.br:9001/) | 80m, 40m, 10m. Own page explicitly names PU3ALK/Porto Lucena/RS; page and [configuration](http://pu3alk.com.br:9001/tmp/bandinfo.js): HTTP 200. |
+| `volta_redonda` — Volta Redonda, Rio de Janeiro, Brazil, GG77XM | [Volta Redonda](http://websdr.dynv6.net:8901/) | 40m, 15m, 2m-L, 2m-H. Own page names the location; page and [configuration](http://websdr.dynv6.net:8901/tmp/bandinfo.js): HTTP 200. The separate OpenWebRX link on that page is not included. |
+| `pocos_caldas` — Poços de Caldas, Minas Gerais, Brazil | [CRAPOCA](http://crapoca.websdr.com.br:8901/) | 40m, 10/11m. Independent operator-network identity/location; individual HTML and [configuration](http://crapoca.websdr.com.br:8901/tmp/bandinfo.js): HTTP 200. Older network references to 80m are not carried into this two-band snapshot. |
+| `lz2kac` — Gabrovo, Bulgaria | [LZ2KAC](http://websdr.lz2kac.org:8901/) | 2m only. Own page title explicitly names LZ2KAC/Gabrovo/Bulgaria; page and [configuration](http://websdr.lz2kac.org:8901/tmp/bandinfo.js): HTTP 200. |
+| `sv8fxn` — Naxos Island, Greece | [SV8FXN](http://sv8fxn-naxos.ddns.net:8901/) | 40m, 80m, 160m, MW. Own page names Naxos Island; page and [configuration](http://sv8fxn-naxos.ddns.net:8901/tmp/bandinfo.js): HTTP 200. |
+
+## Deliberate exclusions and transport boundaries
+
+- `www.websdr.at` redirected to `allhau-0.websdr.at`, whose retrieved page was a login redirect shell rather than a verified WebSDR UI. It is **not** in the catalog or HTTP allowlist. No login was attempted.
+- The Itajaí HF endpoint on port 8082 timed out; it was not added. Apiaí and Crejas checks did not establish a usable operator page, so they were not padded into the list. An Andorra endpoint returned an upstream failure and was not added.
+- Farnham's old receiver was reported closed, and EA1URA's current page describes a different OpenWebRX+ service. Neither is admitted as classical WebSDR.
+- The separate BATC QO-100 narrowband page/configuration was reachable, but this change does not introduce an unverified >500 MHz digital-tuner range from a band label or satellite band plan. Its standalone entry is deferred.
+- KiwiSDR's directory key and exact `kiwisdr.com` host family, including proxy subdomains and IDNA-normalized equivalents, are rejected. Arbitrary custom-host SDR servers cannot be classified from their URL alone; an unrelated hostname merely containing the text “kiwi” is not blanket-blocked.
+- Eighteen new HTTP endpoints have exact reviewed `(hostname, port)` entries. HTTP still requires explicit unencrypted-transport consent in the UI. The sole new HTTPS endpoint is SO8OO. This change adds no wildcard, arbitrary import-to-embedded promotion, automatic audio connection, or default-port permission for Allhau.
+- Public-only URL validation, credential rejection, and private/local-address checks are preserved. Directory parsing is still untrusted and does not confer curated frequency ranges or origin permissions.
+
+## Offline regression coverage
+
+`tests/test_websdr_expansion.py` checks the 37-entry catalog/19-entry expansion, unique IDs/URLs, source/date/availability wording, current labels rather than generic templates, exact reviewed HTTP origins, fresh returned records, untrusted-data isolation, retired Kiwi provider/host/proxy rejection, and preserved unsafe-URL rejection. These tests do not assert Windows rendering, receiver audio, or perpetual availability.

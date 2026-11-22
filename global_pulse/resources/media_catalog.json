@@ -238,20 +238,6 @@
       "last_verified": "2026-11-08",
       "description": "Listen-only links. Receiver pages open externally. Radio claims remain unverified.",
       "rights": "No recording, retransmission, reframing, private receivers or encrypted communications."
-    },
-    {
-      "id": "kiwisdr",
-      "title": "KiwiSDR public receiver directory",
-      "provider": "KiwiSDR",
-      "type": "radio",
-      "group": "World",
-      "region": "Global",
-      "url": "https://kiwisdr.com/public/",
-      "live_status": "receiver dependent",
-      "availability": "public directory; not individually checked",
-      "last_verified": null,
-      "description": "Browse publicly listed receivers and follow their access rules.",
-      "rights": "No recording, retransmission or access-control bypass."
     }
   ]
 }
