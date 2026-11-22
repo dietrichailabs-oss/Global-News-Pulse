@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_owner_night_category_filter_canonical.py tests/test_owner_night_stability_map.py tests/test_ui_desktop.py tests/test_issue37_country_owner_video.py tests/test_issue22_situation_stars.py tests/test_issue22_filtered_star_binding.py tests/test_nws_zone_resolution.py tests/test_issue31_tv_basic_player.py tests/test_tv_pending_timeout.py tests/test_issue22_map_pipeline.py
+          python -m pytest -q --tb=short tests/test_owner_night_category_filter_canonical.py tests/test_owner_night_stability_map.py tests/test_ui_desktop.py tests/test_issue37_country_owner_video.py tests/test_issue22_situation_stars.py tests/test_issue22_filtered_star_binding.py tests/test_nws_zone_resolution.py tests/test_youtube_removal.py  tests/test_issue22_map_pipeline.py
       - name: Verify tracked source clean after tests
         if: always()
         shell: bash

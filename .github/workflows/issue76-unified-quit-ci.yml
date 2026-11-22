@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_issue76_quit_paths.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue31_tv_basic_player.py tests/test_issue37_country_owner_video.py tests/test_issue21_sdr_owner_controls.py tests/test_issue22_owner_media_lineup.py tests/test_issue22_situation_stars.py tests/test_issue74_row_lifetime.py tests/test_ui_desktop.py tests/test_owner_feedback_qa_repairs.py
+          python -m pytest -q --tb=short tests/test_issue76_quit_paths.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_youtube_removal.py tests/test_issue37_country_owner_video.py tests/test_issue21_sdr_owner_controls.py tests/test_issue22_owner_media_lineup.py tests/test_issue22_situation_stars.py tests/test_issue74_row_lifetime.py tests/test_ui_desktop.py tests/test_owner_feedback_qa_repairs.py
           echo "FOCUSED_PYTHON_NATIVE_EXIT=0"
       - name: Check tracked source cleanliness
         if: always()

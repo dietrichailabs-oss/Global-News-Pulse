@@ -30,12 +30,15 @@ class NativeNotifications(QObject):
         self._inflight = {}
         self._attempted = deque(maxlen=256)
         self._stopped = False
+        self._closing = False
         self._restart_after_async_stop = False
         self._queue_timer = QTimer(self)
         self._queue_timer.setInterval(1000)
         self._queue_timer.timeout.connect(self._flush)
 
     def start(self):
+        if self._closing:
+            return
         if not self.enabled:
             self._status("Synthetic mode · Windows notifications disabled")
             return
@@ -241,6 +244,44 @@ class NativeNotifications(QObject):
     def _kill_disabled(self, process):
         if self.process is process and self._stopped and process.state() != QProcess.ProcessState.NotRunning:
             process.kill()
+
+    def begin_close(self):
+        """Cancel this owned helper without a GUI-thread process wait.
+
+        Return final history updates for the archive finalizer; emitting them
+        synchronously here would put SQLite back on the tray click path.
+        This is permanent shutdown, unlike the reversible opt-out path.
+        """
+        self._closing = True
+        self._restart_after_async_stop = False
+        self._stopped = True
+        self.ready = False
+        self._queue_timer.stop()
+        outcomes = []
+        while self._pending:
+            event, _, _ = self._pending.popleft()
+            outcomes.append((event["_alert_id"],
+                             "Application exited before native submission; retained in history"))
+        outcomes.extend((alert_id,
+                         "Application exited before native acknowledgement; submission outcome unknown; retained in history")
+                        for alert_id in self._inflight)
+        self._inflight.clear()
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            # The bridge owns no archive writes. Do not serialize a 3-second
+            # graceful wait and two more escalation waits on explicit Exit.
+            process.kill()
+        return outcomes
+
+    def close_ready(self):
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            return False
+        if process:
+            self.process = None
+            process.deleteLater()
+        self._buffer = b""
+        return True
 
     def stop(self):
         self._restart_after_async_stop = False

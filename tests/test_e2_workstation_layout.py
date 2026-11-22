@@ -1,4 +1,4 @@
-"""Real Qt layout, controls and inert four-tile media integration; no live playback."""
+"""Real Qt layout, controls and inert radio/camera integration; no live playback."""
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from global_pulse.controller import Controller
 from global_pulse.ui import MainWindow
-from global_pulse.media_widget import MediaPanel
+from global_pulse.camera_context import camera_catalog
 
 @pytest.fixture
 def workstation(tmp_path):
@@ -29,8 +29,9 @@ def test_default_404020_composition_and_stacked_sidebar(workstation):
     assert .37 < sizes[1]/total < .43
     assert .17 < sizes[2]/total < .23
     assert w.intel_stack.count()==3
-    assert len(w.media.tiles)==4
-    assert w.media.grid.rowCount()==2 and w.media.grid.columnCount()==2
+    assert w.media.tiles==[w.media.camera]
+    assert [w.media.tabs.tabText(i) for i in range(w.media.tabs.count())]==["Radio","Cameras"]
+    assert w.media.tabs.currentWidget() is w.media.radio
     assert w.map_overlay.isVisible() and len(w.layer_checks)>=5
     assert w.map_overlay.mapTo(w.world_map.parentWidget(),w.map_overlay.rect().topLeft()).x()<20
 
@@ -49,41 +50,51 @@ def test_persistent_layer_controls_and_compact_time_controls(workstation):
     assert all(check.isChecked() for check in w.layer_checks.values())
 
 def test_four_tiles_do_not_autoconnect_and_stop_on_replacement(workstation,monkeypatch):
+    # Keep the historical test ID/deselection while matching the current
+    # single reviewed-camera tile, not the retired four-video layout.
     app,w,c=workstation
     items=[dict(url=f"https://www.youtube.com/watch?v=ABCDEF{i:05d}",title=f"Fixture {i}",provider="Synthetic fixture",type="youtube") for i in range(4)]
-    w.media.set_catalog([]);w.media.set_event({"media":items})
+    event=dict(id="park",title="Grand Canyon wildfire",status="active",severity="high",media=items)
+    w.media.set_event(event)
     for tile in w.media.tiles:
-        assert tile.view is None and tile.profile is None
-        assert tile.selector.count()==1
+        assert tile.camera is None and tile.radio_view is None
+        assert not hasattr(tile,"view") and not hasattr(tile,"profile")
+        assert tile.selector.count()==len(camera_catalog())
     # Unchanged refresh must not interrupt an explicitly chosen player.
     stops=[]
     for i,tile in enumerate(w.media.tiles):
         monkeypatch.setattr(tile,"stop",lambda index=i:stops.append(index))
-    w.media.set_event({"media":items})
+    w.media.set_event(event)
     assert stops==[]
     w.media.set_event(None)
-    assert set(stops)==set(range(4))
+    assert set(stops)=={0}
 
 def test_category_controls_keep_original_links_and_honest_empty_states(workstation):
     app,w,c=workstation
-    w.media.set_catalog([
-        {"url":"https://camera.example.org/","title":"Public camera directory","type":"webcam"},
-        {"url":"https://radio.example.org/","title":"Public radio","type":"radio"},
-    ])
-    w.media._filter("Radio")
-    assert w.media.tiles[0]._current()["url"]=="https://radio.example.org/"
-    assert all(not t.view for t in w.media.tiles)
-    assert all(not t._current() for t in w.media.tiles[1:])
-    assert "not connected" in w.media.tiles[0].display.text().lower()
+    assert [w.media.tabs.tabText(i) for i in range(w.media.tabs.count())]==["Radio","Cameras"]
+    w.media.set_event({"id":"uncovered","title":"No named reviewed area","status":"active"})
+    tile=w.media.camera
+    assert {tile.selector.itemData(i)["url"] for i in range(tile.selector.count())}=={
+        entry["url"] for entry in camera_catalog()}
+    assert tile.camera is None and tile.radio_view is None
+    assert "none match selected event" in w.media.camera_status.text()
+    assert "not connected" in tile.display.text().lower()
 
 def test_media_watch_declined_never_constructs_player(workstation,monkeypatch):
     app,w,c=workstation
-    tile=w.media.tiles[0];tile.media=[{"url":"https://www.youtube.com/watch?v=abcdefghijk","title":"Synthetic player test"}];tile.catalog=[];tile._populate()
+    tile=w.media.camera
+    assert tile._current()["id"] in {entry["id"] for entry in camera_catalog()}
     calls=[]
-    monkeypatch.setattr(QMessageBox,"question",lambda *a,**k:QMessageBox.StandardButton.No)
-    monkeypatch.setattr(tile,"_ensure_player",lambda:calls.append("connect"))
+    def decline(*args,**kwargs):
+        calls.append(args[1])
+        return QMessageBox.StandardButton.No
+    monkeypatch.setattr(QMessageBox,"question",decline)
+    monkeypatch.setattr("global_pulse.camera_snapshot.CameraSnapshot",
+                        lambda *a,**k:pytest.fail("declined camera consent must not create a connection"))
     tile.watch()
-    assert calls==[] and tile.view is None
+    assert calls==["Connect to public camera?"]
+    assert tile.camera is None and tile.radio_view is None and tile.radio_profile is None
+    assert not hasattr(tile,"view") and not hasattr(tile,"_ensure_player")
 
 def test_sidebar_values_come_from_selected_event(workstation):
     app,w,c=workstation

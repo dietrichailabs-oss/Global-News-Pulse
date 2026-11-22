@@ -42,8 +42,9 @@ def test_catalog_has_reviewed_free_core_and_explicit_restrictions():
     assert len(catalog) >= 20
     assert all(s['access_status'] == 'reviewed_public' for s in catalog if s['enabled'])
     assert len({s['region'] for s in catalog if s['enabled']}) >= 4
-    for key in ['bbc','reliefweb','x','facebook','tousitv']:
+    for key in ['bbc','reliefweb','x','facebook']:
         assert not next(s for s in catalog if s['id'] == key)['enabled']
+    assert not {'youtube', 'tousitv'} & {s['id'] for s in catalog}
     assert any(s['adapter'] == 'worldbank' and s['min_interval'] >= 86400 for s in catalog)
 
 

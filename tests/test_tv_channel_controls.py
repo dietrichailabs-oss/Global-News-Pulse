@@ -1,8 +1,9 @@
 import pytest
+from urllib.parse import urlsplit
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from global_pulse.core import Store
-from global_pulse.media_widget import MediaPanel, youtube_id
+from global_pulse.media_widget import MediaPanel
 from global_pulse.sources import load_media_catalog
 
 
@@ -11,7 +12,7 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def _entry(identity, group, *, kind="video"):
+def _entry(identity, group, *, kind="link"):
     return {
         "id": identity,
         "title": identity.upper(),
@@ -25,7 +26,7 @@ def _entry(identity, group, *, kind="video"):
     }
 
 
-def test_tv_channel_catalog_has_requested_banks_and_worldwide_sources():
+def test_provider_catalog_keeps_nonvideo_links_and_worldwide_radio_sources():
     catalog = load_media_catalog()
     groups = {}
     for item in catalog:
@@ -33,41 +34,41 @@ def test_tv_channel_catalog_has_requested_banks_and_worldwide_sources():
         assert str(item.get("url", "")).startswith("https://")
         assert item.get("rights")
         assert item.get("availability")
+        host = (urlsplit(item["url"]).hostname or "").casefold()
+        assert not any(host == domain or host.endswith("." + domain)
+                       for domain in ("youtube.com", "youtube-nocookie.com", "youtu.be"))
+        assert item["type"] in {"link", "radio", "webcam"}
+        if item["type"] == "link":
+            assert "external provider page only" in item["availability"].casefold()
+            assert "no in-app video playback" in item["availability"].casefold()
 
-    assert len(groups.get("News", [])) >= 4
-    assert len(groups.get("Markets", [])) >= 4
-    assert len(groups.get("Weather", [])) >= 3
+    assert len(groups.get("News", [])) >= 6
+    assert len(groups.get("Markets", [])) >= 3
+    assert len(groups.get("Weather", [])) >= 4
 
     ids = {item["id"] for item in catalog}
     assert {
-        "associated_press",
-        "bbc_news",
-        "nbc_news_now",
-        "france24_en",
-        "dw_news",
-        "trt_world",
         "aljazeera_en",
         "cna",
         "africanews",
         "globalnews_ca",
+        "cbs_news_247",
+        "abc_news_live",
         "bloomberg_tv",
-        "schwab_network",
         "yahoo_finance",
+        "cnbc_live",
         "fox_weather",
         "accuweather_now",
         "weathernation",
+        "weather_channel",
+        "un_video",
+        "nps_air",
+        "nps_oceans",
+        "websdr",
     } <= ids
-
-    ap = next(item for item in catalog if item["id"] == "associated_press")
-    assert "commercial" in ap["description"].lower()
-    assert "authorization" in ap["rights"].lower()
-
-
-def test_direct_official_youtube_live_entries_remain_embed_parseable():
-    catalog = {item["id"]: item for item in load_media_catalog()}
-    assert youtube_id(catalog["nbc_news_now"]["url"]) == "yDOkVG1uytM"
-    assert youtube_id(catalog["france24_en"]["url"]) == "Ap-UM1O9RBU"
-    assert youtube_id(catalog["trt_world"]["url"]) == "ABfFhWzWs0s"
+    assert "kiwisdr" not in ids
+    assert not ids.intersection({"associated_press", "bbc_news", "nbc_news_now",
+                                 "france24_en", "dw_news", "trt_world", "schwab_network"})
 
 
 def test_each_media_tile_can_channel_up_down_across_whole_bank(app):
@@ -120,36 +121,19 @@ def test_channel_bank_filters_and_resets_media_kind_filter(app):
     panel.close()
 
 
-def test_channel_change_never_autostarts_playback(app):
+def test_channel_change_never_autostarts_playback(app, monkeypatch):
     panel = MediaPanel()
-    panel.set_catalog([
-        {
-            "id": "one",
-            "title": "One",
-            "provider": "Synthetic",
-            "type": "video",
-            "group": "News",
-            "region": "Global",
-            "url": "https://www.youtube.com/watch?v=yDOkVG1uytM",
-            "availability": "test",
-            "rights": "test",
-        },
-        {
-            "id": "two",
-            "title": "Two",
-            "provider": "Synthetic",
-            "type": "video",
-            "group": "News",
-            "region": "Global",
-            "url": "https://www.youtube.com/watch?v=Ap-UM1O9RBU",
-            "availability": "test",
-            "rights": "test",
-        },
-    ])
+    panel.set_catalog([_entry("one", "World", kind="radio"),
+                       _entry("two", "World", kind="radio")])
+    panel.bank_combo.setCurrentText("World")
     tile = panel.tiles[0]
-    assert tile.view is None
-    tile.select_relative(1)
-    assert tile.view is None
+    monkeypatch.setattr(tile, "_ensure_radio_player",
+                        lambda *_: pytest.fail("channel selection must not connect"))
+    assert tile.radio_view is None and tile.radio_profile is None and tile.camera is None
+    assert tile.select_relative(1)
+    assert tile._current()["id"] == "two"
+    assert tile.radio_view is None and tile.radio_profile is None and tile.camera is None
+    assert not hasattr(tile, "view") and not hasattr(tile, "_ensure_player")
     assert "not connected" in tile.display.text().lower()
     panel.close()
 
@@ -170,6 +154,27 @@ def _radio(identity, receiver, frequency, mode):
         "frequency": frequency,
         "mode": mode,
     }
+
+
+def test_receiver_identity_metadata_survives_but_retired_service_url_is_rejected(app):
+    panel = MediaPanel()
+    ordinary = _radio("ordinary", "rx-a", "101.7", "FM")
+    retired = _radio("retired", "https://www.youtube.com/watch?v=abcdefghijk", "101.7", "FM")
+    panel.set_catalog([ordinary, retired])
+    panel._filter("Radio")
+    entries = [tile.selector.itemData(index) for tile in panel.tiles
+               for index in range(tile.selector.count()) if tile.selector.itemData(index)]
+    assert entries == [ordinary]
+    assert panel.save_radio_preset(0)
+    assert panel.radio_presets[0]["receiver"] == "rx-a"
+    assert panel.recall_radio_preset(0)
+    assert panel._radio_current_item()["id"] == "ordinary"
+    with pytest.raises(ValueError, match="HTTPS"):
+        panel.tiles[0]._connect_radio_receiver("rx-a")
+    with pytest.raises(ValueError, match="not a supported public radio receiver"):
+        panel.tiles[0]._connect_radio_receiver(retired["receiver"])
+    assert panel.tiles[0].radio_view is None
+    panel.close()
 
 
 def test_radio_presets_persist_receiver_frequency_mode_and_recall(app):

@@ -14,7 +14,14 @@ GitHub handoff before testing. Do not disable Windows security to make it run.
 On the first normal launch, choose interests and whether to start public-source
 monitoring. No API key or paid account is required for enabled default sources.
 Opening a media player is a separate consented connection to its provider; the
-four tiles do not load remote media merely because they are visible.
+Radio and Cameras tabs do not load remote media merely because they are visible.
+Radio is the default tab. YouTube playback, the TV tab and native TV helper have
+been removed from this R20 candidate.
+
+For complete physical removal of an older installed TV helper, close Pulse,
+uninstall the old version, then run this installer. An overlay install can leave
+unused old program files. The normal uninstaller preserves the separate user
+settings/archive directory. A fresh portable extraction also contains no TV helper.
 
 Closing the dashboard normally hides it in the system tray. Double-click the
 purple radar icon to reopen it. **Exit Completely** in the tray menu stops the
@@ -43,7 +50,7 @@ are not shipped in this runtime. Normal startup contains no synthetic headlines.
 ## First checks
 
 Verify the upper map, persistent left-side category/time controls, lower news feed,
-four consent-gated media tiles, and narrow stacked intelligence sidebar. Panels
+Radio/Cameras media panel, and narrow stacked intelligence sidebar. Panels
 can be resized. Reset Layout restores the E2 defaults; an upgraded user profile
 may retain its previously saved panel arrangement.
 

@@ -14,7 +14,6 @@ from PySide6.QtWidgets import QApplication
 from global_pulse.controller import Controller
 from global_pulse.ui import MainWindow, EconomicChart
 from global_pulse.__main__ import show_initializing,prepare_initial_dashboard
-from global_pulse.single_media import Television
 
 
 @pytest.fixture(scope="session")
@@ -64,7 +63,8 @@ def test_initial_splash_drains_cold_headlines_and_prepares_all_tabs(app,tmp_path
         assert not c._headlines.deferred_timer.isActive()
         assert not (w._dirty_pages & set(range(1,6)))
         assert w.pages.currentIndex()==0
-        assert w.media.tv._requested is False
+        assert not hasattr(w.media, "tv")
+        assert w.media.camera.camera is None
         assert w.media.radio.receiver_connected is False
         assert splash.isVisible()
         w.show()
@@ -111,67 +111,6 @@ def test_second_tab_roundtrip_does_not_refetch_prepared_workspaces(app,tmp_path,
         c.close()
         if w is not None:w.deleteLater()
         if splash is not None:splash.close();splash.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-def test_video_diagnostic_does_not_call_black_picture_playing(app):
-    tv=Television()
-    try:
-        tv._requested=True
-        tv._player_loaded=True
-        tv._last_time=2.0
-        payload={
-            "time":3.0, "paused":False,"ready":4,"network":1,
-            "video_width":0,"video_height":0,"frames":0,
-            "controls_visible":False,
-            "codecs":{"h264":"","vp9":"probably","av1":"maybe"}
-        }
-        tv._observed(tv._generation,payload)
-        assert tv.tv_status.text()=="NO DECODED FRAMES · black video suspected"
-        assert "H.264 not reported" in tv.note.text()
-        assert "VP9 probably" in tv.note.text()
-        assert "YouTube controls hidden" in tv.note.text()
-        assert tv._had_playback is False
-        tv._observed(tv._generation,{
-            **payload,"time":4.0,"video_width":1920,
-            "video_height":1080,"frames":10
-        })
-        assert tv.tv_status.text()=="VIDEO TIME ADVANCING · picture unverified"
-        assert tv._had_playback is True
-        assert "NOT confirmed" in tv.note.text()
-    finally:
-        tv.stop();tv.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-@pytest.mark.parametrize("code,label",[
-    (2,"network"),(3,"decoder"),(4,"unsupported media")
-])
-def test_player_media_error_code_is_visible_not_playing(app,code,label):
-    tv=Television()
-    try:
-        tv._requested=True
-        tv._observed(tv._generation,{"error_code":code})
-        assert label in tv.tv_status.text()
-        assert not tv._requested
-        assert "code "+str(code) in tv.note.text()
-    finally:
-        tv.stop();tv.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-def test_renderer_exit_reports_real_browser_failure(app):
-    tv=Television()
-    try:
-        tv._requested=True
-        tv._renderer_terminated(None,3)
-        assert tv.tv_status.text().startswith("RENDERER EXITED")
-        assert not tv._requested
-    finally:
-        tv.stop();tv.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         app.processEvents()
 
@@ -238,7 +177,8 @@ def test_splash_primes_real_size_first_economy_paint_before_interaction(
         assert world._projected_view_key == (
             world.width(), world.height(), world.zoom, world.pan_x, world.pan_y
         )
-        assert w.media.tv._requested is False
+        assert not hasattr(w.media, "tv")
+        assert w.media.camera.camera is None
         assert w.media.radio.receiver_connected is False
     finally:
         if w is not None:

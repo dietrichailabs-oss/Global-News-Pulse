@@ -1,4 +1,4 @@
-"""Issue76 owner Windows failures: opt-in HAM receiver, TV and tab responsiveness.
+"""Issue76 owner Windows failures: opt-in HAM receiver and tab responsiveness.
 
 All media tests are intentionally offline: they verify correct policy/selection,
 source identities and truthful UI state, not actual audio/video playback.
@@ -18,9 +18,6 @@ from global_pulse.internet_radio import (
     RadioPanel, OWNER_TEST_WEBDR_ORIGIN, _owner_legacy_websdr,
 )
 from global_pulse.sdr_directory import public_receiver_url
-from global_pulse.single_media import Television
-from global_pulse.sources import load_media_catalog
-from global_pulse.media_widget import youtube_id, youtube_player_navigation
 from global_pulse.ui import MainWindow
 
 
@@ -41,9 +38,7 @@ def test_exact_public_na5b_origin_has_consent_only_embedded_test(app):
         assert url=="http://na5b.com:8901/?tune=7100usb"
         assert host=="na5b.com"
         assert receiver.sdr_state=="OFF"
-        receiver.receiver_type.setCurrentIndex(
-            receiver.receiver_type.findData("kiwi")
-        )
+        receiver.receiver_type.setCurrentIndex(-1)  # No supported protocol.
         assert not receiver.receiver_connect.isEnabled()
         with pytest.raises(ValueError):
             receiver._receiver_target()
@@ -98,51 +93,6 @@ def test_na5b_consent_is_required_before_any_webengine_request(app,monkeypatch):
     finally:
         receiver.shutdown()
         receiver.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-def test_owner_and_official_video_candidates_carry_no_playback_claim(app):
-    ids={"Hz1cNNgtLtM","Y4M0i8HT7mc","gTpn5Whu2ao",
-         "t7OUAw1LNBc","HvZt-nh9sGg"}
-    catalog=load_media_catalog()
-    indexed={youtube_id(row.get("url","")):row for row in catalog}
-    assert ids.issubset(indexed)
-    for identity in ids:
-        item=indexed[identity]
-        assert "NOT verified" in item["availability"] or "not verified" in item["availability"].lower()
-        assert item["url"].startswith("https://www.youtube.com/watch?v=")
-        assert "rights" in item and "player" in item["rights"].lower() or "embed" in item["rights"].lower()
-    tv=Television()
-    try:
-        tv.set_catalog(catalog)
-        options={youtube_id(row["url"]) for row in tv._test_candidates}
-        assert ids.issubset(options)
-        assert len(tv._builtins)==0
-        assert not tv._requested
-    finally:
-        tv.stop()
-        tv.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-def test_youtube_provider_error_overrides_loaded_page(app):
-    tv=Television()
-    try:
-        tv._requested=True
-        tv._tv_load_finished(True)
-        assert "NOT verified" in tv.tv_status.text()
-        assert "PLAYING" not in tv.tv_status.text()
-        tv._observed(tv._generation,{
-            "provider_error":"Video unavailable. This live stream recording is not available."
-        })
-        assert tv.tv_status.text().startswith("UNAVAILABLE")
-        assert not tv._requested
-        assert "Open on YouTube" in tv.note.text()
-    finally:
-        tv.stop()
-        tv.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         app.processEvents()
 
@@ -223,42 +173,3 @@ def test_native_tray_has_single_click_context_fallback():
     assert "menu.popup(QCursor.pos())" in source
     assert "tray.setContextMenu(menu)" in source
     assert "controller.notification_changed.emit()" in source
-
-
-def test_youtube_official_watch_mode_allows_only_selected_video(app):
-    identity="Hz1cNNgtLtM"
-    embed=f"https://www.youtube.com/embed/{identity}?autoplay=0"
-    watch=f"https://www.youtube.com/watch?v={identity}&t=30"
-    assert youtube_player_navigation(embed,identity)
-    assert not youtube_player_navigation(watch,identity)
-    assert youtube_player_navigation(watch,identity,full_watch=True)
-    assert not youtube_player_navigation(
-        "https://www.youtube.com/watch?v=Y4M0i8HT7mc",
-        identity,full_watch=True
-    )
-    assert not youtube_player_navigation(
-        "https://www.youtube.com/redirect?q=https://evil.example.org",
-        identity,full_watch=True
-    )
-    assert not youtube_player_navigation(
-        f"http://www.youtube.com/watch?v={identity}",
-        identity,full_watch=True
-    )
-    assert not youtube_player_navigation(
-        f"https://evil.example.org/watch?v={identity}",
-        identity,full_watch=True
-    )
-    assert not youtube_player_navigation(
-        f"https://www.youtube.com:8443/watch?v={identity}",
-        identity,full_watch=True
-    )
-    tv=Television()
-    try:
-        assert tv.full_watch_button is not None
-        assert "YouTube watch page" in tv.full_watch_button.text()
-        assert tv._requested is False
-    finally:
-        tv.stop()
-        tv.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()

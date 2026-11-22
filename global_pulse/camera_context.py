@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def camera_catalog():
-    return json.loads((Path(__file__).with_name('resources')/'context_cameras.json').read_text())['entries']
+    return json.loads((Path(__file__).with_name('resources')/'context_cameras.json').read_text(encoding='utf-8'))['entries']
 
 
 def _words(value):

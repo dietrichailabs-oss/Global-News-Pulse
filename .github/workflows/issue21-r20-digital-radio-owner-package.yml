@@ -1,20 +1,15 @@
-name: Windows Owner-Test Package - Issue31 TV Player Proof
+name: Issue21 R20 curated global media — owner-test artifacts
 
 on:
   push:
-    branches: [eng/issue31-tv-basic-playback-proof-20261113]
-    paths:
-      - '.github/workflows/issue31-tv-owner-package.yml'
-      - 'global_pulse/single_media.py'
-      - 'global_pulse/media_widget.py'
-      - 'tests/test_issue31_tv_basic_player.py'
+    branches: [eng/issue21-r20-digital-radio-20261119]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-owner-test-issue31-tv
+  group: issue21-r20-digital-radio-exact
   cancel-in-progress: true
 
 jobs:
@@ -45,13 +40,6 @@ jobs:
         --deselect=tests/test_official_feed_batch.py::test_integrated_catalog_adds_only_completed_live_passes
         --deselect=tests/test_official_feed_batch2.py::test_batch2_frozen_catalog_preserves_baseline_and_appends_exact_candidates_once
         --deselect=tests/test_gdelt_named_schema.py::test_prior_parent_is_correct_and_rejected_parser_reproduces_real_schema_failure
-        --deselect=tests/test_source_expansion_ecb.py::test_admitted_publisher_group_and_metadata_constraints
-        --deselect=tests/test_source_expansion_ecb.py::test_rss_metadata_only_and_original_publisher_link
-        --deselect=tests/test_source_expansion_mid.py::test_mid_is_keyless_metadata_only_and_one_ecb_origin
-        --deselect=tests/test_source_expansion_mid.py::test_mid_original_xml_link_and_body_media_exclusion
-        --deselect=tests/test_source_expansion_nl_za.py::test_source_catalog_contract_and_provenance
-        --deselect=tests/test_source_expansion_nl_za.py::test_sibling_feeds_share_origin_not_report_identity
-        --deselect=tests/test_source_expansion_open_feeds.py::test_second_batch_is_metadata_only_and_publisher_grouped
         --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_catalog_is_exact_41_plus_two
         --deselect=tests/test_official_feed_batch4_frozen.py::test_frozen_batch4_receipts_match_original_completed_job_identity
         --ignore=tests/test_official_feed_receipt_recovery.py
@@ -63,23 +51,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Confirm exact owner-tested SDR parent and issue31-only changes
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git merge-base --is-ancestor b1d599d1b7cb29d26457e5c54ca2b4153580e244 HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Exact owner-tested SDR parent is not an ancestor' }
-          $changed = @(git diff --name-only b1d599d1b7cb29d26457e5c54ca2b4153580e244..HEAD)
-          $allowed = @(
-            'global_pulse/single_media.py',
-            'global_pulse/media_widget.py',
-            'tests/test_issue31_tv_basic_player.py',
-            '.github/workflows/issue31-tv-basic-ci.yml',
-            '.github/workflows/issue31-tv-owner-package.yml'
-          )
-          $unexpected = @($changed | Where-Object { $allowed -notcontains $_ })
-          if ($unexpected.Count -gt 0) { throw ('Unexpected TV patch diff: ' + ($unexpected -join ', ')) }
-          Write-Host 'OWNER_SDR_PARENT=b1d599d1b7cb29d26457e5c54ca2b4153580e244'
-          Write-Host ('ISSUE31_CHANGED_PATHS=' + ($changed -join ', '))
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
@@ -87,6 +58,51 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.403'
+      - name: Verify stable SDK 10 selected before packaging
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dotnetVersion = (& dotnet --version).Trim()
+          Write-Host "SELECTED_DOTNET_SDK=$dotnetVersion"
+          if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') { throw 'Pinned SDK10 selection failed before package tests' }
+      - name: Require exact R20 parent and bounded curated media expansion
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git merge-base --is-ancestor 76b8164308dd2c8ca6da465e0df729c102715124 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Expected R20 original integration ancestor not found' }
+          $parent = (& git rev-parse HEAD^).Trim()
+          if ($parent -ne '87371db43236c4e223bd95249e243130bee7f1f8') { throw 'Unexpected curated-media expansion parent' }
+          $actual = @(git diff --name-only 87371db43236c4e223bd95249e243130bee7f1f8 HEAD)
+          $expected = @(
+            '.github/workflows/ci.yml',
+            '.github/workflows/issue21-r20-digital-radio-owner-package.yml',
+            'README.md',
+            'docs/ISSUE21_R20_DIGITAL_RADIO_OWNER_QA.md',
+            'docs/KNOWN_LIMITATIONS.md',
+            'docs/SOURCE_ACCESS_MATRIX.md',
+            'docs/USER_GUIDE.md',
+            'docs/WEBDR_OPERATOR_LINKS_20261121.md',
+            'docs/WORLD_CAMERA_SOURCES_20261121.md',
+            'global_pulse/camera_context.py',
+            'global_pulse/camera_snapshot.py',
+            'global_pulse/internet_radio.py',
+            'global_pulse/media_widget.py',
+            'global_pulse/resources/context_cameras.json',
+            'global_pulse/resources/media_catalog.json',
+            'global_pulse/sdr_directory.py',
+            'global_pulse/single_media.py',
+            'tests/test_camera_payload_admission.py',
+            'tests/test_global_camera_expansion.py',
+            'tests/test_issue21_sdr_owner_controls.py',
+            'tests/test_issue22_owner_media_lineup.py',
+            'tests/test_issue76_ham_tv_tray_tabs.py',
+            'tests/test_kiwi_removal.py',
+            'tests/test_r20_digital_radio.py',
+            'tests/test_r20_owner_radio_feedback.py',
+            'tests/test_tv_channel_controls.py',
+            'tests/test_websdr_expansion.py',
+            'tests/test_youtube_removal.py'
+          )
+          if (Compare-Object $expected $actual) { throw 'Unexpected source delta for owner-approved curated media expansion' }
       - name: Prepare reviewed Inno compiler
         run: |
           $ErrorActionPreference = 'Stop'
@@ -109,6 +125,14 @@ jobs:
           & .\scripts\build_windows.ps1 -Python $python -InnoCompiler $env:GP_INNO_COMPILER -OutputDirectory $output
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
           "GP_OUTPUT=$output" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify removed YouTube helper is absent from the packaged app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = Join-Path $env:GITHUB_WORKSPACE 'build\venv-windows\Scripts\python.exe'
+          $runtime = Join-Path $env:GITHUB_WORKSPACE 'dist\GlobalPulse'
+          if (Test-Path -LiteralPath (Join-Path $runtime 'tv')) { throw 'Retired TV payload remains in the package' }
+          & $python scripts/package_manifest.py verify $runtime
+          if ($LASTEXITCODE -ne 0) { throw 'YouTube-free package integrity verification failed' }
       - name: Offline installer lifecycle smoke
         run: |
           $ErrorActionPreference = 'Stop'
@@ -136,21 +160,46 @@ jobs:
             portable_zip_sha256 = (Get-FileHash -LiteralPath (Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-portable.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
             public_release = $false
             signing_performed = $false
-            purpose = 'private non-release Issue31 basic TV playback test; workflow artifact only'
+            purpose = 'private owner test; workflow artifact only'
           } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:GP_OUTPUT 'OWNER_TEST_RECEIPT.json') -Encoding utf8
           Write-Host "SETUP_EXE_SHA256=$exeSha"
           Write-Host "SETUP_ZIP_SHA256=$zipSha"
-      - name: Upload owner-test ZIPs
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Check ZIP contains exactly the one installer EXE
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.zip'
+          $exe = Join-Path $env:GP_OUTPUT 'GlobalPulse-0.1.1-E2-windows-x64-setup.exe'
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].Name -ne (Split-Path $exe -Leaf) -or $archive.Entries[0].Length -ne (Get-Item -LiteralPath $exe).Length) {
+              throw 'R20 owner ZIP is not a verified one-EXE ZIP'
+            }
+          } finally { $archive.Dispose() }
+          Write-Host 'R20_INSTALLER_ZIP_SINGLE_EXE=PASS'
+      - name: Upload R20 quick-test setup ZIP ONLY
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: global-news-pulse-issue31-tv-owner-test-${{ github.sha }}
+          name: GlobalPulse-R20-QUICK-TEST-SETUP-ONLY-${{ github.sha }}
+          path: ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-setup.zip
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload optional portable ZIP SEPARATELY
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: GlobalPulse-R20-PORTABLE-OPTIONAL-${{ github.sha }}
+          path: ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload receipts SEPARATELY
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: GlobalPulse-R20-RECEIPTS-${{ github.sha }}
           path: |
-            ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-setup.zip
-            ${{ env.GP_OUTPUT }}/GlobalPulse-0.1.1-E2-windows-x64-portable.zip
             ${{ env.GP_OUTPUT }}/OWNER_TEST_RECEIPT.json
             ${{ env.GP_OUTPUT }}/WINDOWS_BUILD_RECORD.json
             ${{ env.GP_OUTPUT }}/WINDOWS_SMOKE.json
+            ${{ env.GP_OUTPUT }}/internal-tests.xml
             ${{ env.GP_OUTPUT }}/SHA256SUMS.txt
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1

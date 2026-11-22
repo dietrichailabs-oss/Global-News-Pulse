@@ -76,20 +76,11 @@ TOP_FILES = {
     "KNOWN_LIMITATIONS.md", "SOURCE_ACCESS_MATRIX.md", "THIRD_PARTY_NOTICES.md",
     "LICENSE.txt", "MANIFEST.json", "SBOM.cdx.json",
 }
-TOP_DIRECTORIES = {"_internal", "notifications", "tv", "licenses"}
-# The TV subtree must not admit arbitrary nested folders or executable content.
-TV_LOCALE_FOLDER = re.compile(r"^[a-z]{2}(?:-[A-Za-z]{2,5})?$")
-TV_PUBLISHED_EXES = {"GlobalPulse.TV.exe", "createdump.exe"}
-TV_LICENSE_SUFFIXES = {".txt", ".md", ".rst", ".json", ".xml"}
-TV_LICENSE_BARE_NAMES = {"LICENSE", "NOTICE", "COPYING"}
-TV_REFERENCE_IDENTITIES = {
-    "microsoft.web.webview2.core/1.0.4314.35",
-    "microsoft.web.webview2.winforms/1.0.4314.35",
-    "microsoft.web.webview2.wpf/1.0.4314.35",
-}
-TV_PARENT = "Microsoft.Web.WebView2/1.0.4314.35"
-TV_NUGET_CONTENT_SHA512 = "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
-TV_ARCHIVE_SHA512 = "cOaiVqP3BmQHMnxGpZzANM22tUXgycrisyJHjIGNzIaMsm8iXj7Kx+ceYg+RbYwJtzT009qfcFTocvVLY+ekMw=="
+TOP_DIRECTORIES = {"_internal", "notifications", "licenses"}
+# Retired video components may not survive a dirty/repeated package build, even
+# if they are accidentally copied under an otherwise permitted runtime folder.
+RETIRED_VIDEO_BASENAMES = {"webview2loader.dll", "native_tv.py", "native_tv.pyc", "tv_playback_verified.json"}
+RETIRED_VIDEO_PREFIXES = ("globalpulse.tv.", "microsoft.web.webview2.")
 
 FORBIDDEN_PARTS = {
     ".git", ".github", ".venv", "venv", "tests", "test", "fixtures", "checkpoints",
@@ -170,37 +161,15 @@ def scan(root, *, require_complete=True):
     root=Path(root).resolve()
     if not root.is_dir():raise ValueError("Runtime package directory does not exist")
     errors=[];count=0;total=0
-    tv_license_files=set()
     for path,relative in files(root):
         parts=PurePosixPath(relative).parts
         folded={p.lower() for p in parts}
-        if relative.startswith("tv/licenses/"):
-            tv_license_files.add(relative)
         if len(parts)==1 and parts[0] not in TOP_FILES:errors.append(relative+": root file is not allowlisted")
         if len(parts)>1 and parts[0] not in TOP_DIRECTORIES:errors.append(relative+": root directory is not allowlisted")
-        if parts[0] == "tv" and len(parts) > 1:
-            if len(parts) == 2:
-                name = parts[1]
-                if (path.suffix.lower() not in {".dll", ".exe", ".xml", ".json"}
-                        or (path.suffix.lower() == ".exe" and name not in TV_PUBLISHED_EXES)
-                        or (path.suffix.lower() == ".json" and name not in {
-                            "GlobalPulse.TV.deps.json", "GlobalPulse.TV.runtimeconfig.json",
-                        })):
-                    errors.append(relative+": unreviewed native TV root file")
-            elif parts[1] == "licenses":
-                if not (
-                    (len(parts) == 3 and parts[2] == "NATIVE_PACKAGE_NOTICES.json")
-                    or (len(parts) == 4 and (path.suffix.lower() in TV_LICENSE_SUFFIXES
-                                            or path.name.upper() in TV_LICENSE_BARE_NAMES))
-                ):
-                    errors.append(relative+": unreviewed native TV license payload")
-            elif parts == ("tv", "runtimes", "win-x64", "native", "WebView2Loader.dll"):
-                pass
-            elif (len(parts) == 3 and TV_LOCALE_FOLDER.fullmatch(parts[1])
-                    and parts[2].endswith(".resources.dll")):
-                pass
-            else:
-                errors.append(relative+": outside reviewed native TV subtree")
+        if (parts[0].lower() == "tv"
+                or any(part.lower() in RETIRED_VIDEO_BASENAMES
+                       or part.lower().startswith(RETIRED_VIDEO_PREFIXES) for part in parts)):
+            errors.append(relative+": retired YouTube playback payload is forbidden")
         if folded & FORBIDDEN_PARTS:errors.append(relative+": development or private-data directory")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES and relative!="_internal/certifi/cacert.pem":errors.append(relative+": forbidden runtime file type")
         if path.name.lower().startswith((".env","credentials","token_cache","secret")):errors.append(relative+": credential-like filename")
@@ -217,9 +186,6 @@ def scan(root, *, require_complete=True):
         count+=1;total+=path.stat().st_size
     required=["GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/GlobalPulse.Notifications.deps.json",
               "notifications/GlobalPulse.Notifications.runtimeconfig.json","notifications/pulse.png",
-              "tv/GlobalPulse.TV.exe","tv/GlobalPulse.TV.deps.json","tv/GlobalPulse.TV.runtimeconfig.json",
-              "tv/coreclr.dll","tv/Microsoft.Web.WebView2.Core.dll","tv/Microsoft.Web.WebView2.WinForms.dll",
-              "tv/runtimes/win-x64/native/WebView2Loader.dll","tv/licenses/NATIVE_PACKAGE_NOTICES.json",
               "_internal/global_pulse/resources/world_countries.geojson","_internal/global_pulse/resources/sources.json",
               "_internal/global_pulse/resources/translation_models.json","_internal/global_pulse/resources/context_cameras.json","USER_GUIDE.md","KNOWN_LIMITATIONS.md","THIRD_PARTY_NOTICES.md"]
     if require_complete:
@@ -227,76 +193,13 @@ def scan(root, *, require_complete=True):
             if not (root/relative).is_file():errors.append(relative+": required runtime file is missing")
         # A framework-dependent helper must never be passed off as self-contained.
         if not (root/"notifications"/"coreclr.dll").is_file():errors.append("notifications/coreclr.dll: self-contained .NET runtime is missing")
-        if not (root/"tv"/"coreclr.dll").is_file():errors.append("tv/coreclr.dll: self-contained .NET runtime is missing")
         for relative in ("GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/coreclr.dll",
-                         "tv/GlobalPulse.TV.exe","tv/coreclr.dll","tv/runtimes/win-x64/native/WebView2Loader.dll",
                          "_internal/python312.dll"):
             path=root/relative
             if not path.is_file() or not is_x64_pe(path):errors.append(relative+": required x64 Windows PE binary is missing or invalid")
         deps=root/"notifications"/"GlobalPulse.Notifications.deps.json"
         if deps.exists() and not any("microsoft.windowsappsdk" in name.lower() for name in json.loads(deps.read_text(encoding="utf-8-sig")).get("libraries",{})):
             errors.append("Native helper dependency identity does not include Microsoft.WindowsAppSDK")
-        tv_deps=root/"tv"/"GlobalPulse.TV.deps.json"
-        if tv_deps.exists():
-            libraries=json.loads(tv_deps.read_text(encoding="utf-8-sig")).get("libraries",{})
-            # Published WebView2 assemblies can be .deps 'reference' aliases
-            # without the parent SDK appearing as a package library.
-            refs={name.lower() for name,info in libraries.items()
-                  if isinstance(info,dict) and info.get("type")=="reference"}
-            parent={name.lower() for name,info in libraries.items()
-                    if isinstance(info,dict) and info.get("type")=="package"}
-            if not (TV_REFERENCE_IDENTITIES <= refs or TV_PARENT.lower() in parent):
-                errors.append("Native television lacks exact reviewed WebView2 assembly identities")
-        notice_ledger=root/"tv"/"licenses"/"NATIVE_PACKAGE_NOTICES.json"
-        if notice_ledger.is_file():
-            receipt=json.loads(notice_ledger.read_text(encoding="utf-8-sig"))
-            records=receipt.get("packages") or []
-            if not isinstance(records,list):
-                errors.append("Native television has invalid notice ledger records")
-                records=[]
-            for alias in sorted(TV_REFERENCE_IDENTITIES):
-                matching=[
-                    record for record in records
-                    if isinstance(record,dict) and
-                    (str(record.get("package",""))+"/"+str(record.get("version",""))).lower()==alias
-                    and record.get("type")=="reference"
-                ]
-                if (len(matching)!=1
-                        or matching[0].get("notice_source_package")!=TV_PARENT
-                        or matching[0].get("notice_source_lock_sha512")!=TV_NUGET_CONTENT_SHA512
-                        or matching[0].get("notice_source_archive_sha512")!=TV_ARCHIVE_SHA512
-                        or not isinstance(matching[0].get("notice_files"),list)
-                        or not matching[0]["notice_files"]):
-                    errors.append("Native television lacks dual-pinned WebView2 SDK notice proof: "+alias)
-            expected={"tv/licenses/NATIVE_PACKAGE_NOTICES.json"}
-            for record in records:
-                if not isinstance(record,dict):
-                    errors.append("Native television has malformed notice ledger record")
-                    continue
-                entries=record.get("notice_files") or []
-                if not isinstance(entries,list):
-                    errors.append("Native television has malformed notice ledger entries")
-                    continue
-                for item in entries:
-                    if not isinstance(item,dict) or not isinstance(item.get("packaged_relative"),str):
-                        errors.append("Native television has malformed notice file entry")
-                        continue
-                    rel=item["packaged_relative"]
-                    parts=PurePosixPath(rel).parts
-                    if (len(parts)!=3 or parts[0]!="licenses"
-                            or any(part in ("..",".") for part in parts)
-                            or rel.startswith("/")):
-                        errors.append("Native television has unsafe notice path")
-                        continue
-                    name="tv/"+"/".join(parts)
-                    expected.add(name)
-                    target=root/name
-                    if (not target.is_file() or not isinstance(item.get("bytes"),int)
-                            or target.stat().st_size!=item["bytes"]
-                            or digest(target)!=item.get("sha256")):
-                        errors.append(name+": exact native TV notice bytes differ")
-            for name in sorted(tv_license_files-expected):
-                errors.append(name+": not recorded by exact native TV notice ledger")
     if errors:raise ValueError("Runtime package rejected:\n"+"\n".join(errors[:100]))
     return {"status":"PASS","files":count,"bytes":total,"scope":"Allowlist, required native payload, filenames, and selected embedded-secret patterns; not a complete security audit"}
 
@@ -455,11 +358,10 @@ def sbom(root):
     for normalized,dist in sorted(distributions.items()):
         names=[canonical(re.split(r"[\s(<>=!~\[]",requirement,maxsplit=1)[0]) for requirement in dist.requires or []]
         dependencies.append({"ref":refs[normalized],"dependsOn":sorted({refs[name] for name in names if name in refs})})
-    # Both independent self-contained helpers contribute native/runtime NuGet components.
-    # Deduplicate identical package identities if the same runtime is used by both.
+    # The self-contained notification helper contributes native/runtime NuGet components.
+    # Deduplicate identical package identities across its dependency manifests.
     native_seen=set()
-    native_deps=(sorted((root/"notifications").glob("*.deps.json")) +
-                 sorted((root/"tv").glob("*.deps.json")))
+    native_deps=sorted((root/"notifications").glob("*.deps.json"))
     for deps_path in native_deps:
         document=json.loads(deps_path.read_text(encoding="utf-8-sig"))
         for name,info in document.get("libraries",{}).items():
@@ -471,30 +373,6 @@ def sbom(root):
             components.append({"type":"library","name":package,"version":version,"bom-ref":ref,"purl":ref,
                                "properties":[{"name":"globalpulse:evidence","value":"Published .NET deps.json"},
                                              {"name":"globalpulse:license-review","value":"NOASSERTION — consult NuGet package licenses and notices"}]})
-    # The WebView2 .deps assembly aliases are type=reference, not restored
-    # packages. Map them to the one pinned parent SDK only via its exact
-    # dual-hash notice receipt, never mint fictitious NuGet alias packages.
-    tv_notice=root/"tv"/"licenses"/"NATIVE_PACKAGE_NOTICES.json"
-    if tv_notice.is_file():
-        receipt=json.loads(tv_notice.read_text(encoding="utf-8-sig"))
-        if any(
-            isinstance(record,dict)
-            and record.get("type")=="reference"
-            and record.get("notice_source_package")==TV_PARENT
-            and record.get("notice_source_lock_sha512")==TV_NUGET_CONTENT_SHA512
-            and record.get("notice_source_archive_sha512")==TV_ARCHIVE_SHA512
-            for record in receipt.get("packages", [])
-        ):
-            package,version=TV_PARENT.rsplit("/",1)
-            ref=f"pkg:nuget/{quote(package)}@{quote(version)}"
-            if ref not in native_seen:
-                native_seen.add(ref)
-                components.append({"type":"library","name":package,"version":version,
-                                   "bom-ref":ref,"purl":ref,
-                                   "properties":[
-                                       {"name":"globalpulse:evidence","value":"Exact signed parent SDK notice receipt; published WebView2 references"},
-                                       {"name":"globalpulse:license-review","value":"NOASSERTION — distribution review remains HOLD"},
-                                   ]})
     # A file inventory covers bundled native/Qt/WebEngine assets for which package
     # metadata alone is insufficient. It is not a claim of complete provenance.
     for path,name in files(root):

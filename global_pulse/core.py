@@ -1545,6 +1545,33 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(key)[:200], encoded))
 
+    def set_settings_atomic(self, settings: dict[str, Any]) -> None:
+        """Persist one plain settings snapshot with the existing size limits.
+
+        Validation finishes before any SQL mutation. All rows commit together
+        or roll back together; callers must not fan a layout snapshot into
+        separate settings transactions or UI refresh signals.
+        """
+        if not isinstance(settings, dict):
+            raise ValueError("Settings snapshot must be a dictionary")
+        from .capacity_limits import MAX_USER_FEED_SETTING_BYTES
+        encoded = []
+        keys = set()
+        for key, value in settings.items():
+            name = str(key)[:200]
+            if name in keys:
+                raise ValueError("Settings snapshot contains overlapping keys")
+            keys.add(name)
+            payload = _json(value)
+            limit = MAX_USER_FEED_SETTING_BYTES if key == "user_feeds" else 250_000
+            if len(payload.encode("utf-8")) > limit:
+                raise ValueError("Setting is too large")
+            encoded.append((name, payload))
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                encoded)
+
     def get_source_state(self, source_id: str) -> dict:
         with self._lock:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()
@@ -1971,6 +1998,47 @@ class Store:
                 self._conn.close()
                 self._closed = True
 
+    def close_after_shutdown(self, settings: dict, delivery_outcomes=(), *, lock_timeout=1.0) -> None:
+        """Commit final UI/history state without a blocking WAL truncate.
+
+        Called only by the shutdown finalizer after collection is gated and
+        owned database children have actually exited. The existing Store lock
+        protects an in-progress transaction; failure leaves the connection and
+        singleton alive for an explicit retry. A busy reader may retain a WAL,
+        which is durable SQLite state, not a reason to delay application exit.
+        """
+        encoded = [(str(key)[:200], _json(value)) for key, value in settings.items()]
+        if any(len(value.encode("utf-8")) > 250_000 for _, value in encoded):
+            raise ValueError("Shutdown setting is too large")
+        if not self._lock.acquire(timeout=max(0.0, lock_timeout)):
+            raise RuntimeError("An archive operation is still finishing; exit can be retried safely")
+        try:
+            if self._closed:
+                return
+            previous_timeout = self._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self._conn.execute("PRAGMA busy_timeout=250")
+            try:
+                # One transaction: do not lose half the layout or acknowledge
+                # native submissions before their history outcome is durable.
+                with self._conn:
+                    self._conn.executemany(
+                        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        encoded)
+                    for alert_id, status in delivery_outcomes:
+                        row = self._conn.execute("SELECT body FROM alerts WHERE id=?", (alert_id,)).fetchone()
+                        if row:
+                            body = json.loads(row[0])
+                            body["delivery_status"] = plain_text(status, 500)
+                            self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
+                self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                self._conn.close()
+                self._closed = True
+            finally:
+                if not self._closed:
+                    self._conn.execute(f"PRAGMA busy_timeout={int(previous_timeout)}")
+        finally:
+            self._lock.release()
+
     def __enter__(self):
         return self
 
@@ -1985,23 +2053,99 @@ def _markdown_text(value: Any) -> str:
 def build_brief(events: list[dict], period: str = "daily") -> str:
     if period not in {"daily", "weekly"}:
         raise ValueError("Brief period must be daily or weekly")
-    limit = 100 if period == "weekly" else 40
+    limit = 80 if period == "weekly" else 60
     title = "Weekly" if period == "weekly" else "Daily"
-    synthetic = any(e.get("synthetic") for e in events)
-    lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {utcnow()}", "",
+    generated = utcnow()
+    moment = _dt(generated)
+    since = moment - timedelta(days=7 if period == "weekly" else 1)
+    window = "last 7 days" if period == "weekly" else "last 24 hours"
+    supplied = [e for e in events[:1500] if isinstance(e, dict)]
+    synthetic = any(e.get("synthetic") for e in supplied)
+
+    def text(value, length=300):
+        from html import escape
+        # Markdown may contain inline HTML. Entity-encoded source markup must
+        # remain text even after plain_text has decoded its entities.
+        return escape(_markdown_text(plain_text(value, length)), quote=False)
+
+    def date(value):
+        try:
+            return _dt(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def source_time(report):
+        published = date(report.get("published_at"))
+        if report.get("publication_time_known") is not False and published:
+            return "source published " + _iso(published)
+        retrieved = date(report.get("first_retrieved_at") or report.get("retrieved_at"))
+        return ("publication time unknown; first retrieved " + _iso(retrieved)
+                if retrieved else "publication time unknown; retrieval time unavailable")
+
+    def period_changes(event):
+        # This is the local revision trail, not an inferred real-world change.
+        # Filter by the actual change timestamp, not the event's latest update.
+        candidates = []
+        for entry in event.get("timeline", [])[-40:]:
+            if isinstance(entry, dict):
+                candidates.extend((change, entry.get("at")) for change in
+                                  entry.get("changes", [])[:20] if isinstance(change, dict))
+        candidates.extend((change, event.get("updated_at")) for change in
+                          event.get("changes", [])[:20] if isinstance(change, dict))
+        found = {}
+        for change, fallback in candidates:
+            at = date(change.get("at") or fallback)
+            if at is None or not since <= at <= moment:
+                continue
+            key = (at, str(change.get("kind")), str(change.get("publisher")),
+                   str(change.get("report_id")), str(change.get("title")))
+            found[key] = (at, change)
+        return sorted(found.values(), key=lambda row: row[0], reverse=True)[:3]
+
+    lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {generated}", "",
+             f"**Reporting window (UTC):** {_iso(since)} through {_iso(moment)} — rolling {window}, not a calendar-day total.", "",
              "SYNTHETIC TRAINING DATA — NOT LIVE NEWS" if synthetic else "Source-linked summary of the supplied local monitoring records.", "",
-             "Coverage is limited to monitored sources. Official attribution does not independently confirm every underlying claim.", ""]
+             "The requested window uses local record updates; source publication dates may be older. "
+             "Exact dates and any supplied historical context remain visible below. "
+             "Coverage is limited to monitored sources, not all world events.", "",
+             "**Read the labels separately:** UNASSESSED means the source has not supplied an importance/severity rating; "
+             "it does not mean a story is false or that verification was completed. "
+             "Evidence status describes source attribution and documented independent reporting. "
+             "An official statement confirms its publication, not every underlying claim.", ""]
     # A single high-volume weather adapter can otherwise consume every slot
     # before one disease, conflict, infrastructure or government record appears.
     # These are source CATEGORY groupings, never invented news/crisis claims.
     from .brief_selection import balanced_brief_sections, BRIEF_DOMAINS
     grouped = balanced_brief_sections(
-        events, per_domain=4 if period == "daily" else 9,
+        supplied, per_domain=8 if period == "daily" else 9,
         max_total=limit, disaster_limit=3 if period == "daily" else 6
     )
+    ranked = [(domain, event) for domain, items in grouped for event in items]
+    selected = [event for _, event in ranked]
+    supplied_count = len({str(e.get("id")) for e in supplied if e.get("id")})
     if not grouped:
         lines.extend(["No matching developments are stored for this period.", ""])
     else:
+        evidence_counts = {key: 0 for key in ("official", "corroborated", "developing", "unverified")}
+        for event in selected:
+            evidence = str(event.get("verification") or "unverified")
+            evidence_counts[evidence if evidence in evidence_counts else "unverified"] += 1
+        publishers = {str(r.get("source_id") or r.get("publisher"))
+                      for e in selected for r in e.get("reports", [])
+                      if isinstance(r, dict) and (r.get("source_id") or r.get("publisher"))}
+        unrated = sum(e.get("severity", "unassessed") == "unassessed" for e in selected)
+        lines.extend([
+            "## At a glance", "",
+            f"**Included:** {len(selected)} of {supplied_count} supplied local records across {len(grouped)} topics; "
+            f"{len(publishers)} source identities represented. This is a bounded sample, not a global event count.", "",
+            f"**Evidence in this sample:** {evidence_counts['official']} official measurement(s), "
+            f"{evidence_counts['corroborated']} corroborated event association(s), "
+            f"{evidence_counts['developing']} developing association(s), "
+            f"{evidence_counts['unverified']} unverified record(s). {unrated} have unassessed importance.", "",
+        ])
+        if supplied_count > len(selected):
+            lines.extend([f"{supplied_count - len(selected)} additional supplied records are outside the displayed topic limits. "
+                          "Use the feed or event archive for their complete evidence.", ""])
         lines.extend([
             "## Topic coverage", "",
             "Items are grouped by source category, then by importance and last recorded update. "
@@ -2013,34 +2157,103 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
             lines.extend(["**Not represented in supplied local records:** " +
                           ", ".join(absent) +
                           ". This is a coverage gap, not evidence that no events occurred.", ""])
-    ranked = [(domain, event) for domain, items in grouped for event in items]
+        lines.extend([" | ".join(f"{domain}: {len(rows)}" for domain, rows in grouped), ""])
+        by_day = defaultdict(list)
+        for domain, event in ranked:
+            at = date(event.get("updated_at"))
+            if at:
+                by_day[at.date().isoformat()].append(domain)
+        if by_day:
+            lines.extend(["### Selected local record updates by date (UTC)", "",
+                          "These are archive update dates, not asserted event-occurrence or publication dates.", ""])
+            for day, domains in sorted(by_day.items(), reverse=True):
+                lines.append(f"- **{day}:** {len(domains)} selected record(s); " +
+                             ", ".join(domain for domain in BRIEF_DOMAINS if domain in domains) + ".")
+            lines.append("")
     current_domain = None
     for index, (domain, event) in enumerate(ranked, 1):
         if domain != current_domain:
             current_domain = domain
             lines.extend([f"## {domain}", ""])
-        lines.extend([f"### {index}. {_markdown_text(event['title'])}", "",
-                      f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {_markdown_text(event['category'])} · {_markdown_text(event['region'])} · {_markdown_text(event['verification'])}", "",
-                      _markdown_text(event["recap"]), "",
-                      f"Last material record update: {event['updated_at']} · Local event: {event['id']}", ""])
+        verification = str(event.get("verification") or "unverified")
+        evidence_label = {
+            "official": "Official measurement — source-attributed and potentially revisable",
+            "corroborated": "Corroborated event association — individual claims still require review",
+            "developing": "Developing association — independent confirmation remains incomplete",
+            "unverified": "Unverified — independent corroboration has not been established",
+        }.get(verification, "Unverified — assessment unavailable")
+        origins = len(set(event.get("independent_origins") or []))
+        reports = [r for r in event.get("reports", []) if isinstance(r, dict)]
+        lines.extend([f"### {index}. {text(event.get('title') or 'Untitled source record', 260)}", "",
+                      f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {text(event.get('category') or 'News', 80)} · {text(event.get('region') or event.get('country') or 'Unspecified location', 120)}", "",
+                      f"**Evidence:** {evidence_label}. {len(reports)} source record(s); {origins} documented independent origin(s). "
+                      f"**Record status:** {text(event.get('status') or 'unknown', 40)}.", "",
+                      text(event.get("recap") or "No source-provided recap is available; inspect the original reports.", 1000), "",
+                      f"Last material record update: {text(event.get('updated_at') or 'unknown', 60)} · Local event: {text(event.get('id'), 100)}", ""])
+        updated = date(event.get("updated_at"))
+        if event.get("future_dated") or updated and updated > moment:
+            lines.extend(["**Future-dated context:** retained for review, not evidence of a current development.", ""])
+        elif updated and updated < since:
+            lines.extend(["**Historical context:** this supplied record is outside the requested rolling window; it is not presented as new today.", ""])
+        if event.get("official_attribution") and verification != "official":
+            lines.extend(["**Official-source attribution:** an official publication is present; this does not independently verify its underlying claims.", ""])
+        for reason in event.get("reasons", [])[:2]:
+            lines.extend(["Evidence basis: " + text(reason, 280), ""])
         if event.get("emerging"):
             lines.extend(["**Emerging signal:** Limited coverage in the monitored source set. This is not a measurement of worldwide media coverage.", ""])
-        for conflict in event.get("contradictions", []):
-            lines.extend([f"**Evidence discrepancy:** {_markdown_text(conflict['explanation'])}", ""])
-        sources = event.get("reports", [])[:20]
-        if sources:
-            lines.append("Sources:")
+        for conflict in event.get("contradictions", [])[:5]:
+            lines.extend([f"**Evidence discrepancy:** {text(conflict.get('explanation'), 400)}", ""])
+        changes = period_changes(event)
+        if changes:
+            lines.extend(["**Recorded changes during this window:**", ""])
+            for at, change in changes:
+                lines.append(f"- {_iso(at)} — {text(change.get('publisher') or 'Source unlisted', 80)}: "
+                             f"{text(change.get('kind') or 'update', 50)} — {text(change.get('title'), 240)}.")
             lines.append("")
-        for report in sources:
+
+        # Prefer current evidence, then show older/retracted/future records with
+        # their state. This never changes the canonical verification result.
+        reports = sorted(reports, key=lambda r: (
+            not bool(r.get("future_dated")), r.get("evidence_status", "active") == "active",
+            date(r.get("published_at")) or datetime.min.replace(tzinfo=UTC)), reverse=True)
+        sources = []
+        for report in reports:
             try:
-                url = safe_public_url(report["url"]).replace("(", "%28").replace(")", "%29").replace(" ", "%20")
-            except ValueError:
+                url = safe_public_url(report.get("url", "")).replace("(", "%28").replace(")", "%29").replace(" ", "%20").replace("<", "%3C").replace(">", "%3E").replace('"', "%22")
+            except (TypeError, ValueError):
                 continue
-            time_label = report['published_at'] if report.get('publication_time_known', True) else f"publication time unknown; first retrieved {report['retrieved_at']}"
-            lines.append(f"- [{_markdown_text(report['publisher'])}: {_markdown_text(report['title'])}]({url}) — {time_label}; {report.get('evidence_status', 'active')}; {report.get('independence', 'unknown')} provenance.")
-            credit = " · ".join(_markdown_text(report[k]) for k in ("byline", "attribution", "source_license") if report.get(k))
+            sources.append((report, url))
+            if len(sources) == 8:
+                break
+        detail_count = 0
+        seen_details = set()
+        for report, url in sources:
+            summary = plain_text(report.get("english_summary") or report.get("summary") or "", 420)
+            key = summary.casefold()
+            if (not summary or key in seen_details or summary == report.get("title")
+                    or report.get("future_dated") or report.get("evidence_status", "active") != "active"):
+                continue
+            seen_details.add(key)
+            if detail_count == 0:
+                lines.extend(["**Source-provided detail (attributed, not a new independent assessment):**", ""])
+            label = ("machine-translated excerpt" if report.get("translation_label")
+                     else "provided English excerpt" if report.get("english_summary") else "source excerpt")
+            lines.append(f"- [{text(report.get('publisher') or report.get('source_id') or 'Source', 100)}]({url}) "
+                         f"({source_time(report)}; {label}): “{text(summary, 420)}”")
+            detail_count += 1
+            if detail_count == 2:
+                break
+        if detail_count:
+            lines.append("")
+        if sources:
+            lines.extend(["Sources:", ""])
+        for report, url in sources:
+            lines.append(f"- [{text(report.get('publisher') or report.get('source_id') or 'Source', 100)}: {text(report.get('title') or 'Original report', 260)}]({url}) — {source_time(report)}; {text(report.get('evidence_status') or 'active', 40)}; {text(report.get('independence') or 'unknown', 40)} provenance.")
+            credit = " · ".join(text(report[k], 220) for k in ("byline", "attribution", "source_license") if report.get(k))
             if credit:
                 lines.append(f"  Credit: {credit}")
+        if len(reports) > len(sources):
+            lines.append(f"{len(reports) - len(sources)} additional source record(s) are omitted by the link/safety budget; inspect the event archive for the complete evidence trail.")
         lines.append("")
     lines.extend(["## Verification notes", "", "Repeated syndication adds no independent confirmation. Conflicting claims are preserved without selecting a winner. Recaps use source-provided metadata and bounded attributed excerpts; no unavailable article details are inferred.", ""])
     return "\n".join(lines)

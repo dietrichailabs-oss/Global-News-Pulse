@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_issue82_startup_video_diagnostics.py tests/test_issue31_tv_basic_player.py tests/test_tv_pending_timeout.py tests/test_issue64_deferred_cold_headlines.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue76_quit_paths.py tests/test_issue74_row_lifetime.py tests/test_ui_desktop.py tests/test_owner_feedback_qa_repairs.py
+          python -m pytest -q --tb=short tests/test_issue82_startup_video_diagnostics.py tests/test_youtube_removal.py  tests/test_issue64_deferred_cold_headlines.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_issue76_quit_paths.py tests/test_issue74_row_lifetime.py tests/test_ui_desktop.py tests/test_owner_feedback_qa_repairs.py
       - name: Check tracked product cleanliness
         if: always()
         shell: bash

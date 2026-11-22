@@ -1,4 +1,4 @@
-"""Actual replacement widgets and lifecycle; live decoding has its own probe."""
+"""Actual radio/camera widgets and lifecycle after video-player retirement."""
 import copy
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QObject,Signal,QUrl
 from PySide6.QtWidgets import QApplication,QMessageBox
 from global_pulse.internet_radio import RadioPanel,AudioSession,station,valid_presets,STATIONS
-from global_pulse.single_media import MediaPanel,Television
+from global_pulse.single_media import MediaPanel
 
 @pytest.fixture(scope='session')
 def app():return QApplication.instance() or QApplication([])
@@ -106,7 +106,11 @@ def test_preset_roundtrip_and_legacy_settings_not_overwritten(radio,app):
     values={'radio_presets':[{'receiver':'https://old.example'}]}
     def put(k,v):values[k]=copy.deepcopy(v)
     radio.configure_preferences(lambda k,d=None:values.get(k,d),put)
-    radio.selector.setCurrentIndex(1);assert radio.save_preset(2)
+    # R20 includes music and classical streams, so catalog order is not an
+    # identity. Save a specific station ID and verify it survives the roundtrip.
+    radio.selector.setCurrentIndex(radio.selector.findData('deutschlandfunk'))
+    assert radio.selector.currentData()=='deutschlandfunk'
+    assert radio.save_preset(2)
     assert values['radio_presets']==[{'receiver':'https://old.example'}]
     other=RadioPanel(session_factory=FakeSession,confirm=lambda:True)
     try:
@@ -139,14 +143,15 @@ def test_timeout_clears_native_source_without_retry(app,monkeypatch):
     assert calls==['stop',''] and not s.watchdog.isActive()
     s.deleteLater()
 
-def test_new_media_has_one_tv_and_no_radio_video_tiles(app,monkeypatch):
+def test_new_media_has_radio_and_cameras_without_video_player(app,monkeypatch):
     monkeypatch.setattr('global_pulse.internet_radio.AudioSession',FakeSession)
     panel=MediaPanel()
     try:
-        assert len(panel.tiles)==1 and panel.tiles[0] is panel.tv
+        assert len(panel.tiles)==1 and panel.tiles[0] is panel.camera
         assert isinstance(panel.radio,RadioPanel)
-        assert not panel.radio.findChildren(Television)
-        assert [panel.tabs.tabText(i) for i in range(3)]==['TV','Radio','Cameras']
+        assert not hasattr(panel,'tv')
+        assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())]==['Radio','Cameras']
+        assert panel.tabs.currentWidget() is panel.radio
     finally:panel.shutdown();panel.deleteLater()
 
 def test_event_refresh_and_tab_switch_cannot_restart_radio(app,monkeypatch):
@@ -154,46 +159,17 @@ def test_event_refresh_and_tab_switch_cannot_restart_radio(app,monkeypatch):
     FakeSession.instances=[]
     panel=MediaPanel();panel.radio._confirm=lambda:True
     try:
-        panel.tabs.setCurrentIndex(1);panel.radio.power.click()
+        panel.tabs.setCurrentIndex(0);panel.radio.power.click()
         current=FakeSession.instances[-1]
         panel.set_event({'id':'event','reports':[],'media':[]})
         assert panel.radio._session is current and not current.stopped
-        panel.tabs.setCurrentIndex(0)
+        panel.tabs.setCurrentIndex(1)
         assert current.stopped and panel.radio.status.text()=='OFF'
         panel.set_event({'id':'another','reports':[]})
-        panel.tabs.setCurrentIndex(1)
+        panel.tabs.setCurrentIndex(0)
         assert len(FakeSession.instances)==1 and panel.radio.status.text()=='OFF'
     finally:panel.shutdown();panel.deleteLater()
 
-def test_external_tv_and_receiver_directories_not_admitted(app):
-    tv=Television()
-    try:
-        tv.set_catalog([{'url':'https://www.bbc.com/','type':'video'}, {'url':'https://websdr.org/','type':'radio'}, {'url':'https://www.youtube.com/watch?v=abcdefghijk','type':'video'}])
-        assert not tv._builtins and not tv.catalog
-        assert 'No packaged-verified TV' in tv.display.text()
-        tv.video_url.setText('https://www.youtube.com/@somechannel/live')
-        assert not tv.add_video()
-        tv.video_url.setText('https://www.youtube.com/watch?v=abcdefghijk')
-        assert tv.add_video() and len(tv.catalog)==1
-        assert 'Your video' in tv.selector.currentText()
-        assert tv.view is None
-    finally:tv.stop();tv.deleteLater()
-
-def test_tv_progress_not_page_load_or_constant_clock(app):
-    tv=Television()
-    try:
-        tv._requested=True;generation=tv._generation
-        tv._observed(generation,{'missing':True})
-        assert tv.tv_status.text()!='PLAYING'
-        tv._observed(generation,{'time':0.0,'paused':False,'ready':4})
-        assert tv.tv_status.text()!='PLAYING'
-        tv._observed(generation,{'time':1.0,'paused':False,'ready':4})
-        assert tv.tv_status.text()=='VIDEO TIME ADVANCING · picture unverified'
-        assert tv._had_playback is True
-        assert 'NOT confirmed' in tv.note.text()
-        tv.stop();tv._observed(generation,{'time':2.0,'paused':False,'ready':4})
-        assert tv.tv_status.text()=='OFF'
-    finally:tv.stop();tv.deleteLater()
 
 def test_actual_mainwindow_uses_replacement_not_legacy(app,tmp_path):
     from global_pulse.controller import Controller
@@ -203,6 +179,8 @@ def test_actual_mainwindow_uses_replacement_not_legacy(app,tmp_path):
         assert isinstance(w.media,MediaPanel)
         assert w.media.radio.status.text()=='OFF'
         assert len(w.media.tiles)==1
+        assert w.media.tiles[0] is w.media.camera
+        assert not hasattr(w.media,'tv')
         c.data_changed.emit();app.processEvents()
         assert w.media.radio._session is None
     finally:w._force_close=True;w.close();c.close();w.deleteLater();app.processEvents()

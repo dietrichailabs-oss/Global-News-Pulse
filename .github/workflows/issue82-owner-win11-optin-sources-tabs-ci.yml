@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_ui_desktop.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_source_expansion_ecb.py tests/test_issue22_settings_boundary.py tests/test_owner_feedback_qa_repairs.py tests/test_issue82_startup_video_diagnostics.py tests/test_issue82_tv_error_readout.py tests/test_controller.py tests/test_installer_component_consent.py tests/test_issue22_provider_controls.py tests/test_qa_correction_integration.py tests/test_qa_history_integration.py tests/test_sdk_distribution.py
+          python -m pytest -q --tb=short tests/test_issue82_owner_win11_optin_sources_tabs.py tests/test_issue82_collector_tray_latency.py tests/test_ui_desktop.py tests/test_issue76_ham_tv_tray_tabs.py tests/test_source_expansion_ecb.py tests/test_issue22_settings_boundary.py tests/test_owner_feedback_qa_repairs.py tests/test_issue82_startup_video_diagnostics.py tests/test_youtube_removal.py tests/test_controller.py tests/test_installer_component_consent.py tests/test_issue22_provider_controls.py tests/test_qa_correction_integration.py tests/test_qa_history_integration.py tests/test_sdk_distribution.py
       - name: Ensure tracked source not mutated by tests
         if: always()
         shell: bash

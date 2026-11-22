@@ -1,4 +1,4 @@
-"""Issue37: search country archive beyond first 30 and test owner video ID.
+"""Issue37: search country archive beyond first 30 after video retirement.
 
 All geo records are synthetic and explicitly country attributed. No network.
 """
@@ -12,8 +12,6 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget, QPushButton
 
 from global_pulse.map_widget import WorldMap
-from global_pulse.single_media import Television
-from global_pulse.media_widget import youtube_id
 
 
 @pytest.fixture(scope="session")
@@ -73,26 +71,5 @@ def test_us_archive_searches_beyond_first_thirty_without_fake_points(app):
             world.country_dialog.close()
         world.close()
         world.deleteLater()
-        app.sendPostedEvents(None,QEvent.Type.DeferredDelete)
-        app.processEvents()
-
-
-def test_owner_exact_youtube_video_is_opt_in_unverified(app,monkeypatch):
-    tv=Television()
-    calls=[]
-    try:
-        monkeypatch.setattr(tv,"watch",lambda:calls.append("watch"))
-        assert tv.test_owner_video() is True
-        assert calls==["watch"]
-        assert youtube_id(tv._current()["url"])=="b0ZhJhN_Sn8"
-        assert "LIVE" not in tv.tv_status.text()
-        assert "unverified" in tv.tv_status.text().lower()
-        assert tv.test_owner_video() is True
-        assert len([tv.selector.itemData(index)
-                    for index in range(tv.selector.count())
-                    if youtube_id((tv.selector.itemData(index) or {}).get("url",""))=="b0ZhJhN_Sn8"])==1
-    finally:
-        tv.stop()
-        tv.deleteLater()
         app.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         app.processEvents()

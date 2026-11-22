@@ -168,7 +168,9 @@ def test_html_export_has_colors_and_synthetic_warning(controller,tmp_path):
     current=datetime.now(timezone.utc).isoformat()
     controller.store.ingest([record(stamp=current)],now=current)
     path=tmp_path/'brief.html';controller.export_brief(path)
-    text=path.read_text()
+    # The exporter writes UTF-8, not the platform's legacy Windows codepage.
+    text=path.read_text(encoding='utf-8')
+    assert 'charset="utf-8"' in text.lower()
     assert SEVERITY['moderate'] in text and 'SYNTHETIC' in text
 
 
