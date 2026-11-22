@@ -422,6 +422,157 @@
       "last_verified": "2026-11-22T02:02:05Z",
       "image_last_modified_at_review": "2026-11-22T01:48:16Z",
       "availability": "HTTP 200 and decoded 960x355 JPEG checked 2026-11-22 02:02 UTC; source Last-Modified 01:48 UTC. Current availability may change."
+    },
+    {
+      "id": "gpc-tannum-sands-live",
+      "title": "Tannum Sands — live beach video, Australia",
+      "group": "Live video — manual only",
+      "provider": "Gladstone Ports Corporation / CoastalCOMS",
+      "type": "webcam",
+      "playback": "live_video",
+      "manual_only": true,
+      "continent": "Oceania",
+      "country": "Australia",
+      "region": "Tannum Sands, Queensland, Australia",
+      "area_keywords": [],
+      "country_keywords": [
+        "Australia",
+        "AU"
+      ],
+      "region_keywords": [
+        "Global",
+        "Oceania",
+        "Australia",
+        "AU",
+        "Queensland",
+        "QLD",
+        "Tannum Sands"
+      ],
+      "url": "https://gpcl.com.au/environment/live-beach-cameras/tannum-sands-webcam/",
+      "allowed_hosts": [
+        "gpcl.com.au",
+        "widget.coastalcoms.com",
+        "streaming-au.coastalcoms.com",
+        "ajax.googleapis.com",
+        "unpkg.com",
+        "vjs.zencdn.net",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "live-gpcl.pantheonsite.io"
+      ],
+      "allowed_frame_hosts": [
+        "widget.coastalcoms.com"
+      ],
+      "live_status": "Live video on the original provider page. Manual connection only; not a refreshing still image or incident verification.",
+      "attribution": "Gladstone Ports Corporation; live player supplied by CoastalCOMS",
+      "license": "Public watch page; separate re-embedding or redistribution permission not established",
+      "rights": "View the unmodified public owner page with its original player and attribution. No raw-stream extraction, recording, mirroring or redistribution. A general third-party embed license has not been established.",
+      "rights_url": "https://gpcl.com.au/disclaimer/",
+      "documentation": "https://gpcl.com.au/environment/live-beach-cameras/",
+      "review_status": "public_player_verified",
+      "last_verified": "2026-11-22",
+      "verification_context": "Prior recorded public-page check in cloud Chrome; not Windows Pulse",
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed."
+    },
+    {
+      "id": "gpc-1770-live",
+      "title": "Town of 1770 — live coastal video, Australia",
+      "group": "Live video — manual only",
+      "provider": "Gladstone Ports Corporation / CoastalCOMS",
+      "type": "webcam",
+      "playback": "live_video",
+      "manual_only": true,
+      "continent": "Oceania",
+      "country": "Australia",
+      "region": "Town of 1770, Queensland, Australia",
+      "area_keywords": [],
+      "country_keywords": [
+        "Australia",
+        "AU"
+      ],
+      "region_keywords": [
+        "Global",
+        "Oceania",
+        "Australia",
+        "AU",
+        "Queensland",
+        "QLD",
+        "Town of 1770",
+        "Seventeen Seventy"
+      ],
+      "url": "https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/",
+      "allowed_hosts": [
+        "gpcl.com.au",
+        "widget.coastalcoms.com",
+        "streaming-au.coastalcoms.com",
+        "ajax.googleapis.com",
+        "unpkg.com",
+        "vjs.zencdn.net",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "live-gpcl.pantheonsite.io"
+      ],
+      "allowed_frame_hosts": [
+        "widget.coastalcoms.com"
+      ],
+      "live_status": "Live video on the original provider page. Manual connection only; not a refreshing still image or incident verification.",
+      "attribution": "Gladstone Ports Corporation; live player supplied by CoastalCOMS",
+      "license": "Public watch page; separate re-embedding or redistribution permission not established",
+      "rights": "View the unmodified public owner page with its original player and attribution. No raw-stream extraction, recording, mirroring or redistribution. A general third-party embed license has not been established.",
+      "rights_url": "https://gpcl.com.au/disclaimer/",
+      "documentation": "https://gpcl.com.au/environment/live-beach-cameras/",
+      "review_status": "public_player_verified",
+      "last_verified": "2026-11-22",
+      "verification_context": "Prior recorded public-page check in cloud Chrome; not Windows Pulse",
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1280x720 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed."
+    },
+    {
+      "id": "bsyc-seacliff-live",
+      "title": "Brighton & Seacliff Yacht Club — live beach video, Australia",
+      "group": "Live video — manual only",
+      "provider": "Brighton & Seacliff Yacht Club / IPCamLive",
+      "type": "webcam",
+      "playback": "live_video",
+      "manual_only": true,
+      "continent": "Oceania",
+      "country": "Australia",
+      "region": "Seacliff, Adelaide, South Australia",
+      "area_keywords": [],
+      "country_keywords": [
+        "Australia",
+        "AU"
+      ],
+      "region_keywords": [
+        "Global",
+        "Oceania",
+        "Australia",
+        "AU",
+        "South Australia",
+        "SA",
+        "Adelaide",
+        "Seacliff",
+        "Brighton & Seacliff Yacht Club"
+      ],
+      "url": "https://www.ipcamlive.com/bsyc1080",
+      "allowed_hosts": [
+        "www.ipcamlive.com",
+        "player.ipcamlive.com",
+        "g3.ipcamlive.com",
+        "s127.ipcamlive.com"
+      ],
+      "allowed_frame_hosts": [
+        "www.ipcamlive.com"
+      ],
+      "live_status": "Live video on the club-linked public IPCamLive page. Manual connection only; not a refreshing still image or incident verification.",
+      "attribution": "Brighton & Seacliff Yacht Club; public player supplied by IPCamLive",
+      "license": "Visitor viewing on the provider public page; no third-party re-embedding or redistribution grant",
+      "rights": "The camera owner links this public IPCamLive page. IPCamLive permits visitor viewing on its site or owner-authorized embeds. Retain the unmodified public page and its normal transient player flow; do not copy a standalone iframe, retain tokens, extract raw streams, record or redistribute.",
+      "rights_url": "https://www.ipcamlive.com/terms",
+      "documentation": "https://www.bsyc.com.au/weather",
+      "review_status": "public_player_verified",
+      "last_verified": "2026-11-22",
+      "verification_context": "Prior recorded club-linked public-page check in cloud Chrome; not Windows Pulse",
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. IPCamLive may rotate its resource servers; unreviewed hosts fail closed."
     }
   ]
 }

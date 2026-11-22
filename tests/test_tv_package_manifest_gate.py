@@ -65,7 +65,8 @@ def test_complete_package_still_requires_notification_identity_and_x64_runtime(t
     ):
         assert required in message
     assert "tv/" not in message
-    assert "WebView2" not in message
+    assert "camera/GlobalPulse.Camera.exe" in message
+    assert "camera/WebView2Loader.dll" in message
     assert "tv" not in manifest.TOP_DIRECTORIES
     assert {"qt6webenginecore.dll", "qtwebengineprocess.exe"} <= manifest.QT_REQUIRED_RUNTIME_BASENAMES
 

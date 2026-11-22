@@ -76,11 +76,51 @@ TOP_FILES = {
     "KNOWN_LIMITATIONS.md", "SOURCE_ACCESS_MATRIX.md", "THIRD_PARTY_NOTICES.md",
     "LICENSE.txt", "MANIFEST.json", "SBOM.cdx.json",
 }
-TOP_DIRECTORIES = {"_internal", "notifications", "licenses"}
+TOP_DIRECTORIES = {"_internal", "notifications", "camera", "licenses"}
 # Retired video components may not survive a dirty/repeated package build, even
 # if they are accidentally copied under an otherwise permitted runtime folder.
-RETIRED_VIDEO_BASENAMES = {"webview2loader.dll", "native_tv.py", "native_tv.pyc", "tv_playback_verified.json"}
-RETIRED_VIDEO_PREFIXES = ("globalpulse.tv.", "microsoft.web.webview2.")
+RETIRED_VIDEO_BASENAMES = {"native_tv.py", "native_tv.pyc", "tv_playback_verified.json"}
+RETIRED_VIDEO_PREFIXES = ("globalpulse.tv.",)
+CAMERA_WEBVIEW2_VERSION = "1.0.4314.35"
+CAMERA_WEBVIEW2_PARENT = "Microsoft.Web.WebView2/" + CAMERA_WEBVIEW2_VERSION
+CAMERA_WEBVIEW2_ALIASES = {"Microsoft.Web.WebView2.Core", "Microsoft.Web.WebView2.WinForms", "Microsoft.Web.WebView2.Wpf"}
+CAMERA_WEBVIEW2_LOCK_SHA512 = "x5MFf2W03xueU1mMNvivXfHSsQ+ODo7vJ36qw/dLtU5Gs+8d7+7N7zzmNNDoT3ffosmcvZNBtUnlzyiDUuBkSQ=="
+CAMERA_WEBVIEW2_ARCHIVE_SHA512 = "cOaiVqP3BmQHMnxGpZzANM22tUXgycrisyJHjIGNzIaMsm8iXj7Kx+ceYg+RbYwJtzT009qfcFTocvVLY+ekMw=="
+# Exact regular-.NET5+ managed assemblies and x64 loader from the pinned SDK.
+# Other frameworks/architectures and relocated copies remain forbidden.
+CAMERA_WEBVIEW2_ASSETS = {
+    "camera/Microsoft.Web.WebView2.Core.dll": {"bytes": 703328, "sha256": "acdd517b951829f763d1255f32df1e6a936cb8623a7ebff6b8b24172dede6bd6"},
+    "camera/Microsoft.Web.WebView2.WinForms.dll": {"bytes": 39264, "sha256": "35879378cb078733af0e13ce6db8f0675593e3c8a10bfb0a5cedb0766f875a59"},
+    "camera/Microsoft.Web.WebView2.Wpf.dll": {"bytes": 87392, "sha256": "2964bfbfb7aa5960187875a5e0714cf7d9de95fb7477d9d575338ecc9424a5a0"},
+    "camera/WebView2Loader.dll": {"bytes": 194912, "sha256": "d3fce90bdeecb08596e377dea6a316354dd8949e32ff09b89d51be00c14e21b6"},
+}
+CAMERA_WEBVIEW2_NOTICE_PINS = {
+    "LICENSE.txt": {"bytes": 1487, "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55"},
+    "NOTICE.txt": {"bytes": 3894, "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"},
+}
+
+# SDK10.0.403/404 can be selected by the existing global.json policy. Admit
+# only their separately reviewed WindowsDesktop14/15 satellite bytes.
+CAMERA_DESKTOP_RUNTIME_PINS = {
+    "runtimepack.Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.14": {
+        "archive_sha256": "a6dba3ca8b8b5b7945399545d881e0ac294746a7571f2209981934d49ecfe8cc",
+        "resources_sha256": "818b04fe69dea719b73913b4d7995aab0d7e7b89aa95090033b5804984a7d417",
+    },
+    "runtimepack.Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.15": {
+        "archive_sha256": "a036c174bac57a716e21dedccf96459804e4d8d8c31a08e3a8de649bf7684497",
+        "resources_sha256": "1414234419f334e5b663493c8a19263424c00db7e93455c3aa1895ac098fd833",
+    },
+}
+CAMERA_DESKTOP_CULTURES = {"cs", "de", "es", "fr", "it", "ja", "ko", "pl", "pt-BR", "ru", "tr", "zh-Hans", "zh-Hant"}
+CAMERA_DESKTOP_SATELLITES = {"Microsoft.VisualBasic.Forms.resources.dll", "System.Windows.Forms.Design.resources.dll", "System.Windows.Forms.Primitives.resources.dll", "System.Windows.Forms.resources.dll"}
+
+CAMERA_WEBVIEW2_NATIVE_DUPLICATE = "camera/runtimes/win-x64/native/WebView2Loader.dll"
+CAMERA_REQUIRED_FILES = {
+    "camera/GlobalPulse.Camera.exe", "camera/GlobalPulse.Camera.dll",
+    "camera/GlobalPulse.Camera.deps.json", "camera/GlobalPulse.Camera.runtimeconfig.json",
+    "camera/coreclr.dll", "camera/licenses/NATIVE_PACKAGE_NOTICES.json",
+    *CAMERA_WEBVIEW2_ASSETS,
+}
 
 FORBIDDEN_PARTS = {
     ".git", ".github", ".venv", "venv", "tests", "test", "fixtures", "checkpoints",
@@ -157,19 +197,211 @@ def is_x64_pe(path):
         return len(pe)==6 and pe[:4]==b"PE\0\0" and struct.unpack_from("<H",pe,4)[0]==0x8664
 
 
+def _camera_json(path):
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 8*1024*1024:
+        raise ValueError(path.name + ": camera metadata missing, escaped, or oversized")
+    document = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(document, dict):
+        raise ValueError(path.name + ": camera metadata is not an object")
+    return document
+
+
+def _camera_relative(value):
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise ValueError("Invalid camera inventory path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in value.split("/")) or ":" in value:
+        raise ValueError("Unsafe camera inventory path")
+    return path
+
+
+def camera_payload(root):
+    """Bind the camera-only exception to actual deps, notices, and reviewed bytes.
+
+    This verifies packaging provenance only. It does not initialize WebView2,
+    accept redistribution terms, or verify live camera/provider playback.
+    """
+    root = Path(root).resolve()
+    missing = sorted(name for name in CAMERA_REQUIRED_FILES if not (root/name).is_file())
+    if missing:
+        raise ValueError("Required camera runtime file is missing: " + ", ".join(missing))
+    config = _camera_json(root/"camera/GlobalPulse.Camera.runtimeconfig.json").get("runtimeOptions", {})
+    if not str(config.get("tfm", "")).startswith("net10.0") or "framework" in config or "frameworks" in config:
+        raise ValueError("Camera must publish a self-contained .NET10 runtime")
+    for name in ("camera/GlobalPulse.Camera.exe", "camera/coreclr.dll", "camera/WebView2Loader.dll"):
+        if not is_x64_pe(root/name):
+            raise ValueError(name + ": required camera x64 Windows PE is invalid")
+    deps_path = root/"camera/GlobalPulse.Camera.deps.json"
+    deps = _camera_json(deps_path)
+    targets = deps.get("targets", {})
+    names = [name for name in targets if name.lower().endswith("/win-x64")]
+    if len(names) != 1:
+        raise ValueError("Camera must declare exactly one Windows x64 dependency target")
+    target_name = names[0]
+    target = targets[target_name]
+    libraries = deps.get("libraries", {})
+    if (CAMERA_WEBVIEW2_PARENT not in target or libraries.get(CAMERA_WEBVIEW2_PARENT, {}).get("type") != "package"
+            or libraries.get(CAMERA_WEBVIEW2_PARENT, {}).get("sha512") != "sha512-" + CAMERA_WEBVIEW2_LOCK_SHA512):
+        raise ValueError("Camera dependency manifest lacks the reviewed parent WebView2 SDK identity")
+    aliases = {name.rsplit("/", 1)[0] for name in target if name.rsplit("/", 1)[0] in CAMERA_WEBVIEW2_ALIASES}
+    if aliases != CAMERA_WEBVIEW2_ALIASES:
+        raise ValueError("Camera dependency manifest lacks the exact reviewed WebView2 aliases")
+    allowed = set(CAMERA_REQUIRED_FILES)
+    expected_notices = {}
+    for identity, metadata in target.items():
+        if "/" not in identity or not isinstance(metadata, dict):
+            raise ValueError("Malformed camera dependency identity")
+        package, version = identity.rsplit("/", 1)
+        kind = libraries.get(identity, {}).get("type")
+        runtime, native = metadata.get("runtime", {}), metadata.get("native", {})
+        if package in CAMERA_WEBVIEW2_ALIASES:
+            if (version != CAMERA_WEBVIEW2_VERSION or kind != "reference"
+                    or set(runtime) != {package+".dll"} or native):
+                raise ValueError("Camera WebView2 reference identity or asset differs")
+        elif "webview2" in package.lower() and (identity != CAMERA_WEBVIEW2_PARENT or kind != "package"):
+            raise ValueError("Unreviewed camera WebView2 dependency")
+        if runtime or native:
+            if kind not in {"project", "package", "runtimepack", "reference"}:
+                raise ValueError("Unreviewed camera dependency kind")
+            if kind == "reference" and package not in CAMERA_WEBVIEW2_ALIASES:
+                raise ValueError("Camera reference has no reviewed package provenance")
+            if kind == "project" and package != "GlobalPulse.Camera":
+                raise ValueError("Unexpected project in camera dependency manifest")
+            if kind != "project":
+                expected_notices[identity] = (kind, sorted(runtime), sorted(native))
+        for key in ("runtime", "native"):
+            for relative in metadata.get(key, {}):
+                path = _camera_relative(relative)
+                if path.suffix.lower() not in {".dll", ".exe"}:
+                    raise ValueError("Unexpected camera runtime asset type")
+                allowed.add("camera/" + path.name)
+                if identity == CAMERA_WEBVIEW2_PARENT and key == "native":
+                    if path.as_posix() != "runtimes/win-x64/native/WebView2Loader.dll":
+                        raise ValueError("Unreviewed camera WebView2 native path")
+                    allowed.add(CAMERA_WEBVIEW2_NATIVE_DUPLICATE)
+        for relative in metadata.get("resources", {}):
+            path = _camera_relative(relative)
+            if not path.name.endswith(".resources.dll"):
+                raise ValueError("Unexpected camera resource asset")
+            allowed.add("camera/" + path.as_posix())
+    ledger = _camera_json(root/"camera/licenses/NATIVE_PACKAGE_NOTICES.json")
+    if (ledger.get("component") != "camera" or ledger.get("deps_file") != deps_path.name
+            or ledger.get("deps_sha256") != digest(deps_path) or ledger.get("target") != target_name):
+        raise ValueError("Camera notice ledger is not bound to the shipped dependency manifest")
+    resources = ledger.get("supplemental_resources", [])
+    desktop = [name for name in target if name.startswith("runtimepack.Microsoft.WindowsDesktop.App.Runtime.")]
+    if desktop:
+        if len(desktop) != 1 or desktop[0] not in CAMERA_DESKTOP_RUNTIME_PINS:
+            raise ValueError("Camera WindowsDesktop runtime version is not reviewed")
+        expected_paths = {culture + "/" + name for culture in CAMERA_DESKTOP_CULTURES for name in CAMERA_DESKTOP_SATELLITES}
+        if not isinstance(resources, list) or {item.get("file") for item in resources} != expected_paths:
+            raise ValueError("Camera WindowsDesktop satellite set differs from reviewed runtime")
+        resources = sorted(resources, key=lambda item: item["file"])
+        encoded = json.dumps(resources, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if hashlib.sha256(encoded).hexdigest() != CAMERA_DESKTOP_RUNTIME_PINS[desktop[0]]["resources_sha256"]:
+            raise ValueError("Camera WindowsDesktop satellite inventory differs from reviewed runtime")
+        for item in resources:
+            path = root/"camera"/item["file"]
+            if not path.is_file() or path.is_symlink() or path.stat().st_size != item["bytes"] or digest(path) != item["sha256"]:
+                raise ValueError("Camera WindowsDesktop satellite byte identity differs")
+            allowed.add("camera/" + item["file"])
+    elif resources:
+        raise ValueError("Camera supplemental resources lack exact runtime package provenance")
+    seen = set()
+    reviewed_notices = set()
+    for record in ledger.get("packages", []):
+        identity = str(record.get("package", "")) + "/" + str(record.get("version", ""))
+        if identity in seen or identity not in expected_notices:
+            raise ValueError("Camera notice inventory has an unlisted or duplicate dependency")
+        seen.add(identity)
+        if (record.get("type"), record.get("runtime_files"), record.get("native_files")) != expected_notices[identity]:
+            raise ValueError("Camera notice inventory runtime assets differ from deps")
+        package = record["package"]
+        webview = package in CAMERA_WEBVIEW2_ALIASES or identity == CAMERA_WEBVIEW2_PARENT
+        if webview and (record.get("notice_source_package") != CAMERA_WEBVIEW2_PARENT
+                        or record.get("notice_source_lock_sha512") != CAMERA_WEBVIEW2_LOCK_SHA512
+                        or record.get("notice_source_archive_sha512") != CAMERA_WEBVIEW2_ARCHIVE_SHA512):
+            raise ValueError("Camera WebView2 notices lack exact parent SDK lock/archive binding")
+        notice_records = record.get("notice_files", [])
+        if not notice_records:
+            raise ValueError("Camera dependency notice text missing")
+        source_names = set()
+        for notice in notice_records:
+            relative = _camera_relative(notice.get("packaged_relative"))
+            if relative.parts[0] != "licenses" or len(relative.parts) < 3:
+                raise ValueError("Camera notice path is outside the license inventory")
+            name = "camera/" + relative.as_posix()
+            if name in allowed:
+                raise ValueError("Camera notice file is duplicated or collides with runtime")
+            path = root/name
+            if (not path.is_file() or path.is_symlink()
+                    or path.stat().st_size != notice.get("bytes") or digest(path) != notice.get("sha256")):
+                raise ValueError("Camera notice byte identity differs: " + name)
+            if webview:
+                source_name = notice.get("source_relative")
+                expected = CAMERA_WEBVIEW2_NOTICE_PINS.get(source_name)
+                expected_directory = package + "-" + CAMERA_WEBVIEW2_VERSION
+                if (expected is None or source_name in source_names
+                        or relative.as_posix() != "licenses/" + expected_directory + "/" + source_name
+                        or notice.get("bytes") != expected["bytes"] or notice.get("sha256") != expected["sha256"]):
+                    raise ValueError("Camera WebView2 notice bytes/path differ from reviewed SDK")
+                source_names.add(source_name)
+                reviewed_notices.add(name)
+            allowed.add(name)
+        if webview and source_names != set(CAMERA_WEBVIEW2_NOTICE_PINS):
+            raise ValueError("Camera WebView2 SDK notice set is incomplete")
+        # The exact SDK projection verifier adds this supplemental receipt; it is
+        # separate from notice text and can never grant WebView2 exceptions.
+        if record.get("evidence_kind") == "official_sdk_license_redist_and_exact_unmodified_assets":
+            receipt_name = "camera/licenses/windows-sdk/SDK_DISTRIBUTION_RECEIPT.json"
+            receipt = _camera_json(root/receipt_name)
+            if receipt.get("component") != "camera" or receipt.get("sdk_identity") != identity:
+                raise ValueError("Camera SDK distribution receipt identity differs")
+            allowed.add(receipt_name)
+    if seen != set(expected_notices):
+        raise ValueError("Camera notice inventory is missing shipped dependencies")
+    for relative, expected in CAMERA_WEBVIEW2_ASSETS.items():
+        path = root/relative
+        if path.stat().st_size != expected["bytes"] or digest(path) != expected["sha256"]:
+            raise ValueError("Camera WebView2 asset byte identity differs: " + relative)
+    if CAMERA_WEBVIEW2_NATIVE_DUPLICATE in allowed:
+        duplicate = root/CAMERA_WEBVIEW2_NATIVE_DUPLICATE
+        expected = CAMERA_WEBVIEW2_ASSETS["camera/WebView2Loader.dll"]
+        if not duplicate.is_file() or duplicate.stat().st_size != expected["bytes"] or digest(duplicate) != expected["sha256"]:
+            raise ValueError("Camera WebView2 x64 native duplicate byte identity differs")
+    actual = {name for _, name in files(root/"camera")}
+    if {"camera/"+name for name in actual} != allowed:
+        extra = sorted({"camera/"+name for name in actual} - allowed)
+        missing = sorted(allowed - {"camera/"+name for name in actual})
+        raise ValueError("Camera runtime inventory differs from deps/notices; extra=" + repr(extra) + "; missing=" + repr(missing))
+    return {"allowed_files": allowed, "webview_notice_files": reviewed_notices,
+            "sdk_package": CAMERA_WEBVIEW2_PARENT}
+
+
 def scan(root, *, require_complete=True):
     root=Path(root).resolve()
     if not root.is_dir():raise ValueError("Runtime package directory does not exist")
     errors=[];count=0;total=0
+    camera = {"allowed_files": set(), "webview_notice_files": set()}
+    if require_complete or (root/"camera").exists():
+        try:
+            camera = camera_payload(root)
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            errors.append("camera: " + str(error))
     for path,relative in files(root):
         parts=PurePosixPath(relative).parts
         folded={p.lower() for p in parts}
         if len(parts)==1 and parts[0] not in TOP_FILES:errors.append(relative+": root file is not allowlisted")
         if len(parts)>1 and parts[0] not in TOP_DIRECTORIES:errors.append(relative+": root directory is not allowlisted")
-        if (parts[0].lower() == "tv"
-                or any(part.lower() in RETIRED_VIDEO_BASENAMES
-                       or part.lower().startswith(RETIRED_VIDEO_PREFIXES) for part in parts)):
-            errors.append(relative+": retired YouTube playback payload is forbidden")
+        retired = ("tv" in folded or any(part.lower() in RETIRED_VIDEO_BASENAMES
+                   or part.lower().startswith(RETIRED_VIDEO_PREFIXES) for part in parts))
+        webview = any(part.lower() == "webview2loader.dll" or part.lower().startswith("microsoft.web.webview2")
+                      for part in parts)
+        camera_exception = (relative in camera["allowed_files"] and
+                            (relative in CAMERA_WEBVIEW2_ASSETS or relative == CAMERA_WEBVIEW2_NATIVE_DUPLICATE
+                             or relative in camera["webview_notice_files"]))
+        if retired or (webview and not camera_exception):
+            errors.append(relative+": retired YouTube playback payload is forbidden; WebView2 requires exact camera provenance")
         if folded & FORBIDDEN_PARTS:errors.append(relative+": development or private-data directory")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES and relative!="_internal/certifi/cacert.pem":errors.append(relative+": forbidden runtime file type")
         if path.name.lower().startswith((".env","credentials","token_cache","secret")):errors.append(relative+": credential-like filename")
@@ -358,10 +590,12 @@ def sbom(root):
     for normalized,dist in sorted(distributions.items()):
         names=[canonical(re.split(r"[\s(<>=!~\[]",requirement,maxsplit=1)[0]) for requirement in dist.requires or []]
         dependencies.append({"ref":refs[normalized],"dependsOn":sorted({refs[name] for name in names if name in refs})})
-    # The self-contained notification helper contributes native/runtime NuGet components.
-    # Deduplicate identical package identities across its dependency manifests.
+    # Both self-contained helpers contribute native/runtime NuGet components.
+    # Reference assembly aliases resolve to the reviewed parent SDK, never fake
+    # NuGet packages. Validate that binding before creating its SBOM identity.
+    camera = camera_payload(root) if (root/"camera").exists() else None
     native_seen=set()
-    native_deps=sorted((root/"notifications").glob("*.deps.json"))
+    native_deps=sorted((root/"notifications").glob("*.deps.json")) + sorted((root/"camera").glob("*.deps.json"))
     for deps_path in native_deps:
         document=json.loads(deps_path.read_text(encoding="utf-8-sig"))
         for name,info in document.get("libraries",{}).items():
@@ -373,6 +607,14 @@ def sbom(root):
             components.append({"type":"library","name":package,"version":version,"bom-ref":ref,"purl":ref,
                                "properties":[{"name":"globalpulse:evidence","value":"Published .NET deps.json"},
                                              {"name":"globalpulse:license-review","value":"NOASSERTION — consult NuGet package licenses and notices"}]})
+    if camera:
+        package, version = camera["sdk_package"].rsplit("/", 1)
+        ref = f"pkg:nuget/{quote(package)}@{quote(version)}"
+        if ref not in native_seen:
+            native_seen.add(ref)
+            components.append({"type": "library", "name": package, "version": version, "bom-ref": ref, "purl": ref,
+                               "properties": [{"name": "globalpulse:evidence", "value": "Camera deps and notices bound to reviewed parent SDK lock and full archive SHA512"},
+                                              {"name": "globalpulse:license-review", "value": "NOASSERTION — independent redistribution review required"}]})
     # A file inventory covers bundled native/Qt/WebEngine assets for which package
     # metadata alone is insufficient. It is not a claim of complete provenance.
     for path,name in files(root):

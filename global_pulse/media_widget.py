@@ -76,11 +76,11 @@ def _supported_media(item):
 
 def media_identity(item):
     """Keep distinct approved cameras/stations that share a provider page."""
-    if item.get("snapshot_url"):
+    if item.get("snapshot_url") or item.get("playback") == "live_video":
         from .camera_context import approved_camera
         camera = approved_camera(item)
         if camera:
-            return ("camera", camera["id"], camera["snapshot_url"])
+            return ("camera", camera["id"], camera.get("snapshot_url") or camera["url"])
     url = str(item.get("url", item.get("original_url", "")))
     receiver = item.get("receiver")
     frequency = item.get("frequency")
@@ -101,6 +101,8 @@ class _MediaTile(QFrame):
         self.radio_host = ""
         self.camera = None
         self.camera_id = None
+        self._shutting_down = False
+        self._camera_request_generation = 0
         self.auto_camera_suspended = False
         self.layout_ = QVBoxLayout(self)
         self.setObjectName("MediaTile")
@@ -243,29 +245,77 @@ class _MediaTile(QFrame):
     def connect_camera(self, auto_consented=False):
         from .camera_context import approved_camera
         item=approved_camera(self._current())
-        if not item or (auto_consented and self.auto_camera_suspended):return False
+        if self._shutting_down or not item or (auto_consented and self.auto_camera_suspended):return False
+        live = item.get('playback') == 'live_video'
+        if auto_consented and (live or item.get('manual_only')):
+            return False
         if not auto_consented:self.auto_camera_suspended=False
-        if self.camera and self.camera_id==item['id']:return True
+        if self.camera and self.camera_id==item['id']:
+            # Retain a working session. An asynchronous live-player failure
+            # leaves its error visible, but the next manual Connect can retry.
+            if not live or self.camera.active:
+                return True
         if not auto_consented:
+            request_generation = self._camera_request_generation
+            message = (
+                f"Open {item.get('title', 'this live camera')} inside Pulse? The public provider "
+                "and its reviewed media hosts receive your IP address and requests. "
+                "This uses the original provider's player in an isolated private browser session. "
+                "Temporary browser files may be created; cleanup is attempted when the session closes. "
+                "Press Play in that player if asked. No recording; Stop, switching sources or hiding "
+                "Pulse disconnects it. This is area context, not evidence of an incident. Continue?"
+                if live else
+                "This connects to the named public provider, which receives your IP address. Images stay in memory. This is area context, not evidence of the incident. Continue?"
+            )
             consent=QMessageBox.question(self,"Connect to public camera?",
-                "This connects to the named public provider, which receives your IP address. Images stay in memory. This is area context, not evidence of the incident. Continue?",
+                message,
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
             if consent!=QMessageBox.StandardButton.Yes:return False
-        from .camera_snapshot import CameraSnapshot
+            # The dialog pumps a nested event loop. Stop, hide, shutdown or
+            # selection changes during it invalidate this earlier request.
+            if (self._shutting_down or self._camera_request_generation != request_generation
+                    or approved_camera(self._current()) != item):
+                return False
         self.stop()
-        self.camera=CameraSnapshot(item,self);self.camera_id=item['id']
-        self.camera.status_changed.connect(self.note.setText)
-        self.layout_.insertWidget(3,self.camera,1);self.display.hide();self.camera.start()
+        try:
+            if live:
+                from .live_camera import LiveCamera
+                camera = LiveCamera(item, self)
+            else:
+                from .camera_snapshot import CameraSnapshot
+                camera = CameraSnapshot(item, self)
+            self.camera = camera
+            self.camera_id = item['id']
+            camera.status_changed.connect(
+                lambda text, session=camera: self._camera_status(session, text)
+            )
+            self.layout_.insertWidget(3,camera,1)
+            self.display.hide()
+            if camera.start() is False:
+                self.stop()
+                self.note.setText("Camera could not start. Select Source to open the public player.")
+                return False
+        except (ImportError, RuntimeError, ValueError) as error:
+            self.stop()
+            self.note.setText(str(error) + ". Select Source to open the public player.")
+            self.note.setToolTip(self.note.text())
+            return False
         return True
 
+    def _camera_status(self, session, text):
+        if not self._shutting_down and self.camera is session:
+            self.note.setText(text)
+            self.note.setToolTip(text)
+
     def watch(self):
+        if self._shutting_down:
+            return False
         item = self._current()
         if not _supported_media(item):
             self.note.setText("Only public radio receivers and reviewed cameras can connect here.")
             return False
-        if item.get('snapshot_url'):
-            self.connect_camera()
-            return
+        if item.get('snapshot_url') or item.get('playback') == 'live_video':
+            return self.connect_camera()
         if str(item.get("type", "")).lower() == "radio" and all(item.get(key) not in {None, ""} for key in ("receiver", "frequency", "mode")):
             try:
                 receiver_url = safe_url(item.get("receiver") or item.get("url", item.get("original_url", "")))
@@ -389,15 +439,25 @@ class _MediaTile(QFrame):
         self.layout_.insertWidget(3, self.radio_view, 1)
 
     def stop(self):
+        self._camera_request_generation += 1
         if self.camera:
-            self.camera.stop();self.camera.hide();self.camera.deleteLater()
+            camera = self.camera
             self.camera=None;self.camera_id=None
+            camera.stop();camera.hide();camera.deleteLater()
         if self.radio_view:
             self.radio_view.stop()
             self.radio_view.setUrl(QUrl("about:blank"))
             self.radio_view.hide()
         self.display.show()
         self.note.setText("Media stopped. Source monitoring is controlled separately.")
+
+    def hideEvent(self, event):
+        self.stop()
+        super().hideEvent(event)
+
+    def shutdown(self):
+        self._shutting_down = True
+        self.stop()
 
 
 class MediaPanel(QWidget):

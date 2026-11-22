@@ -28,7 +28,8 @@ class CameraSnapshot(QLabel):
     def __init__(self,item,parent=None):
         super().__init__(parent)
         self.item=approved_camera(item)
-        if not self.item:raise ValueError('Camera is not in the reviewed public registry')
+        if not self.item or not self.item.get('snapshot_url') or self.item.get('playback') == 'live_video':
+            raise ValueError('Camera is not a reviewed still-image snapshot')
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.setMinimumSize(40,40)

@@ -66,7 +66,7 @@ def event(title, region="", country=""):
 
 
 def test_bank_adds_twelve_sources_and_keeps_unavailable_legacy_entry_honest():
-    catalog = camera_catalog()
+    catalog = [item for item in camera_catalog() if item.get("snapshot_url")]
     assert len(catalog) == 14
     assert len({item["id"] for item in catalog}) == 14
     assert len({item["snapshot_url"] for item in catalog}) == 14
@@ -90,7 +90,7 @@ def test_bank_adds_twelve_sources_and_keeps_unavailable_legacy_entry_honest():
 def test_every_source_has_exact_https_image_rights_credit_and_dated_review():
     image_hosts = {"www.nps.gov", "volcanoes.usgs.gov", "images.geonet.org.nz",
                    "opendata.dwd.de", "www.eso.org"}
-    for item in camera_catalog():
+    for item in (entry for entry in camera_catalog() if entry.get("snapshot_url")):
         assert item["type"] == "webcam"
         assert item["refresh_seconds"] == 900
         assert urlsplit(item["snapshot_url"]).hostname in image_hosts
@@ -174,7 +174,7 @@ def test_new_areas_do_not_expand_ambiguous_or_conflicting_association(title, reg
 def test_bank_visible_at_start_without_event_network_or_tv(panel):
     assert panel.tabs.currentWidget() is panel.radio
     assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())] == ["Radio", "Cameras"]
-    assert len(ids(panel.camera)) == 14
+    assert len(ids(panel.camera)) == 17
     assert ids(panel.camera)[-1] == "usgs-kilauea-v1"
     assert "available manually" in panel.camera_status.text()
     assert "13 responded at the dated review; 1 unavailable" in panel.camera_status.text()
@@ -185,7 +185,7 @@ def test_bank_visible_at_start_without_event_network_or_tv(panel):
 
 def test_search_and_region_filter_no_match_and_restore(panel):
     panel.camera_region.setCurrentText("Oceania")
-    assert len(ids(panel.camera)) == 6
+    assert len(ids(panel.camera)) == 9
     panel.camera_search.setText("ruapehu")
     assert ids(panel.camera) == ["geonet-ruapehu-north", "geonet-ruapehu-south"]
     panel.camera_search.setText("Germany")
@@ -198,7 +198,7 @@ def test_search_and_region_filter_no_match_and_restore(panel):
     panel.camera_search.setText("Hohenpeissenberg")
     assert ids(panel.camera) == ["dwd-hohenpeissenberg"]
     panel.camera_search.clear()
-    assert len(ids(panel.camera)) == 14
+    assert len(ids(panel.camera)) == 17
     assert panel.camera.camera is None
 
 

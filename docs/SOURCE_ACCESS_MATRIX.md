@@ -8,6 +8,12 @@ The original November 8 inventory had 14 enabled public source configurations, i
 
 **R20 update, November 21:** YouTube playback and its `youtube`/`tousitv` manual catalog entries have been removed at the owner's request. Those two retired entries are omitted from the historical table below. News-source original links remain intact; no YouTube player or live-video discovery is provided.
 
+**Reconstructed three-camera successor, November 22:** the finite manual camera
+bank adds the three original public-player pages listed below. This does not add
+general live-video discovery, arbitrary URLs, or automatic live playback. The
+prior session's public-page checks are retained as dated observations; this
+reconstruction has not repeated those checks or established Windows playback.
+
 The app fetches public metadata, headlines, and bounded feed excerpts. It does not download complete publisher articles, photographs, account data, or video/audio files. Feed text is treated as untrusted plain text. Source attribution, author/byline where supplied, original URL, source-license text, publication date, retrieval date, and source update time travel with the record. A missing publication time remains explicitly unknown. An official statement confirms attribution, not all its claims. EONET and GDACS reuse external reporting and are not automatically independent corroboration.
 
 Collection intervals are at least 10 minutes by default, 5 minutes only where configured and permissible, and 24 hours for annual World Bank series. Provider Retry-After and cache lifetimes can lengthen them. Failed sources are isolated, and no retry fabricates missed observations. Per-host throttles survive restart through stored rate-limit checkpoints.
@@ -66,15 +72,35 @@ The standalone source suite passes **41 focused tests**, including RSS/Atom/RDF/
 
 ## Media and restricted sources
 
-The YouTube/Tousi TV integration is retired. Historical reports and old saved-video preferences are not erased, but they cannot recreate a playback or dedicated media-source shortcut. Non-YouTube provider pages remain external-only links, not in-app video players.
+The YouTube/Tousi TV integration is retired. Historical reports and old saved-video preferences are not erased, but they cannot recreate a playback or dedicated media-source shortcut. The three explicitly listed public camera pages below have a camera-only in-app Windows player; other original news/provider links remain external actions.
 
 [ReliefWeb](https://apidoc.reliefweb.int/) now requires an approved appname for read/search; none was supplied. [BBC terms](https://downloads.bbc.co.uk/usingthebbc/bbc_terms_of_use_19September2022english.pdf) require permission for business RSS use. [UN terms](https://www.un.org/en/about-us/terms-of-use) restrict redistribution and derivatives. [EBC's current terms](https://www.ebc.com.br/termos-de-uso-e-condicoes-gerais-do-portal-da-ebc) have personal/noncommercial scope; older CC notices cannot silently override them. Those adapters remain disabled pending the stated review or approval.
 
-Public camera entries use individually reviewed operator pages and attributed
+The 14 existing public snapshot entries use individually reviewed operator pages and attributed
 JPEG/PNG landscape snapshots. See [the worldwide camera review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WORLD_CAMERA_SOURCES_20261121.md)
 for exact endpoints, reuse terms and bounded availability observations. These
 are periodically refreshed stills, not continuous video or guaranteed current
-incident views. Provider pages may offer other viewing modes outside Pulse.
+incident views. Their exact records and automatic association behavior are
+preserved in this successor.
+
+The separate manual-only live choices are:
+
+| Catalog ID | Original public player | Provider rights/source references | Prior recorded public-page observation |
+| --- | --- | --- | --- |
+| `gpc-tannum-sands-live` | [GPC Tannum Sands](https://gpcl.com.au/environment/live-beach-cameras/tannum-sands-webcam/) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+| `gpc-1770-live` | [GPC 1770](https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1280×720 player and advancing playback time in cloud Chrome. |
+| `bsyc-seacliff-live` | [BSYC Seacliff on IPCamLive](https://www.ipcamlive.com/bsyc1080) | [BSYC weather page](https://www.bsyc.com.au/weather) · [IPCamLive terms](https://www.ipcamlive.com/terms) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+
+These observations are attributed to the earlier session and were not repeated
+during reconstruction. Public availability and an observed player do not grant
+recording, mirroring or redistribution rights. Pulse opens the provider page,
+retains its own player/credit and a visible Source action, and captures neither
+raw stream URLs nor expiring access tokens. Source terms remain subject to exact
+review. Provider requests stay within each canonical entry's finite HTTPS host
+list; additional hosts require review, not a wildcard or automatic bypass.
+The native helper uses private sessions and attempts temporary-profile cleanup;
+it does not claim an entirely memory-only browser. Windows playback and exact
+package behavior still need fresh validation for this reconstructed candidate.
 
 Radio now supports [WebSDR](https://websdr.org/) only; KiwiSDR is retired. See
 [the individual receiver review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WEBDR_OPERATOR_LINKS_20261121.md) for the expanded

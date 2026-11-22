@@ -1,4 +1,35 @@
-# Current freeware compliance candidate — 2026-11-10
+# Reconstructed camera-only Windows helper — 2026-11-22
+
+This successor introduces a separate native helper for exactly three reviewed
+public camera pages. It does not restore the removed YouTube/TV helper or KiwiSDR
+integration. The existing 14 snapshots and 37 curated WebSDR entries retain
+their distinct access and attribution requirements.
+
+The camera helper uses Microsoft WebView2 SDK components and a self-contained
+.NET Windows runtime. Its project/lock inputs and the resulting Windows package
+inventories identify the exact selected versions. The normal installed Microsoft
+Edge WebView2 Runtime is a prerequisite; this package does not bundle or install
+that runtime. Preserve the applicable Microsoft WebView2 terms and the exact
+.NET component notices alongside the helper. A generated inventory or successful
+build is not by itself a redistribution-rights clearance.
+
+GPC Tannum Sands and 1770 retain Gladstone Ports Corporation/CoastalCOMS
+attribution and original provider pages. BSYC Seacliff retains Brighton & Seacliff
+Yacht Club/IPCamLive attribution and the original public IPCamLive player. The
+canonical catalog includes their Source and terms links; see
+`SOURCE_ACCESS_MATRIX.md` for the exact pages. The application adds no recording,
+mirroring, token extraction or redistribution function, and no media license is
+inferred from public player availability. Live-session private profiles may
+create temporary files; cleanup is attempted rather than guaranteed after a
+crash or file lock.
+
+This reconstruction starts from `74c8de9` and retained task records. The missing
+`a4e4c96` candidate's tests and earlier packages do not establish the identity,
+notices or rights of these new bytes. Fresh exact-package evidence and independent
+review remain required. Historical dependency and notice records below preserve
+their original scope and dates.
+
+# Historical freeware compliance candidate — 2026-11-10
 
 Global Pulse is provided free of charge. This does not change the application's
 source-code licensing or remove third-party obligations.

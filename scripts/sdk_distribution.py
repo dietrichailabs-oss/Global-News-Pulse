@@ -60,7 +60,11 @@ def load_bundle(root: Path) -> dict:
     return bundle
 
 
-def prepare(deps: Path, nuget_root: Path, published: Path, *, bundle_root: Path = BUNDLE_ROOT) -> dict:
+def prepare(deps: Path, nuget_root: Path, published: Path, *, bundle_root: Path = BUNDLE_ROOT, component: str = "notifications") -> dict:
+    if component not in {"notifications", "camera"}:
+        raise ValueError('Unsupported native component')
+    if component == "camera" and deps.name != "GlobalPulse.Camera.deps.json":
+        raise ValueError('Camera SDK receipt requires the published camera dependency identity')
     bundle = load_bundle(bundle_root)
     published = published.resolve(strict=True)
     if deps.resolve().parent != published:
@@ -116,19 +120,24 @@ def prepare(deps: Path, nuget_root: Path, published: Path, *, bundle_root: Path 
         raise ValueError('SDK absent or duplicated in native notice inventory')
     record = records[0]
     record['evidence_kind'] = 'official_sdk_license_redist_and_exact_unmodified_assets'
-    record['notice_files'] = copied
+    record['notice_files'] = record.get('notice_files', []) + copied
     record['verified_runtime_files'] = verified
-    record['downstream_terms'] = 'Installer terms page and content-bound first-use notification-component consent; independent QA pending'
+    record['downstream_terms'] = (
+        'Installer terms page and content-bound first-use notification-component consent; independent QA pending'
+        if component == 'notifications' else
+        'HOLD: camera SDK projection distribution terms need independent review; notification consent does not approve this component'
+    )
     notices['external_license_reference_only'] = [
         {'package': r['package'], 'version': r['version']} for r in notices['packages']
         if r['evidence_kind'] == 'external_license_reference_only'
     ]
     notices['release_rights_status'] = (
         'HOLD: remaining external-only license reference' if notices['external_license_reference_only'] else
+        'HOLD: camera SDK projection distribution terms need independent review; exact bytes and documents verified' if component == 'camera' else
         'Official notice evidence collected; exact SDK distribution conditions implemented, pending independent QA; not public release approval'
     )
     notice_path.write_text(json.dumps(notices, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-    receipt = {'schema_version': 1, 'sdk_identity': SDK_ID, 'target': target_name,
+    receipt = {'schema_version': 1, 'component': component, 'sdk_identity': SDK_ID, 'target': target_name,
                'sdk_archive_sha256': SDK_ARCHIVE_SHA256, 'verified_runtime_files': verified,
                'documents': copied, 'status': 'ENGINEERING_BYTE_AND_DOCUMENT_CHECK_PASS',
                'independent_qa': 'PENDING', 'public_release': 'NOT_APPROVED',
@@ -142,8 +151,9 @@ def main():
     parser.add_argument('--deps', type=Path, required=True)
     parser.add_argument('--nuget-root', type=Path, required=True)
     parser.add_argument('--published', type=Path, required=True)
+    parser.add_argument('--component', choices=('notifications', 'camera'), default='notifications')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.deps, args.nuget_root, args.published), indent=2))
+    print(json.dumps(prepare(args.deps, args.nuget_root, args.published, component=args.component), indent=2))
 
 
 if __name__ == '__main__':

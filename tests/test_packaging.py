@@ -19,7 +19,7 @@ def inert_pe_header(machine=0x8664):
 
 
 @pytest.fixture
-def package(tmp_path):
+def package(tmp_path, monkeypatch):
     root=tmp_path/"runtime";root.mkdir()
     for name in ("GlobalPulse.exe","notifications/GlobalPulse.Notifications.exe","notifications/coreclr.dll","_internal/python312.dll"):
         path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(inert_pe_header())
@@ -33,6 +33,8 @@ def package(tmp_path):
         ("_internal/global_pulse/resources/translation_models.json",{}),
         ("_internal/global_pulse/resources/context_cameras.json",{"schema_version":1,"entries":[]})):
         path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data))
+    from test_live_camera_packaging import add_inert_camera
+    add_inert_camera(root, monkeypatch, pack)
     return root
 
 

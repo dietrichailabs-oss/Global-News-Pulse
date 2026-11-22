@@ -1,4 +1,46 @@
-# R20 WebSDR and worldwide camera expansion — 2026-11-21
+# R20 three-camera reconstruction — 2026-11-22
+
+This successor restores three **manual-only** live-video choices alongside the
+unchanged 14-entry still-image bank. The live choices are GPC Tannum Sands, GPC
+1770, and BSYC Seacliff. They load the named public provider pages through a new
+camera-only Windows WebView2 helper. They are not automatically selected by event
+geography or started by automatic-camera consent. No YouTube/TV helper, KiwiSDR
+path, arbitrary page player, raw-stream extraction, token capture, or recording
+feature is restored. The 37 curated WebSDR entries remain unchanged.
+
+The earlier session recorded visible player dimensions and advancing playback
+time on the three original public pages on November 22. Those are retained,
+attributed observations, not new checks made during reconstruction. They do not
+establish Windows Pulse playback, current provider uptime, fresh camera capture,
+or permission to record, mirror, or redistribute media. A loaded page, helper
+process, or embedded child window is not proof of moving video or working codecs.
+
+Windows live video requires the normally installed Microsoft Edge WebView2
+Runtime. The packaged helper is self-contained for its .NET runtime; it does not
+bundle or install the Edge runtime. Provider layout, host assignments, cookies,
+autoplay policy or codecs may change. The finite host policy fails closed when a
+provider needs an unreviewed host. Use **Source** if the in-app player is
+unavailable, and retain that limitation until the exact package is observed.
+
+Stop, camera changes, tab changes, hiding the panel and shutdown disconnect the
+camera. Returning to the panel does not resume live video. A Yes response to an
+older consent dialog must not restart a request canceled by Stop, hiding,
+shutdown or a changed selection. Failed inactive live sessions can be retried
+with a fresh manual Connect; active same-camera Connect is idempotent. Isolated
+private browser sessions can create temporary files. Cleanup is attempted on
+close, but crashes or locked files can leave remnants; memory-only privacy claims
+apply to the still-image path, not the native live helper.
+
+This source was reconstructed on base
+`74c8de9ef59df577b0d9ee7e902b2d98baa6903e` after the previous checkout disappeared.
+The unrecovered `a4e4c960bf8954a19db62a486c65822b7ef1019d` files and their reported
+2,320-test result are separate historical evidence. This reconstruction requires
+fresh source validation, an exact Windows build and playback/lifecycle checks.
+Historical timing failures on the base remain historical findings; the camera
+restoration is not presented as a correction for them. No public release is
+approved by source reconstruction or by an offline regression result.
+
+# Historical R20 WebSDR and worldwide camera expansion — 2026-11-21
 
 KiwiSDR support is retired at the owner's request. WebSDR receiver links are
 individually sourced; this is not a complete copy of WebSDR.org's maintained

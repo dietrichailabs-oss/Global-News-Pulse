@@ -95,14 +95,33 @@ guarantee of reception or current availability.
 The **Cameras** tab offers a worldwide bank of reviewed public cameras even
 without a selected news event. Matching area cameras are shown for selected
 events, but they are area context, not evidence that a camera witnessed the
-story. Connect a camera explicitly, or enable **Auto cameras** after its consent
-prompt. Native camera views are silent, periodically refreshed JPEG/PNG stills,
-not continuous live video. Refresh is no faster than every 15 minutes; check
-the image's capture time and provider status, not just Pulse's download time.
-An endpoint working when reviewed is not an uptime guarantee. Images stay in
-process memory without a recording archive. **Stop all media** ends media
-playback without pausing source monitoring. Switching tabs stops the media from
-the previous tab.
+story. The bank contains **14 still-image views** plus **three manual live-video
+choices**: GPC Tannum Sands, GPC 1770, and BSYC Seacliff.
+
+Connect a snapshot explicitly, or enable **Auto cameras (still images)** after
+its consent prompt. Snapshots are silent JPEG/PNG images with a refresh no faster
+than every 15 minutes. Check the image's capture time and provider status, not
+just Pulse's download time. Images stay in process memory without a recording
+archive. An endpoint working at its dated review is not an uptime guarantee.
+
+Live-video choices always require a separate manual **Connect** and consent.
+Selecting one, opening Cameras, or enabling automatic snapshots does not start
+live video. The original provider page opens inside the camera panel; press
+Play in that page if asked. This feature requires Windows and the Microsoft Edge
+WebView2 Runtime. If the player is unavailable, use **Source** to visit the
+original page. The visible source credit and provider terms still apply; Pulse
+does not record the video. The private browser session can create temporary
+files and attempts to remove them when it closes, but a crash or locked file
+can leave remnants.
+
+**Stop all media** ends media playback without pausing source monitoring.
+Changing cameras or tabs, hiding the dashboard, or exiting disconnects the
+previous camera. Returning does not resume live video; choose Connect again.
+A failed connection can be retried manually, while Connect on an already active
+camera keeps the existing session. A page-loaded message is not proof that video
+is moving. The dated public-page checks in this reconstructed candidate come
+from the earlier session; playback inside the exact Windows package remains a
+separate test.
 
 YouTube playback and the TV tab have been removed. There are no video test,
 saved-video, watch-page, or floating YouTube controls, and new packages do not

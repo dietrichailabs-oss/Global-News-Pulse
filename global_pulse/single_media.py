@@ -38,7 +38,7 @@ class MediaPanel(QWidget):
         self._camera_catalog = [dict(item) for item in camera_catalog()]
         self.camera_page = QWidget()
         camera_layout = QVBoxLayout(self.camera_page)
-        self.auto_camera_check = QCheckBox("Auto cameras")
+        self.auto_camera_check = QCheckBox("Auto cameras (still images)")
         self.auto_camera_check.toggled.connect(self._toggle_cameras)
         self.camera_search = QLineEdit()
         self.camera_search.setPlaceholderText("Search place, country or provider")
@@ -143,12 +143,15 @@ class MediaPanel(QWidget):
         self.camera._populate(initial_index=initial_index)
         reviewed = sum(item.get("review_status") == "recent_image_verified" for item in self._camera_catalog)
         unavailable = sum(item.get("review_status") == "unavailable_at_review" for item in self._camera_catalog)
+        live_count = sum(item.get("playback") == "live_video" for item in self._camera_catalog)
+        snapshot_count = sum(bool(item.get("snapshot_url")) for item in self._camera_catalog)
         relation = (f"{len(matches)} match selected event; area context only"
                     if matches else "none match selected event")
         self.camera_status.setText(
             f"{len(catalog)} / {len(self._camera_catalog)} reviewed entries available manually · {relation}\n"
+            f"{live_count} manual live-video choices; {snapshot_count} still-image views. "
             f"{reviewed} responded at the dated review; {unavailable} unavailable. "
-            "Refreshing still images, not continuous video; 15-minute minimum refresh."
+            "Still images are not continuous video; 15-minute minimum refresh."
         )
         self._update_camera_attribution()
 
@@ -171,7 +174,9 @@ class MediaPanel(QWidget):
         license_text = str(item.get("license", "See source terms"))
         license_link = link(license_text, item.get("license_url", item.get("rights_url", "")))
         checked = str(item.get("last_verified", "Not checked")).replace("T", " ").replace("Z", " UTC")
-        state = ("Unavailable at review — try Source" if item.get("review_status") == "unavailable_at_review"
+        state = ("Manual live video on the original provider page; Windows playback unverified"
+                 if item.get("playback") == "live_video"
+                 else "Unavailable at review — try Source" if item.get("review_status") == "unavailable_at_review"
                  else "Image responded at review; availability may change")
         self.camera_attribution.setText(
             f"{credit} · {license_link}<br>{escape(state)} · Checked {escape(checked)}"
@@ -197,8 +202,8 @@ class MediaPanel(QWidget):
     def _toggle_cameras(self, enabled):
         if enabled:
             enabled = QMessageBox.question(
-                self, "Automatically connect reviewed area cameras?",
-                "While the Cameras tab is selected, connect matching reviewed public cameras "
+                self, "Automatically connect reviewed area snapshots?",
+                "While the Cameras tab is selected, connect matching reviewed public still-image cameras "
                 "for active events? Providers receive your IP address. Images remain in memory, "
                 "not recordings. Coverage is limited.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -228,6 +233,11 @@ class MediaPanel(QWidget):
     def shutdown(self):
         self._shutting_down = True
         self.radio.shutdown()
-        self.camera.stop()
+        self.camera.shutdown()
         from .camera_snapshot import CameraSnapshot
         CameraSnapshot._images.clear()
+
+    def hideEvent(self, event):
+        self.radio.off()
+        self.camera.stop()
+        super().hideEvent(event)
