@@ -8,11 +8,11 @@ The original November 8 inventory had 14 enabled public source configurations, i
 
 **R20 update, November 21:** YouTube playback and its `youtube`/`tousitv` manual catalog entries have been removed at the owner's request. Those two retired entries are omitted from the historical table below. News-source original links remain intact; no YouTube player or live-video discovery is provided.
 
-**Reconstructed three-camera successor, November 22:** the finite manual camera
-bank adds the three original public-player pages listed below. This does not add
-general live-video discovery, arbitrary URLs, or automatic live playback. The
-prior session's public-page checks are retained as dated observations; this
-reconstruction has not repeated those checks or established Windows playback.
+**Focused three-camera view, November 22:** the finite manual camera bank uses
+the three reviewed sources below. GPC opens its published video-player documents;
+Seacliff retains its original public document and provider-created player with a
+focused layout. This does not add general live-video discovery, arbitrary URLs,
+or automatic live playback. Dated observations and their limits are listed below.
 
 The app fetches public metadata, headlines, and bounded feed excerpts. It does not download complete publisher articles, photographs, account data, or video/audio files. Feed text is treated as untrusted plain text. Source attribution, author/byline where supplied, original URL, source-license text, publication date, retrieval date, and source update time travel with the record. A missing publication time remains explicitly unknown. An official statement confirms attribution, not all its claims. EONET and GDACS reuse external reporting and are not automatically independent corroboration.
 
@@ -85,22 +85,35 @@ preserved in this successor.
 
 The separate manual-only live choices are:
 
-| Catalog ID | Original public player | Provider rights/source references | Prior recorded public-page observation |
-| --- | --- | --- | --- |
-| `gpc-tannum-sands-live` | [GPC Tannum Sands](https://gpcl.com.au/environment/live-beach-cameras/tannum-sands-webcam/) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
-| `gpc-1770-live` | [GPC 1770](https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1280×720 player and advancing playback time in cloud Chrome. |
-| `bsyc-seacliff-live` | [BSYC Seacliff on IPCamLive](https://www.ipcamlive.com/bsyc1080) | [BSYC weather page](https://www.bsyc.com.au/weather) · [IPCamLive terms](https://www.ipcamlive.com/terms) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+| Catalog ID | Original source / Source action | In-app player document | Provider rights/source references | Prior recorded public-page observation |
+| --- | --- | --- | --- | --- |
+| `gpc-tannum-sands-live` | [GPC Tannum Sands](https://gpcl.com.au/environment/live-beach-cameras/tannum-sands-webcam/) | [Published CoastalCOMS video player](https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+| `gpc-1770-live` | [GPC 1770](https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/) | [Published CoastalCOMS video player](https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1280×720 player and advancing playback time in cloud Chrome. |
+| `bsyc-seacliff-live` | [BSYC Seacliff on IPCamLive](https://www.ipcamlive.com/bsyc1080) | Same original public document; its provider-created iframe remains unchanged. | [BSYC weather page](https://www.bsyc.com.au/weather) · [IPCamLive terms](https://www.ipcamlive.com/terms) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
 
-These observations are attributed to the earlier session and were not repeated
-during reconstruction. Public availability and an observed player do not grant
-recording, mirroring or redistribution rights. Pulse opens the provider page,
-retains its own player/credit and a visible Source action, and captures neither
+The table's observations are attributed to the earlier session. On November 22
+the owner separately reported working 1770 video in the previous Windows build
+and supplied a screenshot of its full-page view. The dedicated 1770 player also
+displayed coastal video in cloud Chrome during this update. These observations
+do not verify the focused layout inside the new Windows package or establish
+current playback for all three sources.
+
+The GPC player routes come from the video iframes published on the original GPC
+pages. Their controls, branding and visible technical-availability notice remain
+in the layout. IPCamLive's standalone BSYC embed reports that embedding is not
+available; Pulse keeps the working public document and adjusts its layout only,
+without changing the provider iframe's URL, parameters, access or error state.
+If the expected player structure is missing, the original page layout remains.
+
+Public availability and an observed player do not grant recording, mirroring or
+redistribution rights. Pulse retains the provider's player/credit and visible
+Source and Source terms actions, and captures neither
 raw stream URLs nor expiring access tokens. Source terms remain subject to exact
 review. Provider requests stay within each canonical entry's finite HTTPS host
 list; additional hosts require review, not a wildcard or automatic bypass.
 The native helper uses private sessions and attempts temporary-profile cleanup;
 it does not claim an entirely memory-only browser. Windows playback and exact
-package behavior still need fresh validation for this reconstructed candidate.
+package behavior still need validation for this focused-view candidate.
 
 Radio now supports [WebSDR](https://websdr.org/) only; KiwiSDR is retired. See
 [the individual receiver review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WEBDR_OPERATOR_LINKS_20261121.md) for the expanded

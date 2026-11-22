@@ -15,6 +15,11 @@ EXPECTED = {
     "gpc-1770-live": "https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/",
     "bsyc-seacliff-live": "https://www.ipcamlive.com/bsyc1080",
 }
+EXPECTED_PLAYERS = {
+    "gpc-tannum-sands-live": "https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec",
+    "gpc-1770-live": "https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d",
+    "bsyc-seacliff-live": "https://www.ipcamlive.com/bsyc1080",
+}
 
 
 def live_entries():
@@ -25,6 +30,7 @@ def test_exact_three_live_choices_are_distinct_from_unchanged_snapshot_bank():
     catalog = camera_catalog()
     assert len(catalog) == 17 and len({row["id"] for row in catalog}) == 17
     assert {row["id"]: row["url"] for row in live_entries()} == EXPECTED
+    assert {row["id"]: row["player_url"] for row in live_entries()} == EXPECTED_PLAYERS
     snapshots = [row for row in catalog if row.get("snapshot_url")]
     assert len(snapshots) == 14
     # Canonical JSON of all 14 original records at base 74c8de9. This verifies
@@ -42,6 +48,7 @@ def test_live_records_use_original_pages_exact_hosts_and_manual_consent(identifi
     assert "not Windows Pulse" in row["verification_context"]
     assert row["attribution"] and row["rights"] and row["rights_url"]
     assert urlsplit(row["url"]).hostname in row["allowed_hosts"]
+    assert urlsplit(row["player_url"]).hostname in row["allowed_hosts"]
     assert set(row["allowed_frame_hosts"]) <= set(row["allowed_hosts"])
     for host in row["allowed_hosts"]:
         assert host == host.strip().lower() and "." in host
@@ -53,7 +60,8 @@ def test_live_records_use_original_pages_exact_hosts_and_manual_consent(identifi
 def test_caller_host_fields_cannot_expand_a_canonical_live_camera(identifier):
     row = next(row for row in live_entries() if row["id"] == identifier)
     poisoned = dict(row, allowed_hosts=["unreviewed.example"], manual_only=False,
-                    attribution="injected", allowed_frame_hosts=["unreviewed.example"])
+                    attribution="injected", allowed_frame_hosts=["unreviewed.example"],
+                    player_url="https://unreviewed.example/player")
     assert approved_camera(poisoned) == row
     assert approved_camera(dict(row, url=row["url"] + "?unreviewed=1")) is None
     assert approved_camera(dict(row, playback="snapshot")) is None

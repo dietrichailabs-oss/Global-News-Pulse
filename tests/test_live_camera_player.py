@@ -127,6 +127,30 @@ def test_initialization_does_not_start_browser_and_uses_immutable_registry(camer
         widget.item["url"] = "https://unreviewed.example/"
 
 
+@pytest.mark.parametrize("identifier", sorted(live.CAMERA_IDS))
+def test_player_route_comes_from_canonical_catalog_not_caller(identifier):
+    row = next(row for row in camera_catalog() if row["id"] == identifier)
+    canonical = live._canonical_camera(dict(row, player_url="https://unreviewed.example/player"))
+    assert canonical["player_url"] == live.CAMERA_PLAYER_PAGES[identifier]
+    assert canonical["url"] == row["url"]
+
+
+@pytest.mark.parametrize("player_url", [
+    "https://unreviewed.example/player",
+    "https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d",
+    "https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec?other=1",
+    "https://widget.coastalcoms.com/weather/53ecdafb-abed-4bce-b9a2-963cdd836dc9",
+    "https://www.ipcamlive.com/player/player.php?alias=bsyc1080",
+    "",
+])
+def test_unreviewed_compiled_player_route_fails_closed(monkeypatch, player_url):
+    import global_pulse.camera_context as registry
+    row = next(row for row in camera_catalog() if row["id"] == "gpc-tannum-sands-live")
+    monkeypatch.setattr(registry, "approved_camera", lambda _: dict(row, player_url=player_url))
+    with pytest.raises(ValueError):
+        live._canonical_camera(row)
+
+
 def test_start_only_sends_finite_id_and_parent_hwnd_not_url(camera):
     widget, sessions = camera
     assert widget.start() is True
@@ -146,7 +170,8 @@ def test_loaded_is_not_playback_and_ready_requires_private_owned_window(camera):
     process.send(type="ready", hwnd=123, in_private=True)
     process.send(type="page_loaded", success=True)
     assert widget.active and not widget.deadline.isActive()
-    assert "not automatically verified" in messages[-1]
+    assert "loaded" in messages[-1].lower() and "press Play" in messages[-1]
+    assert "verified" not in messages[-1].lower()
     assert not any("playing" in message.lower() for message in messages)
 
 
@@ -297,7 +322,7 @@ def test_native_host_source_contract_no_arbitrary_url_or_provider_identity_worka
     source = (ROOT / "packaging/camera/NativeCameraProgram.cs").read_text()
     policy = (ROOT / "packaging/camera/CameraPolicy.cs").read_text()
     assert "catalog.TryGetValue(args[0]" in source
-    assert 'web.Navigate(camera.WatchUrl)' in source
+    assert 'web.Navigate(camera.PlayerUrl)' in source
     assert "IsInPrivateModeEnabled = true" in source
     assert "OwnedProcessJob.Contains(browserProcess.Handle)" in source
     assert 'e.State = CoreWebView2PermissionState.Deny' in source

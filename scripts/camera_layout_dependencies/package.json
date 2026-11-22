@@ -1,0 +1,12 @@
+{
+  "name": "global-pulse-camera-layout-qa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Development-only offline camera layout QA; uses the runner's installed browser.",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

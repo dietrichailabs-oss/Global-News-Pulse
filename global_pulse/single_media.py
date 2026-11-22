@@ -143,13 +143,16 @@ class MediaPanel(QWidget):
         self.camera._populate(initial_index=initial_index)
         reviewed = sum(item.get("review_status") == "recent_image_verified" for item in self._camera_catalog)
         unavailable = sum(item.get("review_status") == "unavailable_at_review" for item in self._camera_catalog)
-        live_count = sum(item.get("playback") == "live_video" for item in self._camera_catalog)
-        snapshot_count = sum(bool(item.get("snapshot_url")) for item in self._camera_catalog)
+        live_count = sum(item.get("playback") == "live_video" for item in catalog)
+        snapshot_count = sum(bool(item.get("snapshot_url")) for item in catalog)
         relation = (f"{len(matches)} match selected event; area context only"
                     if matches else "none match selected event")
         self.camera_status.setText(
-            f"{len(catalog)} / {len(self._camera_catalog)} reviewed entries available manually · {relation}\n"
-            f"{live_count} manual live-video choices; {snapshot_count} still-image views. "
+            f"{len(catalog)} / {len(self._camera_catalog)} cameras · {live_count} live · {snapshot_count} snapshots"
+            + (f" · {relation}" if self._event else "")
+        )
+        self.camera_status.setToolTip(
+            "Reviewed entries are available manually. Automatic area matching uses still images only. "
             f"{reviewed} responded at the dated review; {unavailable} unavailable. "
             "Still images are not continuous video; 15-minute minimum refresh."
         )
@@ -174,9 +177,18 @@ class MediaPanel(QWidget):
         license_text = str(item.get("license", "See source terms"))
         license_link = link(license_text, item.get("license_url", item.get("rights_url", "")))
         checked = str(item.get("last_verified", "Not checked")).replace("T", " ").replace("Z", " UTC")
-        state = ("Manual live video on the original provider page; Windows playback unverified"
-                 if item.get("playback") == "live_video"
-                 else "Unavailable at review — try Source" if item.get("review_status") == "unavailable_at_review"
+        if item.get("playback") == "live_video":
+            terms = link("Source terms", item.get("rights_url", ""))
+            self.camera_attribution.setText(f"{credit} · {terms}")
+            review = str(item.get("provider_player_review", item.get("availability", "")))
+            if item.get("owner_reported_windows_playback"):
+                review += "\n" + str(item["owner_reported_windows_playback"])
+            self.camera_attribution.setToolTip(
+                f"Manual live camera · Reviewed {checked}\n"
+                + review + "\n" + str(item.get("rights", ""))
+            )
+            return
+        state = ("Unavailable at review — try Source" if item.get("review_status") == "unavailable_at_review"
                  else "Image responded at review; availability may change")
         self.camera_attribution.setText(
             f"{credit} · {license_link}<br>{escape(state)} · Checked {escape(checked)}"

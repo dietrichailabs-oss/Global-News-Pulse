@@ -106,12 +106,20 @@ archive. An endpoint working at its dated review is not an uptime guarantee.
 
 Live-video choices always require a separate manual **Connect** and consent.
 Selecting one, opening Cameras, or enabling automatic snapshots does not start
-live video. The original provider page opens inside the camera panel; press
-Play in that page if asked. This feature requires Windows and the Microsoft Edge
-WebView2 Runtime. If the player is unavailable, use **Source** to visit the
-original page. The visible source credit and provider terms still apply; Pulse
-does not record the video. The private browser session can create temporary
-files and attempts to remove them when it closes, but a crash or locked file
+live video. Entries marked **[LIVE]** open a view focused on the provider's
+player; press Play if asked. Tannum Sands and Town of 1770 load GPC's published
+video-player pages directly. Seacliff keeps its original public page and player
+while hiding the surrounding navigation. Resize the panel to change the video
+area. Player controls, branding and availability notices remain visible. If the
+provider changes its page structure, the original page layout can reappear.
+
+This feature requires Windows and the Microsoft Edge WebView2 Runtime.
+**Source** always opens the original provider page, including when the in-app
+player is unavailable. **Source terms** opens its terms reference; hover over
+the credit or camera count for the full review details. The source credit and
+provider terms still apply; Pulse does not record the video. The private browser
+session can create temporary files and attempts to remove them when it closes,
+but a crash or locked file
 can leave remnants.
 
 **Stop all media** ends media playback without pausing source monitoring.
@@ -119,9 +127,7 @@ Changing cameras or tabs, hiding the dashboard, or exiting disconnects the
 previous camera. Returning does not resume live video; choose Connect again.
 A failed connection can be retried manually, while Connect on an already active
 camera keeps the existing session. A page-loaded message is not proof that video
-is moving. The dated public-page checks in this reconstructed candidate come
-from the earlier session; playback inside the exact Windows package remains a
-separate test.
+is moving. Watch the picture and provider controls to confirm playback.
 
 YouTube playback and the TV tab have been removed. There are no video test,
 saved-video, watch-page, or floating YouTube controls, and new packages do not

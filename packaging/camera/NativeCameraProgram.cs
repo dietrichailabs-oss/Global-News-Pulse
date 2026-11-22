@@ -91,6 +91,8 @@ internal sealed class CameraForm : Form
     private bool profileCreationAttempted;
     private Process? browserProcess;
     private bool ownerNavigation;
+    private ulong navigationId;
+    private string playerViewScript = "";
     internal int ExitCode { get; private set; }
 
     [DllImport("user32.dll", SetLastError = true)] private static extern bool IsWindow(IntPtr hwnd);
@@ -262,6 +264,7 @@ internal sealed class CameraForm : Form
             web.NavigationStarting += (_, e) => {
                 if (e.Uri == "about:blank" && (!ownerNavigation || closing)) return;
                 if (closing || stopRequested || smoke || embed || !camera.ExactPage(e.Uri)) e.Cancel = true;
+                else navigationId = e.NavigationId;
             };
             web.FrameNavigationStarting += (_, e) => {
                 if (closing || stopRequested || smoke || embed || !camera.FrameAllowed(e.Uri)) e.Cancel = true;
@@ -273,11 +276,29 @@ internal sealed class CameraForm : Form
             web.BasicAuthenticationRequested += (_, e) => e.Cancel = true;
             web.ClientCertificateRequested += (_, e) => { e.Cancel = true; e.Handled = true; };
             web.ProcessFailed += (_, _) => Fail("renderer_exited");
-            web.NavigationCompleted += (_, e) => {
-                if (closing || !ownerNavigation) return;
+            web.NavigationCompleted += async (_, e) => {
+                if (closing || stopRequested || !ownerNavigation || e.NavigationId != navigationId) return;
                 bool success = e.IsSuccess && e.HttpStatusCode >= 200 && e.HttpStatusCode < 300 && camera.ExactPage(web.Source);
+                bool playerFocused = false;
+                if (success)
+                {
+                    // Reapply the fixed presentation resource after the provider
+                    // has built its DOM. A layout change falls back to the page;
+                    // it never rewrites a player URL or establishes video playback.
+                    try
+                    {
+                        using var presentation = JsonDocument.Parse(await web.ExecuteScriptAsync(playerViewScript));
+                        playerFocused = presentation.RootElement.ValueKind == JsonValueKind.Object
+                            && presentation.RootElement.TryGetProperty("applied", out var applied)
+                            && applied.ValueKind == JsonValueKind.True;
+                    }
+                    catch { /* Keep the successfully loaded provider page usable. */ }
+                }
+                if (ShouldStop() || e.NavigationId != navigationId) return;
+                success = success && camera.ExactPage(web.Source);
                 deadline.Stop();
-                Reply(new { type = "page_loaded", camera_id = camera.Id, success, playback_verified = false });
+                Reply(new { type = "page_loaded", camera_id = camera.Id, success,
+                    player_focused = playerFocused && success, playback_verified = false });
                 if (!success) Fail("navigation_failed");
             };
             // Establish codec capability locally before contacting any camera.
@@ -315,8 +336,16 @@ internal sealed class CameraForm : Form
                 return;
             }
             if (ShouldStop()) return;
+            using (var scriptStream = typeof(CameraForm).Assembly.GetManifestResourceStream("GlobalPulse.Camera.player_view.js")
+                ?? throw new CameraStartupException("player_view_unavailable"))
+            using (var scriptReader = new StreamReader(scriptStream))
+                playerViewScript = scriptReader.ReadToEnd();
+            // This bundled script guards the exact top document itself, including
+            // child frames. No script or URL is accepted from commands or feeds.
+            await web.AddScriptToExecuteOnDocumentCreatedAsync(playerViewScript);
+            if (ShouldStop()) return;
             ownerNavigation = true;
-            web.Navigate(camera.WatchUrl); // Original public page, unchanged.
+            web.Navigate(camera.PlayerUrl); // Exact public provider player route.
         }
         catch (WebView2RuntimeNotFoundException) { Fail("webview2_unavailable"); }
         catch (CameraStartupException error) { Fail(error.Code); }

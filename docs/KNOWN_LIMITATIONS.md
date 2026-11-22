@@ -1,12 +1,21 @@
-# R20 three-camera reconstruction — 2026-11-22
+# R20 focused live-camera view — 2026-11-22
 
-This successor restores three **manual-only** live-video choices alongside the
+This update focuses the three **manual-only** live-video choices alongside the
 unchanged 14-entry still-image bank. The live choices are GPC Tannum Sands, GPC
-1770, and BSYC Seacliff. They load the named public provider pages through a new
-camera-only Windows WebView2 helper. They are not automatically selected by event
-geography or started by automatic-camera consent. No YouTube/TV helper, KiwiSDR
+1770, and BSYC Seacliff. The camera-only Windows WebView2 helper loads GPC's
+published video-player documents directly. BSYC's standalone embed is unavailable,
+so Seacliff retains the original public document and its provider-created iframe;
+only the surrounding page layout is adjusted. They are not automatically selected
+by event geography or started by automatic-camera consent. No YouTube/TV helper, KiwiSDR
 path, arbitrary page player, raw-stream extraction, token capture, or recording
 feature is restored. The 37 curated WebSDR entries remain unchanged.
+
+The focused view preserves player controls, branding and GPC's visible
+technical-availability notice. A changed provider structure falls back to the
+original page layout. Source and Source terms remain explicit external actions.
+The layout helper's local browser run was blocked by the environment, so that
+attempt produced no geometry or screenshot pass. Native Windows resizing and
+playback remain checks against the exact new package.
 
 The earlier session recorded visible player dimensions and advancing playback
 time on the three original public pages on November 22. Those are retained,
@@ -14,6 +23,10 @@ attributed observations, not new checks made during reconstruction. They do not
 establish Windows Pulse playback, current provider uptime, fresh camera capture,
 or permission to record, mirror, or redistribute media. A loaded page, helper
 process, or embedded child window is not proof of moving video or working codecs.
+Separately, on November 22 the owner reported Town of 1770 working in the previous
+Windows build and supplied a screenshot of its full-page view. The dedicated
+1770 player displayed coastal video in cloud Chrome during this update. Neither
+result establishes the new Windows layout or playback for all three cameras.
 
 Windows live video requires the normally installed Microsoft Edge WebView2
 Runtime. The packaged helper is self-contained for its .NET runtime; it does not

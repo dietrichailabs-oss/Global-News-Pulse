@@ -9,17 +9,25 @@ internal sealed class CameraPolicy
         ["gpc-1770-live"] = "https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/",
         ["bsyc-seacliff-live"] = "https://www.ipcamlive.com/bsyc1080",
     };
+    internal static readonly IReadOnlyDictionary<string, string> PlayerPages = new Dictionary<string, string> {
+        ["gpc-tannum-sands-live"] = "https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec",
+        ["gpc-1770-live"] = "https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d",
+        // This camera does not permit a standalone IPCamLive embed. Keep the
+        // original public document and its provider-created player unchanged.
+        ["bsyc-seacliff-live"] = "https://www.ipcamlive.com/bsyc1080",
+    };
     private static readonly string[] RetiredHosts = {
         "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com", "kiwisdr.com",
     };
     internal string Id { get; }
     internal string WatchUrl { get; }
+    internal string PlayerUrl { get; }
     internal IReadOnlySet<string> Hosts { get; }
     internal IReadOnlySet<string> FrameHosts { get; }
 
-    private CameraPolicy(string id, string watchUrl, HashSet<string> hosts, HashSet<string> frames)
+    private CameraPolicy(string id, string watchUrl, string playerUrl, HashSet<string> hosts, HashSet<string> frames)
     {
-        Id = id; WatchUrl = watchUrl; Hosts = hosts; FrameHosts = frames;
+        Id = id; WatchUrl = watchUrl; PlayerUrl = playerUrl; Hosts = hosts; FrameHosts = frames;
     }
 
     internal static IReadOnlyDictionary<string, CameraPolicy> Load()
@@ -33,18 +41,22 @@ internal sealed class CameraPolicy
             if (!row.TryGetProperty("playback", out var playback) || playback.GetString() != "live_video") continue;
             string id = row.GetProperty("id").GetString() ?? "";
             string url = row.GetProperty("url").GetString() ?? "";
+            string playerUrl = row.GetProperty("player_url").GetString() ?? "";
             if (!WatchPages.TryGetValue(id, out var expected) || url != expected
+                || !PlayerPages.TryGetValue(id, out var expectedPlayer) || playerUrl != expectedPlayer
                 || row.GetProperty("type").GetString() != "webcam"
                 || !row.GetProperty("manual_only").GetBoolean())
                 throw new InvalidOperationException("Invalid compiled camera");
             var hosts = HostList(row.GetProperty("allowed_hosts"), 24);
             var frames = HostList(row.GetProperty("allowed_frame_hosts"), 12);
             if (!PublicUri(url, out var page) || !hosts.Contains(page!.IdnHost)
+                || !PublicUri(playerUrl, out var player) || !hosts.Contains(player!.IdnHost)
                 || !frames.IsSubsetOf(hosts) || result.ContainsKey(id))
                 throw new InvalidOperationException("Invalid compiled camera admission");
-            result.Add(id, new CameraPolicy(id, url, hosts, frames));
+            result.Add(id, new CameraPolicy(id, url, playerUrl, hosts, frames));
         }
-        if (result.Count != WatchPages.Count) throw new InvalidOperationException("Incomplete compiled camera catalog");
+        if (result.Count != WatchPages.Count || result.Count != PlayerPages.Count)
+            throw new InvalidOperationException("Incomplete compiled camera catalog");
         return result;
     }
 
@@ -90,7 +102,7 @@ internal sealed class CameraPolicy
         if (!PublicUri(value, out var uri) || uri!.Scheme != "https") return false;
         // Fragments have no network effect. Path/query are never broadened.
         return uri.GetComponents(UriComponents.HttpRequestUrl, UriFormat.UriEscaped)
-            == new Uri(WatchUrl).GetComponents(UriComponents.HttpRequestUrl, UriFormat.UriEscaped);
+            == new Uri(PlayerUrl).GetComponents(UriComponents.HttpRequestUrl, UriFormat.UriEscaped);
     }
 
     internal bool FrameAllowed(string value)
@@ -108,12 +120,27 @@ internal sealed class CameraPolicy
         void Check(bool okay) { cases++; if (!okay) failures++; }
         Check(cameras.Count == 3);
         Check(!cameras.ContainsKey("arbitrary-camera"));
+        Check(PlayerPages.Count == WatchPages.Count);
         foreach (var entry in cameras.Values)
         {
-            Check(entry.ExactPage(entry.WatchUrl));
-            Check(entry.ExactPage(entry.WatchUrl + "#player"));
+            Check(entry.PlayerUrl == PlayerPages[entry.Id]);
+            Check(entry.WatchUrl == WatchPages[entry.Id]);
+            Check(entry.RequestAllowed(entry.PlayerUrl));
+            Check(entry.ExactPage(entry.PlayerUrl));
+            Check(entry.ExactPage(entry.PlayerUrl + "#player"));
+            Check(entry.ExactPage(entry.WatchUrl) == (entry.WatchUrl == entry.PlayerUrl));
+            Check(entry.ExactPage(entry.WatchUrl + "#player") == (entry.WatchUrl == entry.PlayerUrl));
+            string querySeparator = entry.PlayerUrl.Contains('?') ? "&" : "?";
+            Check(!entry.ExactPage(entry.PlayerUrl + querySeparator + "other=1"));
+            Check(!entry.ExactPage(entry.PlayerUrl + "/another-page"));
+            Check(!entry.ExactPage(new Uri(entry.PlayerUrl).GetLeftPart(UriPartial.Authority) + "/"));
+            Check(!entry.ExactPage(entry.PlayerUrl.Replace("https://", "http://", StringComparison.Ordinal)));
             Check(!entry.ExactPage(entry.WatchUrl + "?other=1"));
             Check(!entry.ExactPage(entry.WatchUrl + "another-page"));
+            foreach (var other in cameras.Values.Where(other => other.Id != entry.Id))
+                Check(!entry.ExactPage(other.PlayerUrl));
+            Check(!entry.ExactPage("https://www.ipcamlive.com/player/player.php?alias=bsyc1080"));
+            Check(!entry.ExactPage("https://www.ipcamlive.com/player/player.php?alias=bsyc1080&ispublicpage=1"));
             foreach (string host in entry.Hosts)
             {
                 Check(entry.RequestAllowed("https://" + host + "/asset"));
@@ -125,7 +152,7 @@ internal sealed class CameraPolicy
             foreach (string host in entry.FrameHosts)
                 Check(entry.FrameAllowed("https://" + host + "/provider-player?temporary=normal"));
             Check(entry.FrameAllowed("about:blank"));
-            Check(entry.InternalResource("blob:" + entry.WatchUrl + "uuid"));
+            Check(entry.InternalResource("blob:" + entry.PlayerUrl + "uuid"));
             Check(!entry.InternalResource("blob:https://unreviewed.example/uuid"));
             foreach (string denied in new[] {
                 "https://www.youtube.com/watch?v=abcdefghijk", "https://youtu.be/abcdefghijk",

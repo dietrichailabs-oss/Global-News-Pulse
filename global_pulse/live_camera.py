@@ -23,7 +23,14 @@ from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from .security import safe_url
 
-CAMERA_IDS = frozenset({"gpc-tannum-sands-live", "gpc-1770-live", "bsyc-seacliff-live"})
+CAMERA_PLAYER_PAGES = MappingProxyType({
+    "gpc-tannum-sands-live": "https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec",
+    "gpc-1770-live": "https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d",
+    # This camera's standalone embed is unavailable. Keep its public document
+    # and provider-created player; the native helper only adjusts its layout.
+    "bsyc-seacliff-live": "https://www.ipcamlive.com/bsyc1080",
+})
+CAMERA_IDS = frozenset(CAMERA_PLAYER_PAGES)
 _RETIRED_HOSTS = ("youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com", "ytimg.com", "kiwisdr.com")
 _MAX_STATUS = 16_384
 _CLEANUP_OUTCOMES = deque(maxlen=32)
@@ -77,11 +84,15 @@ def _canonical_camera(item):
     if not isinstance(item, dict) or item.get("id") not in CAMERA_IDS:
         raise ValueError("Only the three reviewed live cameras can use this player")
     canonical = approved_camera(item)
-    if (not canonical or canonical.get("playback") != "live_video"
+    if (not canonical or canonical.get("id") != item["id"]
+            or canonical.get("playback") != "live_video"
             or canonical.get("manual_only") is not True or canonical.get("snapshot_url")
             or canonical.get("type") != "webcam"):
         raise ValueError("Camera is not an approved manual live-video entry")
     url = safe_url(canonical["url"])
+    player_url = safe_url(canonical.get("player_url", ""))
+    if player_url != CAMERA_PLAYER_PAGES[canonical["id"]]:
+        raise ValueError("Live camera player page is not in the reviewed registry")
     hosts = canonical.get("allowed_hosts")
     frames = canonical.get("allowed_frame_hosts")
     if (not isinstance(hosts, list) or not 1 <= len(hosts) <= 24
@@ -94,7 +105,8 @@ def _canonical_camera(item):
                 or host != host.encode("idna").decode("ascii").lower()
                 or any(host == denied or host.endswith("." + denied) for denied in _RETIRED_HOSTS)):
             raise ValueError("Live camera hosts must be exact public names")
-    if urlsplit(url).hostname not in hosts or not set(frames).issubset(hosts):
+    if (urlsplit(url).hostname not in hosts or urlsplit(player_url).hostname not in hosts
+            or not set(frames).issubset(hosts)):
         raise ValueError("Live camera page or frame is outside its reviewed hosts")
     return MappingProxyType({
         key: tuple(value) if isinstance(value, list) else value
@@ -208,7 +220,7 @@ class LiveCamera(QWidget):
             _SHUTDOWN_HOOK = True
         self._process = process
         self.message.show()
-        self._status("Connecting original public camera page · playback not yet verified")
+        self._status("Connecting camera player…")
         self.deadline.start()
         # Finite registry ID, not a URL/path/header from a feed or IPC payload.
         process.start(str(executable), [self.item["id"], str(parent_hwnd)])
@@ -263,7 +275,7 @@ class LiveCamera(QWidget):
                     return
                 self.deadline.stop()
                 self.status_changed.emit(
-                    "Original page loaded · press Play if needed · live motion is not automatically verified"
+                    "Player page loaded · press Play if needed"
                 )
             elif kind == "error":
                 self._fail("Camera player unavailable (" + self._error_label(event.get("reason")) + "); use Source")

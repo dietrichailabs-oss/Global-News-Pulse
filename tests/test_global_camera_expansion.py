@@ -176,9 +176,10 @@ def test_bank_visible_at_start_without_event_network_or_tv(panel):
     assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())] == ["Radio", "Cameras"]
     assert len(ids(panel.camera)) == 17
     assert ids(panel.camera)[-1] == "usgs-kilauea-v1"
-    assert "available manually" in panel.camera_status.text()
-    assert "13 responded at the dated review; 1 unavailable" in panel.camera_status.text()
-    assert "not continuous video" in panel.camera_status.text()
+    assert panel.camera_status.text() == "17 / 17 cameras · 3 live · 14 snapshots"
+    assert "available manually" in panel.camera_status.toolTip()
+    assert "13 responded at the dated review; 1 unavailable" in panel.camera_status.toolTip()
+    assert "not continuous video" in panel.camera_status.toolTip()
     assert not panel.auto_cameras and panel.camera.camera is None
     assert panel.radio._session is None
 
@@ -186,8 +187,10 @@ def test_bank_visible_at_start_without_event_network_or_tv(panel):
 def test_search_and_region_filter_no_match_and_restore(panel):
     panel.camera_region.setCurrentText("Oceania")
     assert len(ids(panel.camera)) == 9
+    assert panel.camera_status.text() == "9 / 17 cameras · 3 live · 6 snapshots"
     panel.camera_search.setText("ruapehu")
     assert ids(panel.camera) == ["geonet-ruapehu-north", "geonet-ruapehu-south"]
+    assert panel.camera_status.text() == "2 / 17 cameras · 0 live · 2 snapshots"
     panel.camera_search.setText("Germany")
     assert ids(panel.camera) == [] and panel.camera._current() == {}
     assert "No reviewed camera matches" in panel.camera_attribution.text()
@@ -199,6 +202,19 @@ def test_search_and_region_filter_no_match_and_restore(panel):
     assert ids(panel.camera) == ["dwd-hohenpeissenberg"]
     panel.camera_search.clear()
     assert len(ids(panel.camera)) == 17
+    assert panel.camera.camera is None
+
+
+@pytest.mark.parametrize("identifier", ["gpc-tannum-sands-live", "gpc-1770-live", "bsyc-seacliff-live"])
+def test_live_camera_has_compact_label_and_original_source_credit(panel, identifier):
+    select_camera(panel.camera, identifier)
+    row = panel.camera._current()
+    assert panel.camera.selector.currentText().startswith("[LIVE] ")
+    assert 'href="' + row["url"] + '"' in panel.camera_attribution.text()
+    assert "Source terms" in panel.camera_attribution.text()
+    assert "<br>" not in panel.camera_attribution.text()
+    assert row["rights"] in panel.camera_attribution.toolTip()
+    assert "Manual live camera" in panel.camera_attribution.toolTip()
     assert panel.camera.camera is None
 
 

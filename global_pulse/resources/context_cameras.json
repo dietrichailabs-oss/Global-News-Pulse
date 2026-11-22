@@ -425,8 +425,8 @@
     },
     {
       "id": "gpc-tannum-sands-live",
-      "title": "Tannum Sands — live beach video, Australia",
-      "group": "Live video — manual only",
+      "title": "Tannum Sands — Australia",
+      "group": "Live",
       "provider": "Gladstone Ports Corporation / CoastalCOMS",
       "type": "webcam",
       "playback": "live_video",
@@ -463,21 +463,23 @@
       "allowed_frame_hosts": [
         "widget.coastalcoms.com"
       ],
-      "live_status": "Live video on the original provider page. Manual connection only; not a refreshing still image or incident verification.",
+      "live_status": "Live provider player with its controls and availability notice. Manual connection only; not a refreshing still image or incident verification.",
       "attribution": "Gladstone Ports Corporation; live player supplied by CoastalCOMS",
       "license": "Public watch page; separate re-embedding or redistribution permission not established",
-      "rights": "View the unmodified public owner page with its original player and attribution. No raw-stream extraction, recording, mirroring or redistribution. A general third-party embed license has not been established.",
+      "rights": "Displays the public CoastalCOMS player document embedded by the owner, retaining its original player, controls, branding and availability notice. No raw-stream extraction, recording, mirroring or redistribution; no general reuse licence is asserted.",
       "rights_url": "https://gpcl.com.au/disclaimer/",
       "documentation": "https://gpcl.com.au/environment/live-beach-cameras/",
       "review_status": "public_player_verified",
       "last_verified": "2026-11-22",
       "verification_context": "Prior recorded public-page check in cloud Chrome; not Windows Pulse",
-      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed."
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed.",
+      "player_url": "https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec",
+      "presentation_review": "2026-11-22: public provider markup reviewed for a responsive player view. This is layout evidence, not new native playback verification."
     },
     {
       "id": "gpc-1770-live",
-      "title": "Town of 1770 — live coastal video, Australia",
-      "group": "Live video — manual only",
+      "title": "Town of 1770 — Australia",
+      "group": "Live",
       "provider": "Gladstone Ports Corporation / CoastalCOMS",
       "type": "webcam",
       "playback": "live_video",
@@ -515,21 +517,25 @@
       "allowed_frame_hosts": [
         "widget.coastalcoms.com"
       ],
-      "live_status": "Live video on the original provider page. Manual connection only; not a refreshing still image or incident verification.",
+      "live_status": "Live provider player with its controls and availability notice. Manual connection only; not a refreshing still image or incident verification.",
       "attribution": "Gladstone Ports Corporation; live player supplied by CoastalCOMS",
       "license": "Public watch page; separate re-embedding or redistribution permission not established",
-      "rights": "View the unmodified public owner page with its original player and attribution. No raw-stream extraction, recording, mirroring or redistribution. A general third-party embed license has not been established.",
+      "rights": "Displays the public CoastalCOMS player document embedded by the owner, retaining its original player, controls, branding and availability notice. No raw-stream extraction, recording, mirroring or redistribution; no general reuse licence is asserted.",
       "rights_url": "https://gpcl.com.au/disclaimer/",
       "documentation": "https://gpcl.com.au/environment/live-beach-cameras/",
       "review_status": "public_player_verified",
       "last_verified": "2026-11-22",
       "verification_context": "Prior recorded public-page check in cloud Chrome; not Windows Pulse",
-      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1280x720 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed."
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1280x720 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. Provider availability and exact resource hosts may change; unreviewed hosts fail closed.",
+      "player_url": "https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d",
+      "presentation_review": "2026-11-22: public provider markup reviewed for a responsive player view. This is layout evidence, not new native playback verification.",
+      "owner_reported_windows_playback": "2026-11-22: owner reported the live camera working in Windows and supplied a screenshot of the original GPC page. The new focused player view needs a separate check.",
+      "provider_player_review": "2026-11-22: the dedicated public player displayed coastal video in cloud Chrome after Play; video readyState 4, no media error, 1280x720 decoded dimensions. This does not verify the focused layout or the new Windows package."
     },
     {
       "id": "bsyc-seacliff-live",
-      "title": "Brighton & Seacliff Yacht Club — live beach video, Australia",
-      "group": "Live video — manual only",
+      "title": "Brighton & Seacliff Yacht Club — Australia",
+      "group": "Live",
       "provider": "Brighton & Seacliff Yacht Club / IPCamLive",
       "type": "webcam",
       "playback": "live_video",
@@ -563,16 +569,18 @@
       "allowed_frame_hosts": [
         "www.ipcamlive.com"
       ],
-      "live_status": "Live video on the club-linked public IPCamLive page. Manual connection only; not a refreshing still image or incident verification.",
+      "live_status": "Live video in a focused view of the club-linked public IPCamLive page. Manual connection only; not a refreshing still image or incident verification.",
       "attribution": "Brighton & Seacliff Yacht Club; public player supplied by IPCamLive",
       "license": "Visitor viewing on the provider public page; no third-party re-embedding or redistribution grant",
-      "rights": "The camera owner links this public IPCamLive page. IPCamLive permits visitor viewing on its site or owner-authorized embeds. Retain the unmodified public page and its normal transient player flow; do not copy a standalone iframe, retain tokens, extract raw streams, record or redistribute.",
+      "rights": "Uses the owner-linked public page and its provider-created player. Only surrounding layout is focused; the original document, iframe URL/parameters and provider access/error states are preserved. Standalone embedding is unavailable for this camera. No token capture, raw-stream extraction, recording or redistribution.",
       "rights_url": "https://www.ipcamlive.com/terms",
       "documentation": "https://www.bsyc.com.au/weather",
       "review_status": "public_player_verified",
       "last_verified": "2026-11-22",
       "verification_context": "Prior recorded club-linked public-page check in cloud Chrome; not Windows Pulse",
-      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. IPCamLive may rotate its resource servers; unreviewed hosts fail closed."
+      "availability": "The prior public-browser check recorded on 2026-11-22 showed visible 1920x1080 video with advancing playback time and no media error. This reconstruction does not repeat that observation or verify Windows Pulse playback. IPCamLive may rotate its resource servers; unreviewed hosts fail closed.",
+      "player_url": "https://www.ipcamlive.com/bsyc1080",
+      "presentation_review": "2026-11-22: public provider markup reviewed for a responsive player view. This is layout evidence, not new native playback verification."
     }
   ]
 }

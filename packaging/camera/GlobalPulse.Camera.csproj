@@ -19,5 +19,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <EmbeddedResource Include="../../global_pulse/resources/context_cameras.json" LogicalName="GlobalPulse.Camera.camera_catalog.json" />
+    <EmbeddedResource Include="player_view.js" LogicalName="GlobalPulse.Camera.player_view.js" />
   </ItemGroup>
 </Project>
