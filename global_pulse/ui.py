@@ -405,6 +405,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._deferred_alert_rows=None
         self._deferred_alert_revision=None
         self._idle_snapshot_generation=0
+        self._filter_refresh_pending=False
+        self._filter_pending_widgets=()
         # Last source-consistent display, used only if an evidence signal is a
         # no-op for the underlying SQLite revision. Never a TTL or blind cache.
         self._idle_feed_cache=None
@@ -495,8 +497,14 @@ class MainWindow(SituationActions, QMainWindow):
         # slot could still seize the GUI between fast owner tab clicks.
         self._workspace_warm_timer.setInterval(750)
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
+        self._filter_refresh_timer=QTimer(self)
+        self._filter_refresh_timer.setSingleShot(True)
+        self._filter_refresh_timer.setInterval(75)
+        self._filter_refresh_timer.timeout.connect(self._start_filter_refresh)
         self.search.textChanged.connect(lambda:self.search_timer.start())
-        for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
+        for combo in (self.category,self.region,self.time_range):
+            combo.currentIndexChanged.connect(self._queue_filter_refresh)
+            combo.activated.connect(self._retry_pending_filter)
         # User/settings changes retain immediate presentation semantics.
         # The collector uses its separate evidence_changed signal; that path
         # is coalesced to prevent high-frequency map rebuilds between clicks.
@@ -977,7 +985,7 @@ class MainWindow(SituationActions, QMainWindow):
         # hidden table reads can starve current source delivery well beyond
         # the navigation cooldown, even when the visible Qt heartbeat ticks.
         # Keep all pages dirty; never claim they were rendered or refreshed.
-        if self._idle_snapshot_inflight:
+        if self._idle_snapshot_inflight or self._filter_refresh_timer.isActive():
             self._workspace_warm_timer.start(250)
             return
         # Never let a hidden-table rebuild interrupt an active sequence of
@@ -1107,6 +1115,56 @@ class MainWindow(SituationActions, QMainWindow):
                 self.region.currentData() or "", self.time_range.currentIndex(),
                 self.history_slider.value())
 
+    def _queue_filter_refresh(self, *_args):
+        """Coalesce interactive latest-view filters; preserve old scope until commit."""
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        # Keep the original exact cold-start and historical-replay path.
+        if not self._background_warm_enabled or self.history_slider.value()!=1000:
+            self.refresh_data()
+            return
+        self.search_timer.stop()
+        self._idle_snapshot_generation+=1
+        if not self._filter_refresh_pending:
+            # Old results remain visible, explicitly marked and noninteractive.
+            # Never disable the media panel or the filter controls themselves.
+            widgets=(self.world_map,self.lower_split.widget(0),
+                     self.lower_split.widget(2))
+            self._filter_pending_widgets=tuple((widget,widget.isEnabled())
+                                               for widget in widgets)
+            for widget,_enabled in self._filter_pending_widgets:
+                widget.setEnabled(False)
+        self._filter_refresh_pending=True
+        self.count_label.setText("Updating filters · previous results shown")
+        self.status_label.setText("Preparing the selected archive view…")
+        self._filter_refresh_timer.start(75)
+
+    @Slot()
+    def _start_filter_refresh(self):
+        if (not self._filter_refresh_pending or self._force_close
+                or getattr(self.controller,"_closed",False)):
+            return
+        if self._idle_snapshot_inflight or self._refreshing:
+            self._filter_refresh_timer.start(100)
+            return
+        self._filter_refresh_timer.stop()
+        self._start_idle_snapshot()
+
+    def _retry_pending_filter(self, *_args):
+        if (self._filter_refresh_pending and not self._idle_snapshot_inflight
+                and not self._filter_refresh_timer.isActive()):
+            self._filter_refresh_timer.start(75)
+
+    def _finish_filter_refresh(self):
+        if not self._filter_refresh_pending:
+            return
+        self._filter_refresh_timer.stop()
+        self._filter_refresh_pending=False
+        for widget,enabled in self._filter_pending_widgets:
+            widget.setEnabled(enabled)
+        self._filter_pending_widgets=()
+        self.status_label.setText("Filters updated.")
+
     def events_filters(self):
         self._history_at=None
         filters={"query":self.search.text().strip(),"category":self.category.currentData() or "","region":self.region.currentData() or "","limit":500}
@@ -1159,6 +1217,9 @@ class MainWindow(SituationActions, QMainWindow):
         clicks on SQLite queries, map reconciliation, or chart updates.
         """
         if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        if self._filter_refresh_pending:
+            self._retry_pending_filter()
             return
         idle_for=time.monotonic()-self._last_navigation_at
         # A collector revision can be READ on its isolated, revision-checked
@@ -1296,6 +1357,7 @@ class MainWindow(SituationActions, QMainWindow):
         historical_at=self._history_at
         scope=self._archive_scope_key()
         generation=self._idle_snapshot_generation
+        explicit_filter=self._filter_refresh_pending
         # Selection is part of the immutable collector snapshot: a queued
         # no-click refresh may not overwrite a newer user choice.
         selected_id=str(self._selected_id or "")
@@ -1345,7 +1407,8 @@ class MainWindow(SituationActions, QMainWindow):
                     "explicit_selection_id":explicit_selection_id,
                     "history_at":historical_at,"show_observations":show_observations,
                     "brief_pending":brief_pending,"brief_period":brief_period,
-                    "brief_since":brief_since,"feed_sort_index":feed_sort_index}
+                    "brief_since":brief_since,"feed_sort_index":feed_sort_index,
+                    "explicit_filter":explicit_filter}
             try:
                 store=controller.store
                 before=store.content_revision()
@@ -1504,20 +1567,25 @@ class MainWindow(SituationActions, QMainWindow):
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
             return
-        if "error" in snapshot:
-            if snapshot.get("brief_pending"):
-                self._idle_brief_inflight=False
-            self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
-            return
         if (snapshot["generation"]!=self._idle_snapshot_generation
                 or snapshot["scope"]!=self._archive_scope_key()
                 or snapshot.get("selected_id",str(self._selected_id or ""))!=str(self._selected_id or "")
                 or snapshot.get("archive_pin_id",str(self._archive_selection_id or ""))!=str(self._archive_selection_id or "")
                 or snapshot.get("explicit_selection_id",str(self._explicit_feed_selection_id or ""))!=str(self._explicit_feed_selection_id or "")):
-            # User actions have their own immediate refresh; stale worker
-            # completion must never roll back a newer filter or selection.
+            # Discard stale worker results; a newer filter must still be read.
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
+            self._retry_pending_filter()
+            return
+        if "error" in snapshot:
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
+            if self._filter_refresh_pending:
+                self._filter_refresh_timer.stop()
+                self.count_label.setText("Filter failed · previous results shown")
+                self.status_label.setText("Filter read failed; select again to retry.")
+            else:
+                self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
             return
         # A precomputed source revision may arrive while the owner is still
         # clicking through warmed pages. Hold the SAME immutable worker result
@@ -1525,7 +1593,7 @@ class MainWindow(SituationActions, QMainWindow):
         # navigation. The later callback checks generation, selection and
         # exact Store revision again; a correction or new report cannot be
         # silently accepted as stale. Do not launch another reader here.
-        if self._background_warm_enabled:
+        if self._background_warm_enabled and not snapshot.get("explicit_filter"):
             idle_for=time.monotonic()-self._last_navigation_at
             if idle_for < 1.8:
                 self._idle_snapshot_inflight=True
@@ -1551,7 +1619,10 @@ class MainWindow(SituationActions, QMainWindow):
             # present a mixed evidence revision or fabricate a status update.
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
-            self._schedule_evidence_refresh()
+            if self._filter_refresh_pending:
+                self._retry_pending_filter()
+            else:
+                self._schedule_evidence_refresh()
             return
         self.refresh_data(_idle_snapshot=snapshot)
         if snapshot.get("brief_pending"):
@@ -1907,8 +1978,16 @@ class MainWindow(SituationActions, QMainWindow):
             cap=" · map limit 5,000; narrow filters" if len(self.world_map.events)>=5000 else ""
             self.count_label.setText(f"{count} feed events · "+self.world_map.coverage_summary()+suffix+cap)
             if self._selected_id:
-                selected=(self._selected_event() if _idle_snapshot is None
-                          else _idle_snapshot["selected_event"])
+                if _idle_snapshot is None:
+                    selected=self._selected_event()
+                else:
+                    # The old selection may not belong to the new filter.
+                    # Use the exact worker feed row chosen by _populate_feed;
+                    # never pair the new row with the old selected-event data.
+                    selected=_idle_snapshot["selected_event"]
+                    if not selected or str(selected.get("id",""))!=self._selected_id:
+                        selected=next((e for e in self._events
+                                       if str(e.get("id",""))==self._selected_id),None)
             else:
                 selected=None
             if _idle_snapshot is not None:
@@ -1978,9 +2057,12 @@ class MainWindow(SituationActions, QMainWindow):
             else:
                 self._idle_country_cache=None
             self._last_full_refresh_at=time.monotonic()
+            self._finish_filter_refresh()
         except Exception as exc:
             self._idle_feed_cache=None
             self._idle_country_cache=None
+            if self._filter_refresh_pending:
+                self.count_label.setText("Filter failed · results not confirmed")
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:
             self._refreshing=False
