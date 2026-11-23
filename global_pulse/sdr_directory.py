@@ -372,6 +372,75 @@ CURATED_WEBDR_RECEIVERS = (
         "provenance": "Naxos operator page and its four-band configuration retrieved 2026-11-21; exact edges and live audio unverified",
         "documentation": "http://sv8fxn-naxos.ddns.net:8901/",
     },
+    {
+        "id": "bordeaux_ham", "name": "Bordeaux · HAM",
+        "location": "Bordeaux, France",
+        "url": "https://ham2.websdrbordeaux.fr/", "ranges_khz": (),
+        "bands": ("HF",),
+        "checked_date": "2026-11-23",
+        "provenance": "Operator WebSDR page exposes tuning, mode and waterfall controls in retrieved HTML; HF coverage described by radio amateur F5NIH, exact edges and live audio unverified",
+        "documentation": "https://www.websdrbordeaux.fr/",
+    },
+    {
+        "id": "lu6flz", "name": "LU6FLZ · Venado Tuerto · browser only",
+        "location": "Santa Fe, Argentina",
+        "url": "http://lu6flz.no-ip.org:7999/", "ranges_khz": (),
+        "bands": ("40m",),
+        "checked_date": "2026-11-23",
+        "provenance": "Operator-linked Radio Club Venado Tuerto and LU7DKO Observatory identify this receiver; direct endpoint could not be verified in this environment; live audio unverified",
+        "documentation": "https://www.lu3fv.com.ar/recursos",
+        "link_only_review": True,
+    },
+    {
+        "id": "lu3dj_40", "name": "LU3DJ · Tres Arroyos 40m · browser only",
+        "location": "Buenos Aires, Argentina",
+        "url": "http://lu3dj.ddns.net:8080/", "ranges_khz": (),
+        "bands": ("40m",),
+        "checked_date": "2026-11-23",
+        "provenance": "Radio Club Villa María publishes this individual endpoint and band; direct page not verified; live audio unverified",
+        "documentation": "https://radioclubvillamaria.info/websdr/",
+        "link_only_review": True,
+    },
+    {
+        "id": "lu3dj_20", "name": "LU3DJ · Tres Arroyos 20m · browser only",
+        "location": "Buenos Aires, Argentina",
+        "url": "http://lu3dj.ddns.net:8081/", "ranges_khz": (),
+        "bands": ("20m",),
+        "checked_date": "2026-11-23",
+        "provenance": "Radio Club Villa María publishes this distinct receiver port and band; direct page not verified; live audio unverified",
+        "documentation": "https://radioclubvillamaria.info/websdr/",
+        "link_only_review": True,
+    },
+    {
+        "id": "lu8fcj", "name": "LU8FCJ · Villa Cañás · browser only",
+        "location": "Santa Fe, Argentina",
+        "url": "http://el22.dyndns-blog.com:8080/", "ranges_khz": (),
+        "bands": ("80m",),
+        "checked_date": "2026-11-23",
+        "provenance": "Radio Club Villa María lists this exact 80m link and Radio Club Venado Tuerto confirms the operator; direct page not verified; live audio unverified",
+        "documentation": "https://radioclubvillamaria.info/websdr/",
+        "link_only_review": True,
+    },
+    {
+        "id": "f8kcf_romagny", "name": "F8KCF · Romagny · browser only",
+        "location": "Annemasse, France",
+        "url": "http://sdr.f8kcf.net:8901/", "ranges_khz": (),
+        "bands": ("2m", "70cm"),
+        "checked_date": "2026-11-23",
+        "provenance": "Hosting club documents this exact VHF/UHF endpoint; direct page not verified; live audio unverified",
+        "documentation": "https://f8kcf.net/accueil/",
+        "link_only_review": True,
+    },
+    {
+        "id": "f8kcf_saleve", "name": "F8KCF · Mont Salève · browser only",
+        "location": "Haute-Savoie, France",
+        "url": "http://sdr2.f8kcf.net:7489/", "ranges_khz": (),
+        "bands": ("2m", "70cm", "3cm"),
+        "checked_date": "2026-11-23",
+        "provenance": "Hosting club documents this receiver and bands; direct page not verified; live audio unverified. High frequency controls remain in the original browser.",
+        "documentation": "https://f8kcf.net/accueil/",
+        "link_only_review": True,
+    },
 )
 # Curating an arbitrary discovery result never grants HTTP/WebEngine admission.
 # This immutable allowlist contains only the exact individually reviewed origins.
@@ -480,7 +549,12 @@ def curated_websdr_receivers():
         row["ranges_khz"] = tuple(tuple(pair) for pair in source["ranges_khz"])
         row["provider"] = "websdr"
         parsed = urlsplit(row["url"])
-        if row["embedded_candidate"]:
+        if row.get("link_only_review"):
+            # Club-published HTTP links are selectable external bookmarks;
+            # no new unencrypted embedded origin or numeric bounds granted.
+            row["embedded_candidate"] = False
+            row["reason"] = "Browser only: club-published link; direct endpoint and live audio unverified"
+        elif row["embedded_candidate"]:
             row["reason"] = (
                 "Operator HTTPS/443 candidate; embedded resources may still fail; "
                 "audio and availability unverified"
