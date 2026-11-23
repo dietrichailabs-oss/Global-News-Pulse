@@ -166,14 +166,12 @@ class _MediaTile(QFrame):
             self.media = [m for r in (event or {}).get("reports", []) for m in r.get("media", [])]
         self._populate()
 
-    def _populate(self, initial_index=None):
+    def _populate(self, initial_index=None, *, preserve_live_selection=False):
         signature = repr(self.media + self.catalog)
         if signature == self._items_signature:
             return
-        self._items_signature = signature
-        self.stop()
-        self.selector.blockSignals(True)
-        self.selector.clear()
+        old_item = self._current()
+        rows = []
         seen = set()
         for item in self.media + self.catalog:
             if isinstance(item, str):
@@ -188,13 +186,30 @@ class _MediaTile(QFrame):
             title = str(item.get("title", item.get("name", "Public source")))
             group = str(item.get("group", "")).strip()
             label = f"[{group.upper()}] {title}" if group else title
-            self.selector.addItem(label, item)
-        if not self.selector.count():
-            self.selector.addItem("No associated media", {})
-        if initial_index is not None and self.selector.count():
-            self.selector.setCurrentIndex(max(0, min(int(initial_index), self.selector.count() - 1)))
-        self.selector.blockSignals(False)
-        self._describe()
+            rows.append((label, item))
+        if not rows:
+            rows.append(("No associated media", {}))
+        target = max(0, min(int(initial_index or 0), len(rows) - 1))
+        keep_live = False
+        if (preserve_live_selection and old_item.get("playback") == "live_video"
+                and old_item == rows[target][1]):
+            from .camera_context import approved_camera
+            # Preserve only the identical admitted manual live entry. Never
+            # reuse an active player or pending consent for a changed route.
+            keep_live = approved_camera(old_item) == old_item
+        if not keep_live:
+            self.stop()
+        self._items_signature = signature
+        was_blocked = self.selector.blockSignals(True)
+        try:
+            self.selector.clear()
+            for label, item in rows:
+                self.selector.addItem(label, item)
+            self.selector.setCurrentIndex(target)
+        finally:
+            self.selector.blockSignals(was_blocked)
+        if not keep_live:
+            self._describe()
 
     def select_relative(self, step):
         """Select the adjacent channel without starting playback automatically."""

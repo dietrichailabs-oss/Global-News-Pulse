@@ -54,9 +54,18 @@ class MediaPanel(QWidget):
         self.camera_region.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.camera_region.setMinimumContentsLength(5)
         self.camera_region.setMinimumWidth(0)
+        self.camera_kind = QComboBox()
+        self.camera_kind.setAccessibleName("Filter live video or snapshots")
+        self.camera_kind.addItem("All cameras", "")
+        self.camera_kind.addItem("Live video", "live_video")
+        self.camera_kind.addItem("Snapshots", "snapshot")
+        self.camera_kind.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.camera_kind.setMinimumContentsLength(5)
+        self.camera_kind.setMinimumWidth(0)
         filters = QHBoxLayout()
         filters.addWidget(self.camera_search, 3)
         filters.addWidget(self.camera_region, 2)
+        filters.addWidget(self.camera_kind, 2)
         self.camera_status = QLabel()
         self.camera_status.setWordWrap(True)
         self.camera_status.setTextFormat(Qt.TextFormat.PlainText)
@@ -76,6 +85,7 @@ class MediaPanel(QWidget):
         self.camera.selector.currentIndexChanged.connect(self._update_camera_attribution)
         self.camera_search.textChanged.connect(self._filter_cameras)
         self.camera_region.currentIndexChanged.connect(self._filter_cameras)
+        self.camera_kind.currentIndexChanged.connect(self._filter_cameras)
         self._refresh_camera_bank()
 
         self.tabs.addTab(self.radio, "Radio")
@@ -121,6 +131,7 @@ class MediaPanel(QWidget):
 
     def _refresh_camera_bank(self, *, preserve_selection=False):
         region = self.camera_region.currentData() or ""
+        kind = self.camera_kind.currentData() or ""
         words = _search_words(self.camera_search.text()).split()
 
         def visible(item):
@@ -128,6 +139,10 @@ class MediaPanel(QWidget):
                 str(item.get(key, ""))
                 for key in ("title", "provider", "region", "country", "continent")
             ))
+            if kind == "live_video" and item.get("playback") != "live_video":
+                return False
+            if kind == "snapshot" and not item.get("snapshot_url"):
+                return False
             return (not region or item.get("continent") == region) and all(word in haystack for word in words)
 
         # Keep known-unavailable legacy entries reachable, but do not put one
@@ -135,12 +150,13 @@ class MediaPanel(QWidget):
         catalog = sorted((item for item in self._camera_catalog if visible(item)),
                          key=lambda item: item.get("review_status") == "unavailable_at_review")
         matches = [item for item in self._camera_matches if visible(item)]
-        selected_id = self.camera._current().get("id") if preserve_selection else None
+        current = self.camera._current()
+        selected_id = current.get("id") if preserve_selection or current.get("playback") == "live_video" else None
         ordered = list({item["id"]: item for item in matches + catalog}.values())
         initial_index = next((i for i, item in enumerate(ordered) if item["id"] == selected_id), 0)
         self.camera.media = matches
         self.camera.catalog = catalog
-        self.camera._populate(initial_index=initial_index)
+        self.camera._populate(initial_index=initial_index, preserve_live_selection=True)
         reviewed = sum(item.get("review_status") == "recent_image_verified" for item in self._camera_catalog)
         unavailable = sum(item.get("review_status") == "unavailable_at_review" for item in self._camera_catalog)
         live_count = sum(item.get("playback") == "live_video" for item in catalog)
