@@ -553,7 +553,7 @@ def curated_websdr_receivers():
             # Club-published HTTP links are selectable external bookmarks;
             # no new unencrypted embedded origin or numeric bounds granted.
             row["embedded_candidate"] = False
-            row["reason"] = "Browser only: club-published link; direct endpoint and live audio unverified"
+            row["reason"] = "Browser only: club-published link; direct endpoint and live audio unverified; availability unverified"
         elif row["embedded_candidate"]:
             row["reason"] = (
                 "Operator HTTPS/443 candidate; embedded resources may still fail; "

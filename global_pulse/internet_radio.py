@@ -691,7 +691,7 @@ class RadioPanel(QWidget):
         self.ham_details_scroll.setWidget(self.ham_details)
         self.ham_details_scroll.setMaximumHeight(180)
         self.ham_details_scroll.setMinimumHeight(0)
-        self.ham_details_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+        self.ham_details_scroll.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.ham_details_scroll.hide()
         self.ham_details_toggle=QPushButton("Receiver details, volume and scan ▸")
         self.ham_details_toggle.setCheckable(True)
@@ -707,7 +707,7 @@ class RadioPanel(QWidget):
         for core_label in (self.ham_receiver_name,self.ham_frequency_display,
                            self.ham_frequency_detail,self.sdr_status,self.directory_summary):
             core_label.setMinimumWidth(0)
-            core_label.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)
+            core_label.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
         self.ham_frequency_display.setMaximumHeight(70)
 
         self.selector.currentIndexChanged.connect(self._station_changed)
@@ -1255,6 +1255,7 @@ class RadioPanel(QWidget):
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
         self.ham_receiver_name.setText(item["name"])
+        self.ham_receiver_name.setToolTip(item["name"])
         self.receiver_picker.setToolTip(str(self.receiver_picker.currentData(Qt.ItemDataRole.ToolTipRole) or ""))
         self.receiver_picker.lineEdit().setCursorPosition(0)
         self.receiver_url.setCursorPosition(0)
@@ -1266,9 +1267,13 @@ class RadioPanel(QWidget):
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
         self.directory_summary.setText(
-            "Receiver selected · Connect to listen; availability and audio unverified."
+            "Receiver selected · Connect (audio unverified)"
             if self.receiver_connect.isEnabled() else
-            "Browser-only receiver · Open in browser to use the operator's tuner."
+            "Browser-only receiver · Open in browser"
+        )
+        self.directory_summary.setToolTip(
+            "Receiver availability and audio are unverified. "
+            "Browser-only receivers use the operator's original tuner."
         )
 
     def refresh_receiver_directory(self):
