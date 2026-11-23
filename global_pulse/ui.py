@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from .map_widget import WorldMap, CATEGORY_COLORS
+from .hazards import HAZARD_LABELS
+from .hazard_icons import hazard_icon
 from .situation_actions import SituationActions
 from .theme import STYLE, SEVERITY
 
@@ -541,6 +543,25 @@ class MainWindow(SituationActions, QMainWindow):
         self.density_check=QCheckBox("Density");self.density_check.toggled.connect(self._density_changed);self.map_panel.heading.addWidget(self.density_check)
         self.layer_button=button("Layers",self._toggle_layer_panel,"Show or hide persistent map layer controls",checkable=True)
         self.layer_button.setChecked(True);self.map_panel.heading.addWidget(self.layer_button)
+        self.hazard_button=QPushButton("Hazards")
+        self.hazard_button.setAccessibleName("Natural hazard map layers and marker legend")
+        self.hazard_button.setToolTip("Toggle hazard symbols and warning areas within the current map scope. Does not change source collection.")
+        self.hazard_menu=QMenu(self.hazard_button)
+        self.hazard_master=self.hazard_menu.addAction("Show natural hazard reports")
+        self.hazard_master.setCheckable(True)
+        self.hazard_master.toggled.connect(self._toggle_hazards)
+        self.hazard_menu.addSeparator()
+        self.hazard_actions={}
+        for kind,text in HAZARD_LABELS.items():
+            action=self.hazard_menu.addAction(hazard_icon(kind),text)
+            action.setCheckable(True)
+            action.toggled.connect(lambda checked,k=kind:self._toggle_hazard_kind(k,checked))
+            self.hazard_actions[kind]=action
+        self.hazard_menu.addSeparator()
+        self.hazard_menu.addAction("Reset all hazard layers", self._reset_hazards)
+        self.hazard_menu.aboutToShow.connect(self._sync_hazard_controls)
+        self.hazard_button.setMenu(self.hazard_menu)
+        self.map_panel.heading.addWidget(self.hazard_button)
         self.map_panel.heading.addWidget(button("−",lambda:self.world_map.zoom_by(.8),"Zoom out"))
         self.map_panel.heading.addWidget(button("+",lambda:self.world_map.zoom_by(1.25),"Zoom in"))
         self.map_panel.heading.addWidget(button("World",self._reset_map,"Reset global map view and geographic filter"))
@@ -1372,6 +1393,7 @@ class MainWindow(SituationActions, QMainWindow):
         # The worker may process plain source dictionaries, never Qt widgets.
         map_categories=(None if self.world_map.categories is None
                         else tuple(self.world_map.categories))
+        disabled_hazards=self.world_map.disabled_hazards()
         # Plain immutable country names/ISO codes only; no Qt painter or
         # QWidget crosses the worker boundary.
         map_country_rows=tuple({"name":str(c["name"]),
@@ -1506,6 +1528,7 @@ class MainWindow(SituationActions, QMainWindow):
                     now=classification_now,single_record_credits=credits)
                 result["map_classification"]={
                     "category_key":category_key,
+                    "disabled_hazards":disabled_hazards,
                     "record_ids":tuple(id(record) for record in evidence),
                     "crisis_record_ids":(None if crisis_events is None else
                                          tuple(id(record) for record in crisis_events)),
@@ -1515,7 +1538,8 @@ class MainWindow(SituationActions, QMainWindow):
                                             if isinstance(item,dict)),
                     "evidence_index":prepare_country_evidence(
                         selected,result["observations"][:10000],map_country_rows,
-                        credits,category_key),
+                        credits,category_key,
+                        **({"disabled_hazards":disabled_hazards} if disabled_hazards else {})),
                 }
                 after=store.content_revision()
                 result["revision_before"]=before
@@ -2990,6 +3014,39 @@ class MainWindow(SituationActions, QMainWindow):
     def _density_changed(self,checked):
         self.world_map.density=checked;self.world_map.update()
 
+    def _toggle_hazards(self, checked):
+        self.world_map.set_hazards_enabled(checked)
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _toggle_hazard_kind(self, kind, checked):
+        self.world_map.set_hazard_layer(kind, checked)
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _reset_hazards(self):
+        self.world_map.reset_hazard_layers()
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _sync_hazard_controls(self):
+        blocked=self.hazard_master.blockSignals(True)
+        self.hazard_master.setChecked(self.world_map.hazards_enabled)
+        self.hazard_master.blockSignals(blocked)
+        for kind,action in self.hazard_actions.items():
+            blocked=action.blockSignals(True)
+            action.setChecked(self.world_map.hazard_layers[kind])
+            action.setEnabled(self.world_map.hazards_enabled)
+            action.blockSignals(blocked)
+
+    def _refresh_hazard_coverage(self):
+        if not hasattr(self,"count_label") or self._filter_refresh_pending:
+            return
+        retained=sum(bool(e.get("retained_on_map")) for e in self.world_map.events)
+        suffix=f" · {retained} significant retained" if retained else ""
+        cap=" · map limit 5,000; narrow filters" if len(self.world_map.events)>=5000 else ""
+        self.count_label.setText(f"{len(self._events)} feed events · "+self.world_map.coverage_summary()+suffix+cap)
+
     def _toggle_crisis_overlay(self,checked):
         self.world_map.set_crisis_overlay_enabled(checked)
         for control in self.crisis_checks.values():control.setEnabled(checked)
@@ -3001,6 +3058,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.map_overlay.setVisible(checked)
 
     def _sync_map_controls(self):
+        self._sync_hazard_controls()
         self.crisis_master_check.blockSignals(True);self.crisis_master_check.setChecked(self.world_map.crisis_overlay_enabled);self.crisis_master_check.blockSignals(False)
         for kind,control in self.crisis_checks.items():
             control.blockSignals(True);control.setChecked(bool(self.world_map.crisis_layers.get(kind,True)));control.setEnabled(self.world_map.crisis_overlay_enabled);control.blockSignals(False)

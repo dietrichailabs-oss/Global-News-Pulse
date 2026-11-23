@@ -18,6 +18,9 @@ from .theme import SEVERITY
 from .crisis_overlay import build_country_activity, normalize_country
 from .map_evidence import incident_country
 from .map_area_layer import WarningAreaLayer
+from .hazards import (HAZARD_KEYS, HAZARD_LABELS, event_hazard_types,
+                      area_hazard_types, hazard_visible)
+from .hazard_icons import draw_hazard_glyph
 
 
 def _number(value):
@@ -44,7 +47,8 @@ _CATEGORY_PRIORITY = (
 )
 
 
-def prepare_country_evidence(selected, observations, country_rows, credits, category_key):
+def prepare_country_evidence(selected, observations, country_rows, credits, category_key,
+                             *, disabled_hazards=()):
     """Build source-attributed map evidence indexes using plain Python records.
 
     This is shared by the post-splash Store worker and direct Qt fallback.
@@ -64,6 +68,8 @@ def prepare_country_evidence(selected, observations, country_rows, credits, cate
     coverage_points = 0
     coverage_unlocated = 0
     for record in selected:
+        if disabled_hazards and not hazard_visible(event_hazard_types(record), disabled_hazards):
+            continue
         country = normalize_country(incident_country(record))
         located = WorldMap.has_location(record)
         if located:
@@ -171,6 +177,11 @@ class WorldMap(QWidget):
         self.observations = []
         self.economic_observations = {}
         self._activity_categories = object()
+        self._activity_hazard_key = None
+        self.hazards_enabled = True
+        self.hazard_layers = dict.fromkeys(HAZARD_KEYS, True)
+        self._point_hazard_types = {}
+        self._point_hazard_counts = {}
         # Reuse the exact event classification in the activity-index pass for
         # the summary. Re-scanning up to 5,000 events on every idle UI refresh
         # was measured as part of the blocked main-thread coverage hot path.
@@ -286,7 +297,9 @@ class WorldMap(QWidget):
         return {"zoom": self.zoom, "pan_x": self.pan_x, "pan_y": self.pan_y, "density": self.density, "labels": self.labels,
                 "categories": sorted(self.categories) if self.categories is not None else None,
                 "crisis_overlay_enabled": self.crisis_overlay_enabled,
-                "crisis_layers": dict(self.crisis_layers)}
+                "crisis_layers": dict(self.crisis_layers),
+                "hazards_enabled": self.hazards_enabled,
+                "hazard_layers": dict(self.hazard_layers)}
 
     def restore_view(self, state):
         if not isinstance(state, dict):
@@ -305,6 +318,12 @@ class WorldMap(QWidget):
             for key in ("conflict", "unrest", "migration"):
                 if key in layers:
                     self.crisis_layers[key] = bool(layers[key])
+        self.hazards_enabled = state.get("hazards_enabled", True) is not False
+        layers = state.get("hazard_layers")
+        self.hazard_layers = {
+            kind: (layers.get(kind, True) is not False if isinstance(layers, dict) else True)
+            for kind in HAZARD_KEYS
+        }
         self.update()
 
     def reset_view(self):
@@ -342,6 +361,17 @@ class WorldMap(QWidget):
         self._country_badge_specs = ()
         self._country_badge_hits = []
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
+        # Hydrated source records label existing legacy compact points, never
+        # create new coordinates. New compact rows carry explicit hazard types.
+        by_identity = {str(row.get("id")): row for row in self.evidence_events if row.get("id")}
+        self._point_hazard_types = {}
+        self._point_hazard_counts = {}
+        for row in self.events:
+            if not self.has_location(row):
+                continue
+            types = event_hazard_types(by_identity.get(str(row.get("id")), row))
+            self._point_hazard_types[id(row)] = types
+            self._point_hazard_counts[types] = self._point_hazard_counts.get(types, 0) + 1
         # Direct/legacy and historical views retain their original classifier.
         # A separate current context owns stripes, not ordinary category rings.
         self._crisis_context_events = (None if crisis_events is None
@@ -363,7 +393,8 @@ class WorldMap(QWidget):
 
     def _refresh_country_activity(self):
         key = None if self.categories is None else frozenset(_map_category(c) for c in self.categories)
-        if key != self._activity_categories:
+        disabled = self.disabled_hazards()
+        if key != self._activity_categories or disabled != self._activity_hazard_key:
             selected = [e for e in self.evidence_events if key is None or _map_category(e.get("category")) in key]
             # Use one evidence-time boundary for both the current crisis layer
             # and neutral archive classification. Local Store refresh time must
@@ -405,17 +436,53 @@ class WorldMap(QWidget):
                        if (prepared_matches
                            and prepared.get("category_key")==key
                            and prepared.get("country_rows")==country_rows
+                           and prepared.get("disabled_hazards", frozenset())==disabled
                            and prepared.get("observation_ids")==self._pending_observation_ids)
                        else None)
             if not isinstance(indexed, dict):
                 indexed = prepare_country_evidence(
-                    selected, self.observations, country_rows, single_record_credits, key)
+                    selected, self.observations, country_rows, single_record_credits, key,
+                    **({"disabled_hazards":disabled} if disabled else {}))
             self.country_only_evidence = indexed["country_only_evidence"]
             self.country_category_evidence = indexed["country_category_evidence"]
             self.economic_observations = indexed["economic_observations"]
             self._coverage_points = indexed["coverage_points"]
             self._coverage_unlocated = indexed["coverage_unlocated"]
             self._activity_categories = key
+            self._activity_hazard_key = disabled
+
+    def disabled_hazards(self):
+        return frozenset(kind for kind in HAZARD_KEYS
+                         if not self.hazards_enabled or not self.hazard_layers[kind])
+
+    def set_hazards_enabled(self, enabled):
+        self.hazards_enabled = bool(enabled)
+        self._hazard_visibility_changed()
+
+    def set_hazard_layer(self, kind, enabled):
+        if kind not in self.hazard_layers:
+            raise ValueError("Unknown hazard map layer")
+        self.hazard_layers[kind] = bool(enabled)
+        self._hazard_visibility_changed()
+
+    def reset_hazard_layers(self):
+        self.hazards_enabled = True
+        self.hazard_layers = dict.fromkeys(HAZARD_KEYS, True)
+        self._hazard_visibility_changed()
+
+    def _hazard_visibility_changed(self):
+        self._hits.clear()
+        self._country_badge_hits.clear()
+        self.update()
+        self.view_changed.emit()
+
+    def warning_area_visible(self, event, area):
+        disabled = self.disabled_hazards()
+        return not disabled or hazard_visible(area_hazard_types(event, area), disabled)
+
+    def _point_types(self, event):
+        types = self._point_hazard_types.get(id(event))
+        return event_hazard_types(event) if types is None else types
 
     def coverage_summary(self):
         self._refresh_country_activity()
@@ -444,8 +511,12 @@ class WorldMap(QWidget):
         Warning geometry and zoom remain live so layer toggles and camera
         changes do not display stale counts or imply unsupported locations.
         """
+        disabled = self.disabled_hazards()
+        count = (sum(n for types,n in self._point_hazard_counts.items()
+                     if hazard_visible(types, disabled))
+                 if disabled else self._footer_point_count)
         return (
-            f"{self._footer_point_count} points / {len(self.evidence_events)} reports assessed"
+            f"{count} points / {len(self.evidence_events)} reports assessed"
             f" · {len(self.area_layer.visible())} warning areas · {self.zoom:.1f}×"
         )
 
@@ -727,8 +798,9 @@ class WorldMap(QWidget):
     def visible_clusters(self):
         selected_categories = (None if self.categories is None else
                                frozenset(_map_category(c) for c in self.categories))
+        disabled = self.disabled_hazards()
         key = (id(self.events), len(self.events), self.width(), self.height(),
-               self.zoom, self.pan_x, self.pan_y, selected_categories)
+               self.zoom, self.pan_x, self.pan_y, selected_categories, disabled)
         if key == self._cluster_view_key:
             return self._cluster_groups
         groups = defaultdict(list)
@@ -739,7 +811,8 @@ class WorldMap(QWidget):
         for event in self.events:
             if (not self.has_location(event) or
                     (selected_categories is not None and
-                     _map_category(event.get("category")) not in selected_categories)):
+                     _map_category(event.get("category")) not in selected_categories)
+                    or (disabled and not hazard_visible(self._point_types(event), disabled))):
                 continue
             p = transform.map(self.normalized(event["longitude"], event["latitude"]))
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
@@ -771,11 +844,19 @@ class WorldMap(QWidget):
             representative = max(
                 group, key=lambda item: severity_order.get(
                     item[0].get("severity"), 0))[0]
+            disabled = self.disabled_hazards()
+            kinds = {tuple(k for k in self._point_types(event) if k not in disabled)
+                     for event, _point in group}
+            # A mixed-location cluster is a neutral count; an individual
+            # multi-hazard record uses its first enabled canonical type.
+            common = next(iter(kinds)) if len(kinds)==1 else ()
+            kind = common[0] if common and (size==1 or len(common)==1) else ""
             specs.append({
+                "hazard": kind,
                 "group": group,
                 "size": size,
                 "center": center,
-                "radius": 6 if size == 1 else min(14, 8 + math.log2(size) * 2),
+                "radius": (9 if kind else 6) if size == 1 else min(14, 8 + math.log2(size) * 2),
                 "color": QColor(SEVERITY.get(
                     representative.get("severity"), SEVERITY["unassessed"])),
                 "verification": representative.get("verification", "unverified"),
@@ -942,7 +1023,7 @@ class WorldMap(QWidget):
             self.width(), self.height(), ratio, self.zoom, self.pan_x, self.pan_y,
             id(self.events), id(self.country_activity),
             id(self.country_only_evidence), id(self.economic_observations),
-            self._activity_categories, self.selected_country,
+            self._activity_categories, self._activity_hazard_key, self.selected_country,
             self._hover_country, self.crisis_overlay_enabled,
             tuple(sorted(self.crisis_layers.items())),
         )
@@ -1029,7 +1110,17 @@ class WorldMap(QWidget):
             if marker["approximate"]:
                 painter.setPen(QPen(QColor("#131927"), 1.5))
                 painter.drawLine(QPointF(center.x()-3, center.y()), QPointF(center.x()+3, center.y()))
-            if size > 1:
+            if marker["hazard"]:
+                draw_hazard_glyph(painter, center, radius*.63, marker["hazard"], "#0b111b")
+                if size > 1:
+                    painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                    painter.setPen(QPen(QColor("#c9d1df"), .8))
+                    painter.setBrush(QColor("#10151c"))
+                    badge = QRectF(center.x()+radius*.35, center.y()+radius*.35,
+                                   max(18, painter.fontMetrics().horizontalAdvance(str(size))+8), 14)
+                    painter.drawRoundedRect(badge, 3, 3)
+                    painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, str(size))
+            elif size > 1:
                 painter.setPen(QColor("#0c111b")); painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
                 painter.drawText(QRectF(center.x()-radius,center.y()-radius,radius*2,radius*2),Qt.AlignmentFlag.AlignCenter,str(len(group)))
             self._hits.append((center, radius+8, group))
@@ -1199,6 +1290,9 @@ class WorldMap(QWidget):
             color=SEVERITY.get(severity,SEVERITY["unassessed"])
             lines.append(f"<span style='color:{color}'>{html.escape(str(severity).upper())}</span> · {html.escape(str(e.get('title','Event')))}")
             lines.append(html.escape(str(e.get("verification","unverified")))+" · "+html.escape(str(e.get("updated_at",""))))
+            kinds=event_hazard_types(e)
+            if kinds:
+                lines.append(html.escape("Hazard type: "+", ".join(HAZARD_LABELS[k] for k in kinds)))
             if e.get("map_retention_note"):
                 lines.append(html.escape(e["map_retention_note"]))
         if len(events)>8:lines.append(f"{len(events)-8} more — click for the complete list")

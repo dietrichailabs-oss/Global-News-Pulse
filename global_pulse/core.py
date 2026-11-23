@@ -23,6 +23,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from uuid import UUID, uuid4, uuid5
 
 from .map_evidence import normalize_map_fields, event_areas
+from .hazards import canonical_hazard_types, report_hazard_types
 
 from .lifecycle import (normalize_lifecycle, apply_lifecycle, is_expired, select_warning_event,
                         register_warning, canonical_event, SCHEMA as LIFECYCLE_SCHEMA)
@@ -237,6 +238,8 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     result["official"] = raw.get("official") is True
     result["metadata_only"] = raw.get("metadata_only") is True
     result["claims"] = _normalise_claims(raw.get("claims"))
+    if "hazard_types" in raw:
+        result["hazard_types"] = list(canonical_hazard_types(raw["hazard_types"]))
     result["latitude"] = result["longitude"] = None
     lat, lon = raw.get("latitude"), raw.get("longitude")
     if lat is not None and lon is not None:
@@ -600,6 +603,10 @@ def _build_event(event_id: str, reports: list[dict], *, previous: dict | None, s
                             "historical_abnormality": "Insufficient local baseline for an abnormality claim.",
                             "coverage_volume": len(reports), "reporting_changes": len(changes),
                             "contradictory_information": len(conflicts)}}
+    hazard_types = canonical_hazard_types(
+        [kind for report in active for kind in report_hazard_types(report)])
+    if hazard_types or any("hazard_types" in report for report in active):
+        event["hazard_types"] = list(hazard_types)
     event["map_areas"] = event_areas(active)
     seen_media = set()
     for report in eligible:

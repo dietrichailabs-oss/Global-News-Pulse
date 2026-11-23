@@ -84,3 +84,42 @@ jobs:
           python -m compileall -q global_pulse
           python -m pytest -q --tb=short tests/test_crisis_context_display_cap.py tests/test_issue22_owner_crisis_stripes.py tests/test_crisis_world_press.py tests/test_issue22_undated_crisis_freshness.py tests/test_issue22_idle_crisis_topic_screen.py tests/test_issue22_idle_crisis_single_credit.py tests/test_issue22_idle_map_evidence_index_worker.py tests/test_issue22_map_projection.py tests/test_issue82_batched_map_country_evidence.py tests/test_warmed_category_filter.py
           git diff --exit-code
+  hazards:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Natural hazard source and map regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q --tb=short tests/test_natural_hazard_layers.py tests/test_sources.py tests/test_issue58_map_paint_cache.py tests/test_owner_night_category_filter_canonical.py tests/test_nws_warning_context_qt.py tests/test_map_evidence_geometry.py tests/test_issue22_idle_map_evidence_index_worker.py
+          git diff --exit-code

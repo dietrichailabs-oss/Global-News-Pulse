@@ -30,6 +30,7 @@ from defusedxml import ElementTree as SafeET
 
 from .lifecycle import provider_id, scope_identifier
 from .map_evidence import nws_map_fields
+from .hazards import GDACS_TYPES, EONET_TYPES, canonical_hazard_types, text_hazard_types
 from .capacity_limits import MAX_TOTAL_SOURCES
 
 LOG = logging.getLogger(__name__)
@@ -334,8 +335,12 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
             report["country"] = plain(_child(node, "country"), 100)
             report["country_basis"] = "provider_incident"
             event_id = _child(node, "eventid")
+            event_type = _child(node, "eventtype")
             if event_id:
-                report["event_key"] = "gdacs:" + _child(node, "eventtype") + ":" + event_id
+                report["event_key"] = "gdacs:" + event_type + ":" + event_id
+            kind = GDACS_TYPES.get(event_type.upper())
+            if kind:
+                report["hazard_types"] = [kind]
             report["official_scope"] = "statement"
             report["independence"] = "unknown"  # GDACS can reuse agency inputs.
             report["origin_id"] = ""
@@ -366,6 +371,9 @@ def parse_cap(root, source: dict, retrieved: str) -> list[dict]:
              provider_identifier=identifier, identity_aliases=[r["id"]], lifecycle_references=[],
              source_references=[], reference_errors=False, event_key="cap:" + r["id"],
              expires_at=value("expires"))
+    hazard_types = text_hazard_types(value("event"))
+    if hazard_types:
+        r["hazard_types"] = list(hazard_types)
     r["language"] = value("language").split("-")[0] or r["language"]
     r["cap_references"] = _child(root, "references")
     entries = r["cap_references"].split()
@@ -393,6 +401,13 @@ def parse_usgs(payload: dict, source: dict, retrieved: str) -> list[dict]:
         if not r["url"]:
             continue
         r.update(event_key="usgs:" + str(f.get("id")), official=True, official_scope="measurement", kind="measurement")
+        event_type = str(p.get("type") or "").strip().lower()
+        if event_type:
+            r["hazard_types"] = ["earthquake"] if event_type == "earthquake" else ["other"]
+        elif re.search(r"\b(?:explosion|blast|quarry|mine collapse)\b", r["title"], re.I):
+            r["hazard_types"] = ["other"]
+        else:
+            r["hazard_types"] = ["earthquake"]
         r["source_updated_at"] = iso(p.get("updated"))
         r["region"] = plain(p.get("place"), 160) or "Global"
         r["summary"] = f"USGS reports {plain(p.get('title') or p.get('place'), 250)}. "
@@ -425,7 +440,13 @@ def parse_eonet(payload: dict, source: dict, retrieved: str) -> list[dict]:
         r["closed_at"] = iso(e.get("closed"))
         r["source_updated_at"] = iso(latest.get("date"))
         r["source_references"] = [{"source": plain(s.get("id"), 100), "url": safe_link(s.get("url"))} for s in (e.get("sources") or [])[:30]]
-        r["subcategories"] = [plain(c.get("title"), 60) for c in (e.get("categories") or [])]
+        categories = [c for c in (e.get("categories") or []) if isinstance(c, dict)]
+        r["subcategories"] = [plain(c.get("title"), 60) for c in categories]
+        typed = [EONET_TYPES.get(c.get("id")) for c in categories]
+        title_types = text_hazard_types(r["title"])
+        if "cyclone" in title_types:
+            typed = ["cyclone" if kind == "storm" else kind for kind in typed]
+        r["hazard_types"] = list(canonical_hazard_types(typed + list(title_types)) or ("other",))
         r["severity"] = "unassessed"  # Catalog presence is not an impact measure.
         coords = latest.get("coordinates") or []
         if latest.get("type") == "Point" and len(coords) >= 2:
@@ -460,6 +481,7 @@ def parse_nws(payload: dict, source: dict, retrieved: str) -> list[dict]:
                  provider_identifier=str(rid), lifecycle_references=[], reference_errors=False,
                  identity_aliases=list(dict.fromkeys(provider_id(source["id"], value) for value in
                      [rid, p.get("@id"), f.get("id"), p.get("identifier")] if value)))
+        r["hazard_types"] = list(text_hazard_types(p.get("event")) or text_hazard_types(r["title"]) or ("other",))
         r["region"] = plain(p.get("areaDesc"), 180) or "United States"
         r["severity"] = {"Extreme": "critical", "Severe": "high", "Moderate": "moderate", "Minor": "informational"}.get(p.get("severity"), "unassessed")
         r["expires_at"] = p.get("expires") or ""

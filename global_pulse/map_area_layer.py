@@ -51,7 +51,8 @@ class WarningAreaLayer:
     def visible(self):
         categories = self.owner.categories
         return [(path, event, area) for path, event, area in self.paths
-                if categories is None or event.get("category") in categories]
+                if (categories is None or event.get("category") in categories)
+                and self.owner.warning_area_visible(event, area)]
 
     def paint(self, painter):
         painter.save()

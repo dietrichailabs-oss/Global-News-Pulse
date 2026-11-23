@@ -46,11 +46,13 @@ def archive(tmp_path):
             report("stale","FICTIONAL armed conflict in France","News",
                    (now-timedelta(days=30)).isoformat(),country="France"),
         ]
-        for row in source:
+        for row in sorted(source,key=lambda row:row["published_at"]):
             assert store.ingest([row], now=row["published_at"])
         flood=[report("economy-"+str(i),f"FICTIONAL quarterly cereal output measure {i}",
                       "Economy",recent,country="Germany") for i in range(20)]
-        assert len(store.ingest(flood,now=recent))==20
+        # Ingest returns touched events, including temporal reassessments.
+        store.ingest(flood,now=recent)
+        assert len(store.list_events(category="Economy",limit=100))==20
         yield store,now
 
 
