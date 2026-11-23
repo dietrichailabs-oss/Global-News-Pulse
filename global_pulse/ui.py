@@ -602,7 +602,7 @@ class MainWindow(SituationActions, QMainWindow):
         crisis_legend=QHBoxLayout();crisis_legend.setSpacing(8)
         for text,color in (("//// Conflict / war","#d84a52"),("//// Protest / unrest","#e3bd4d"),("==== Migration / displacement","#9a6748")):
             item=label(text);item.setStyleSheet(f"color:{color};font-size:9px;");crisis_legend.addWidget(item)
-        crisis_note=label("source-derived · toggle in Layers","Muted");crisis_note.setToolTip("Country hatching summarizes recent sourced events; it is not a legal declaration of war or crisis.");crisis_legend.addWidget(crisis_note)
+        crisis_note=label("source context · toggle in Layers","Muted");crisis_note.setToolTip("Current crisis stripes are independent of the news-category selector. They summarize recent source evidence within the selected region, search and time scope, using a separate bounded review (up to 5,000 topical candidates). They are not legal declarations of war or crisis; incomplete coverage remains possible. Historical playback never borrows current context.");crisis_legend.addWidget(crisis_note)
         crisis_legend.addStretch();self.map_panel.layout.addLayout(crisis_legend)
         history=row(label("HISTORY","Eyebrow"))
         self.history_slider=QSlider(Qt.Orientation.Horizontal);self.history_slider.setRange(0,1000);self.history_slider.setValue(1000);self.history_slider.setAccessibleName("Historical event playback position")
@@ -1488,7 +1488,7 @@ class MainWindow(SituationActions, QMainWindow):
                 # used to run on the GUI thread immediately after the Store
                 # worker returned. Compute it on the same bounded worker;
                 # pass back the exact source object identities for validation.
-                from .crisis_overlay import build_country_activity
+                from .crisis_overlay import build_country_activity, load_crisis_context
                 from .map_widget import _map_category, prepare_country_evidence
                 category_key=(None if map_categories is None else
                               frozenset(_map_category(c) for c in map_categories))
@@ -1496,13 +1496,19 @@ class MainWindow(SituationActions, QMainWindow):
                 selected=[record for record in evidence
                           if category_key is None or
                           _map_category(record.get("category")) in category_key]
+                classification_now=datetime.now(timezone.utc)
+                crisis_events=load_crisis_context(
+                    store,map_filters,evidence,now=classification_now)
+                result["crisis_events"]=crisis_events
                 credits=set()
                 classified=build_country_activity(
-                    selected, now=datetime.now(timezone.utc),
-                    single_record_credits=credits)
+                    selected if crisis_events is None else crisis_events,
+                    now=classification_now,single_record_credits=credits)
                 result["map_classification"]={
                     "category_key":category_key,
                     "record_ids":tuple(id(record) for record in evidence),
+                    "crisis_record_ids":(None if crisis_events is None else
+                                         tuple(id(record) for record in crisis_events)),
                     "activity":classified, "credits":credits,
                     "country_rows":map_country_rows,
                     "observation_ids":tuple(id(item) for item in result["observations"][:10000]
@@ -1942,12 +1948,19 @@ class MainWindow(SituationActions, QMainWindow):
                                              if valid_economy_revision else None)
             point_events=(self.controller.events(**map_filters)
                           if _idle_snapshot is None else _idle_snapshot["map_events"])
+            if _idle_snapshot is None:
+                from .crisis_overlay import load_crisis_context
+                crisis_events=load_crisis_context(self.controller.store,map_filters,
+                    country_evidence,now=datetime.now(timezone.utc))
+            else:
+                crisis_events=_idle_snapshot.get("crisis_events")
             self.world_map.set_events(
                 point_events,
                 country_events=country_evidence,
                 observations=observations,
                 preclassified_country=(_idle_snapshot.get("map_classification")
                                        if _idle_snapshot is not None else None),
+                crisis_events=crisis_events,
             )
             if self.gdelt_panel is not None:
                 if _idle_snapshot is not None:

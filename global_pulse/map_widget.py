@@ -166,6 +166,8 @@ class WorldMap(QWidget):
         self.events = []
         self.gdelt_layer = None
         self.evidence_events = []
+        self._crisis_context_events = None
+        self._crisis_context_cache = None
         self.observations = []
         self.economic_observations = {}
         self._activity_categories = object()
@@ -320,7 +322,7 @@ class WorldMap(QWidget):
         return self._transform().map(self.normalized(lon, lat))
 
     def set_events(self, events, *, country_events=None, observations=None,
-                   preclassified_country=None):
+                   preclassified_country=None, crisis_events=None):
         # A worker may supply pure-Python classification, never widget data.
         # This short-lived token is consumed exactly once by the matching
         # source snapshot. Direct calls keep the original GUI classifier.
@@ -340,6 +342,11 @@ class WorldMap(QWidget):
         self._country_badge_specs = ()
         self._country_badge_hits = []
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
+        # Direct/legacy and historical views retain their original classifier.
+        # A separate current context owns stripes, not ordinary category rings.
+        self._crisis_context_events = (None if crisis_events is None
+                                       else list(crisis_events)[:5000])
+        self._crisis_context_cache = None
         self.observations = [dict(item) for item in observation_source if isinstance(item, dict)]
         self.area_layer.set_events(self.evidence_events)
         self._cluster_view_key = None
@@ -367,20 +374,26 @@ class WorldMap(QWidget):
             # neutral-archive pass; never repeat a full 5k-record source/date
             # classifier once per country-only row on the GUI thread.
             prepared=self._pending_preclassified_country
-            if (isinstance(prepared, dict)
-                    and prepared.get("category_key")==key
-                    and prepared.get("record_ids")==tuple(
-                        id(record) for record in self.evidence_events)):
-                # The worker's source dictionaries are the very same objects
-                # handed to set_events. Never reuse an index after a category
-                # change or a copied/changed report; fall back to normal local
-                # classification for direct/map-only updates.
-                self.country_activity=prepared["activity"]
-                single_record_credits=prepared["credits"]
+            context=self._crisis_context_events
+            context_ids=(None if context is None else tuple(id(record) for record in context))
+            prepared_matches=(isinstance(prepared, dict)
+                              and prepared.get("record_ids")==tuple(
+                                  id(record) for record in self.evidence_events)
+                              and prepared.get("crisis_record_ids")==context_ids)
+            if context is not None and self._crisis_context_cache is not None:
+                # Local category toggles rebuild ordinary rings, not stripes.
+                self.country_activity, single_record_credits = self._crisis_context_cache
             else:
-                single_record_credits = set()
-                self.country_activity = build_country_activity(
-                    selected, now=now, single_record_credits=single_record_credits)
+                if prepared_matches and (context is not None or prepared.get("category_key")==key):
+                    self.country_activity=prepared["activity"]
+                    single_record_credits=prepared["credits"]
+                else:
+                    single_record_credits = set()
+                    self.country_activity = build_country_activity(
+                        selected if context is None else context,
+                        now=now, single_record_credits=single_record_credits)
+                if context is not None:
+                    self._crisis_context_cache=(self.country_activity, single_record_credits)
             country_rows = tuple(
                 {"name":str(c["name"]), "code":str(c.get("code") or "")} for c in self._countries)
             # Source-category and historical/economy ring indexes are pure
@@ -389,10 +402,8 @@ class WorldMap(QWidget):
             # Direct calls, changed views and copied/mutated source records
             # always use the same local implementation (fail closed).
             indexed = (prepared.get("evidence_index")
-                       if (isinstance(prepared, dict)
+                       if (prepared_matches
                            and prepared.get("category_key")==key
-                           and prepared.get("record_ids")==tuple(
-                               id(record) for record in self.evidence_events)
                            and prepared.get("country_rows")==country_rows
                            and prepared.get("observation_ids")==self._pending_observation_ids)
                        else None)
@@ -473,27 +484,39 @@ class WorldMap(QWidget):
                 continue
         return max(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "source publication undated"
 
-    def show_country_evidence(self, name, *, include_current=False, initial_category=None):
+    def show_country_evidence(self, name, *, include_current=False, initial_category=None,
+                              activity_context=False):
         """Searchable attributed archive; never infer an incident's location.
 
         Exactly 30 results are rendered at once, but searches cover the entire
         bounded (max 5,000 identities) country-evidence index. Records lacking
         country evidence must be found via the clearly separate global search.
         """
-        entry = (self.country_category_evidence_for(name) if include_current
-                 else self.country_evidence_for(name))
+        if activity_context:
+            identities=set(self.country_activity_for(name).get("event_ids", ()))
+            records=[record for record in (self._crisis_context_events or ())
+                     if str(record.get("id", "")) in identities]
+            entry={"count":len(records), "events":records} if records else {}
+        else:
+            entry = (self.country_category_evidence_for(name) if include_current
+                     else self.country_evidence_for(name))
         if not entry:
             return False
         if self.country_dialog:
             self.country_dialog.close()
         dialog = QDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        title = "Country-attributed source records" if include_current else "Country-only source records"
+        title = ("Recent crisis reporting" if activity_context else
+                 "Country-attributed source records" if include_current else "Country-only source records")
+        record_label = "source-linked crisis reports" if activity_context else "country-attributed records"
         dialog.setWindowTitle(f"{title} — {name}")
         dialog.resize(690, 550)
         layout = QVBoxLayout(dialog)
         explainer = QLabel(
-            ("Country-level category circles are SOURCE summaries, never incident points. "
+            ("Recent source-linked reports supporting the country stripe; bounded evidence shortlist, "
+             "not a legal declaration of crisis. "
+             if activity_context else
+             "Country-level category circles are SOURCE summaries, never incident points. "
              "Some records may separately have valid incident geometry or qualify "
              "for a current activity stripe. Dates and evidence must be inspected. "
              if include_current else
@@ -572,11 +595,13 @@ class WorldMap(QWidget):
                 listing.setCurrentRow(0)
                 count_label.setText(
                     f"Showing {min(30, len(matches))} of {len(matches)} matching "
-                    f"country-attributed records ({entry['count']} total). "
+                    f"{record_label} ({entry['count']} total). "
                     "Search covers the full country list, not only its first 30."
                 )
             else:
                 count_label.setText(
+                    "No matching crisis reports in this evidence shortlist."
+                    if activity_context else
                     "No matching country-attributed records. An aviation story "
                     "may lack independent US incident geography; use Search full news "
                     "archive to search all locally collected headlines."
@@ -1151,6 +1176,12 @@ class WorldMap(QWidget):
             self.selected_country = self._hover_country
             self.country_selected.emit(self._hover_country)
             self.update()
+            activity=self.country_activity_for(self._hover_country)
+            if (self._crisis_context_events is not None and self.crisis_overlay_enabled
+                    and any(self.crisis_layers.get(kind, True) and activity.get(kind, 0)
+                            for kind in ("conflict", "unrest", "migration"))
+                    and self.show_country_evidence(self._hover_country, activity_context=True)):
+                return
             if self.country_evidence_for(self._hover_country):
                 self.show_country_evidence(self._hover_country)
 

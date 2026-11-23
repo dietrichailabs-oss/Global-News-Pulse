@@ -1334,7 +1334,14 @@ class Store:
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
-                    map_evidence: bool = False) -> list[dict]:
+                    map_evidence: bool = False, *,
+                    _crisis_candidates: bool = False,
+                    _crisis_now: datetime | None = None) -> list[dict]:
+        if _crisis_candidates:
+            if not map_evidence or before or category:
+                raise ValueError("Crisis context requires current all-category map evidence")
+            from .crisis_overlay import is_crisis_context_candidate
+            crisis_now = (_crisis_now or datetime.now(UTC)).astimezone(UTC)
         map_view = bool(map_view or map_evidence)
         # map_evidence retains country/area/unlocated records without inventing points.
         # Map membership is independent of the bounded text-feed page. Explicit
@@ -1358,6 +1365,8 @@ class Store:
                                 (map_evidence or (e.get("latitude") is not None and e.get("longitude") is not None))]
                 return sorted(filtered, key=lambda e: e["updated_at"], reverse=True)[:limit]
             where, params = ["id NOT IN (SELECT alias_id FROM event_aliases)"], []
+            if _crisis_candidates:
+                where.append("synthetic=0")
             if category:
                 where.append("lower(category)=lower(?)")
                 params.append(category)
@@ -1410,18 +1419,29 @@ class Store:
                 # bounded fetchmany keeps materialized rows capped at 256 while
                 # the original accepted-only limit and warning checks remain.
                 cursor = self._conn.execute(sql, params)
+                scanned = 0
                 try:
                     while len(result) < limit:
-                        page = cursor.fetchmany(page_size)
+                        # The independent topical read uses the archive's
+                        # bounded event budget, not the display page size.
+                        # Screen AFTER canonical source projection so stale,
+                        # withdrawn, future or ordinary records do not count.
+                        size = min(page_size, MAX_EVENTS-scanned) if _crisis_candidates else page_size
+                        if size <= 0:
+                            break
+                        page = cursor.fetchmany(size)
                         if not page:
                             break
+                        scanned += len(page)
                         for event in self._map_evidence_page_unlocked(page):
                             if event and (event.get("status") == "active" or
                                           event.get("map_history_incomplete") is True):
+                                if _crisis_candidates and not is_crisis_context_candidate(event, now=crisis_now):
+                                    continue
                                 result.append(event)
                                 if len(result) >= limit:
                                     break
-                        if len(page) < page_size:
+                        if len(page) < size:
                             break
                 finally:
                     cursor.close()
@@ -1437,6 +1457,19 @@ class Store:
                                                   + item["updated_at"]) if item["retained_on_map"] else ""
             return result
 
+
+    def list_crisis_context(self, *, query="", region="", since=None,
+                            keep_significant=False, now=None, limit=5000):
+        """Current source candidates; independent of ordinary map display rows.
+
+        Reuse canonical history/withdrawal-aware projection and scope. Neither
+        the bounded topic screen nor a candidate alone establishes geography
+        or corroboration. No archive writes, collection, or historical replay.
+        """
+        return self.list_events(query=query, region=region, since=since,
+                                keep_significant=keep_significant,
+                                map_evidence=True, limit=limit,
+                                _crisis_candidates=True, _crisis_now=now)
 
     def list_brief_events(self, *, since: str, per_domain: int = 9) -> list[dict]:
         """Bounded, category-balanced Brief read without a multi-second Store lock.

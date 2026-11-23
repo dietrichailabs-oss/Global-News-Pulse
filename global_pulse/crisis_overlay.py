@@ -401,6 +401,60 @@ def _recent_report_scope(event: dict, now: datetime, max_age_days: int) -> dict 
     return scoped
 
 
+def _scoped_crisis_candidate(raw: dict, now: datetime, max_age_days: int):
+    """Share the exact date/status/topic screen with the independent map read.
+
+    Single-source records must survive this screen: separate independent
+    reports can corroborate a country/topic in the aggregate classifier.
+    """
+    if not isinstance(raw, dict):
+        return None
+    event = _recent_report_scope(raw, now, max_age_days)
+    if event is None or event.get("synthetic") or event.get("historical_view"):
+        return None
+    if str(event.get("status", "active")).casefold() in {
+        "retracted", "resolved", "closed", "ended", "cancelled", "expired", "pending"
+    }:
+        return None
+    stamp = _evidence_timestamp(event)
+    if stamp is None or (now - stamp).total_seconds() < -3600:
+        return None
+    if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
+        return None
+    kinds = _topical_kinds(event)
+    return (event, stamp, kinds) if kinds else None
+
+
+def is_crisis_context_candidate(event: dict, *, now: datetime) -> bool:
+    """Recent topical source records are candidates, not crisis decisions."""
+    return _scoped_crisis_candidate(event, now, 14) is not None
+
+
+def load_crisis_context(store, map_filters, country_evidence, *, now):
+    """Separate current crisis context from the ordinary category/display cap.
+
+    Preserve search, region, time and significant-retention scope; only the
+    category is independent. Historical replay never borrows current context.
+    """
+    if map_filters.get("before"):
+        return None
+    if (not map_filters.get("category") and
+            len(country_evidence) < int(map_filters.get("limit", 5000))):
+        return country_evidence
+    candidates = store.list_crisis_context(
+        query=map_filters.get("query", ""), region=map_filters.get("region", ""),
+        since=map_filters.get("since"),
+        keep_significant=bool(map_filters.get("keep_significant")), now=now,
+    )
+    # Preserve exact matching object identities for the neutral-ring credit
+    # contract. Do not substitute a different version of any source record.
+    ordinary = {str(e.get("id", "")): e for e in country_evidence}
+    return [ordinary[str(e.get("id", ""))]
+            if str(e.get("id", "")) in ordinary
+            and ordinary[str(e.get("id", ""))] == e else e
+            for e in candidates]
+
+
 def build_country_activity(events: Iterable[dict], *, now: datetime | None = None, max_age_days: int = 14,
                            single_record_credits: set[tuple[int, str]] | None = None) -> dict[str, dict]:
     """Aggregate recent supported activity by country without losing split-source corroboration.
@@ -416,29 +470,10 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
     candidates: list[tuple[dict, datetime, str, set[str]]] = []
 
     for raw in events:
-        if not isinstance(raw, dict):
+        scoped = _scoped_crisis_candidate(raw, now, max_age_days)
+        if scoped is None:
             continue
-        event = _recent_report_scope(raw, now, max_age_days)
-        if event is None or event.get("synthetic") or event.get("historical_view"):
-            continue
-        if str(event.get("status", "active")).casefold() in {
-            "retracted", "resolved", "closed", "ended", "cancelled", "expired", "pending"
-        }:
-            continue
-        stamp = _evidence_timestamp(event)
-        if stamp is None or (now - stamp).total_seconds() < -3600:
-            continue
-        if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
-            continue
-
-        # Topic eligibility depends only on active source records, not geography.
-        # Most ordinary news/health/economy reports have no conflict, unrest or
-        # displacement claim. Avoid a full country-source text search (including
-        # all bundled country aliases) for those non-topical records. The exact
-        # prior structured/text country decision still runs for every candidate.
-        kinds = _topical_kinds(event)
-        if not kinds:
-            continue
+        event, stamp, kinds = scoped
         structured_country = normalize_country(structured_incident_country(event))
         text_country = _explicit_text_country(event) if not structured_country else ""
         country = structured_country or text_country
