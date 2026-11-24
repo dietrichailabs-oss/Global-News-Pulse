@@ -1,0 +1,41 @@
+name: R20 HAM Windows width diagnostics
+on:
+  push:
+    branches: [eng/r20-ham-native-width-diagnostics-20261124]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify exact product source unchanged
+        shell: bash
+        run: |
+          git merge-base --is-ancestor c8340831d208ce069d751fe6d5257e7c6d11d17b HEAD
+          git diff --exit-code c8340831d208ce069d751fe6d5257e7c6d11d17b HEAD -- global_pulse tests requirements-bootstrap.lock requirements-build.lock
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Record actual Qt minimum-width contributors
+        shell: bash
+        run: python -m scripts.qa_r20_ham_width_diagnostics
+      - name: Reproduce original geometry assertions without changes
+        if: always()
+        shell: bash
+        run: python -m pytest -q --tb=short tests/test_r20_owner_radio_feedback.py -k "core_ham_tuner_and_connect or ham_expanded_details or curated_names_ranges"
