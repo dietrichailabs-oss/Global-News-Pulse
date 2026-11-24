@@ -43,7 +43,7 @@ jobs:
         run: |
           git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
           python -m compileall -q global_pulse
-          python -m pytest -q --tb=short tests/test_live_camera_integration_qa.py tests/test_live_camera_catalog.py tests/test_live_camera_player.py tests/test_global_camera_expansion.py tests/test_issue22_owner_media_lineup.py tests/test_camera_area_conflicts.py tests/test_camera_payload_admission.py tests/test_warmed_category_filter.py tests/test_websdr_expansion.py tests/test_r20_digital_radio.py tests/test_r20_owner_radio_feedback.py
+          python -m pytest -q --tb=short tests/test_live_camera_integration_qa.py tests/test_live_camera_catalog.py tests/test_live_camera_player.py tests/test_global_camera_expansion.py tests/test_issue22_owner_media_lineup.py tests/test_camera_area_conflicts.py tests/test_camera_payload_admission.py tests/test_warmed_category_filter.py tests/test_websdr_expansion.py tests/test_issue21_sdr_owner_controls.py tests/test_r20_digital_radio.py tests/test_r20_owner_radio_feedback.py
           git diff --exit-code
   crisis:
     runs-on: ${{ matrix.os }}

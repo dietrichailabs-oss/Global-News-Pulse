@@ -4,12 +4,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from urllib.parse import urlsplit
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtGui import QDesktopServices
 from global_pulse.sdr_directory import (
     CURATED_WEBDR_HTTP_ORIGINS, curated_receiver_for_url,
     curated_websdr_receivers, parse_directory, public_receiver_url,
 )
-from global_pulse.internet_radio import RadioPanel
+from global_pulse.internet_radio import RadioPanel, _owner_legacy_websdr
+
+
+BROWSER_ONLY_IDS = {
+    "lu6flz", "lu3dj_40", "lu3dj_20", "lu8fcj",
+    "f8kcf_romagny", "f8kcf_saleve",
+}
 
 
 @pytest.fixture(scope="module")
@@ -168,6 +175,7 @@ def test_curated_origins_are_unique_and_transport_explanations_are_specific():
     assert len({row["id"] for row in rows}) == len(rows)
     origins = []
     http_origins = set()
+    browser_only_ids = set()
     for row in rows:
         parsed = urlsplit(row["url"])
         origin = (parsed.scheme, parsed.hostname,
@@ -179,11 +187,86 @@ def test_curated_origins_are_unique_and_transport_explanations_are_specific():
             assert "unencrypted" not in row["reason"]
             assert "HTTP/None" not in row["reason"]
         else:
+            assert parsed.scheme == "http"
             assert row["embedded_candidate"] is False
-            assert "specific unencrypted transport consent" in row["reason"]
-            http_origins.add((parsed.hostname, parsed.port))
+            exact_origin = (parsed.hostname, parsed.port or 80)
+            if row.get("link_only_review") is True:
+                browser_only_ids.add(row["id"])
+                assert row["id"] in BROWSER_ONLY_IDS
+                assert row["reason"].startswith("Browser only:")
+                assert "live audio unverified" in row["reason"]
+                assert "availability unverified" in row["reason"]
+                assert "consent" not in row["reason"].lower()
+                assert row["ranges_khz"] == ()
+                assert exact_origin not in CURATED_WEBDR_HTTP_ORIGINS
+                assert not _owner_legacy_websdr(public_receiver_url(row["url"]), "websdr")
+            else:
+                assert "specific unencrypted transport consent" in row["reason"]
+                http_origins.add(exact_origin)
     assert len(set(origins)) == len(origins)
+    assert browser_only_ids == BROWSER_ONLY_IDS
     assert http_origins == CURATED_WEBDR_HTTP_ORIGINS
+
+
+@pytest.mark.parametrize("identifier", sorted(BROWSER_ONLY_IDS))
+def test_reviewed_browser_only_links_never_gain_in_app_admission(app, monkeypatch, identifier):
+    panel = RadioPanel(confirm=lambda: False)
+    row = next(row for row in curated_websdr_receivers() if row["id"] == identifier)
+    prompts = []
+    browser_urls = []
+    answer = QMessageBox.StandardButton.No
+
+    def reject_embedded(*args, **kwargs):
+        pytest.fail("Browser-only receiver reached embedded network admission")
+
+    def question(*args, **kwargs):
+        prompts.append(args[1])
+        return answer
+
+    def open_browser(url):
+        browser_urls.append(url.toString())
+        return True
+
+    monkeypatch.setattr(panel, "_load_receiver_url", reject_embedded)
+    monkeypatch.setattr(panel, "_ensure_receiver_view", reject_embedded)
+    monkeypatch.setattr(QMessageBox, "question", question)
+    monkeypatch.setattr(QDesktopServices, "openUrl", open_browser)
+    try:
+        # Test direct manual input before choosing a curated catalog row.
+        assert panel.receiver_picker.currentIndex() == 0
+        panel.receiver_url.setText(row["url"])
+        assert not panel.receiver_connect.isEnabled()
+        assert panel.receiver_external.isEnabled()
+        with pytest.raises(ValueError, match="In-app SDR requires public HTTPS/443"):
+            panel._receiver_target()
+        assert not panel.connect_receiver()
+        assert not panel.receiver_connected
+        assert not prompts and not browser_urls
+
+        # Selecting the catalog bookmark cannot change origin admission.
+        panel.receiver_picker.setCurrentIndex(next(
+            i for i in range(panel.receiver_picker.count())
+            if (panel.receiver_picker.itemData(i) or {}).get("id") == identifier))
+        assert panel.receiver_url.text() == row["url"]
+        assert not panel.receiver_connect.isEnabled()
+        assert not panel.receiver_browser_quick.isHidden()
+        with pytest.raises(ValueError, match="In-app SDR requires public HTTPS/443"):
+            panel._receiver_target()
+        assert not panel.connect_receiver()
+        assert not panel.receiver_connected
+        assert not prompts and not browser_urls
+
+        # Browser navigation is a separate explicit, consented action.
+        assert not panel.open_selected_receiver()
+        assert prompts == ["Open public receiver in browser?"]
+        assert not browser_urls
+        answer = QMessageBox.StandardButton.Yes
+        assert panel.open_selected_receiver()
+        assert prompts == ["Open public receiver in browser?"] * 2
+        assert browser_urls == [row["url"]]
+        assert not panel.receiver_connected
+    finally:
+        _cleanup(panel, app)
 
 
 def test_curated_receiver_records_are_fresh_and_do_not_share_mutable_bands():
