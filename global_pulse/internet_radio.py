@@ -413,8 +413,10 @@ class RadioPanel(QWidget):
         # Keep real vertical headroom for native Windows font metrics. The tab
         # already labels HAM / SDR, so start with the selected receiver instead
         # of stacking a duplicate eyebrow above the actual controls.
-        layout.setContentsMargins(6,6,6,6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6,4,6,4)
+        # Reserve a little more vertical room for the independent band row.
+        # Keep all font sizes, natural control minima and the details viewport.
+        layout.setSpacing(3)
         self.ham_receiver_name=QLabel("Choose a public receiver")
         self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_receiver_name.setWordWrap(True)
