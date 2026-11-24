@@ -429,10 +429,13 @@ class RadioPanel(QWidget):
             "padding:4px;border:1px solid #407b67;border-radius:8px;"
         )
         layout.addWidget(self.ham_frequency_display)
-        self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
+        self.ham_frequency_detail=QLabel("7100 kHz · USB · Requested")
         self.ham_frequency_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ham_frequency_detail.setTextFormat(Qt.TextFormat.PlainText)
-        self.ham_frequency_detail.setWordWrap(True)
+        # One concise line leaves vertical room for a real, separate band
+        # selector at compact Windows sizes. Do not hide the uncertainty.
+        self.ham_frequency_detail.setWordWrap(False)
+        self.ham_frequency_detail.setToolTip("Pulse requested frequency and mode; receiver audio and tuning are not verified.")
         self.ham_frequency_detail.setAccessibleName("Exact requested kilohertz and mode; operator playback unverified")
         layout.addWidget(self.ham_frequency_detail)
         self.ham_bands=QLabel(
@@ -611,10 +614,15 @@ class RadioPanel(QWidget):
         self.ham_forward.setAccessibleName("Tune higher by selected kilohertz step")
         self.ham_forward.clicked.connect(lambda:self.step_receiver(1))
         stepping.addWidget(self.ham_back)
-        stepping.addWidget(self.ham_step)
-        stepping.addWidget(self.ham_band,1)
+        stepping.addWidget(self.ham_step,1)
         stepping.addWidget(self.ham_forward)
         layout.addLayout(stepping)
+        # Windows Qt's measured minimum widths for step and band selectors
+        # are 180–192 and 288–309 px respectively. Keeping them with both
+        # buttons in one row forced the panel to 724–772 px. Give the band
+        # selector the full row; retain its actual readable size hint.
+        layout.addWidget(self.ham_band)
+        self.ham_band.setToolTip("Select an operator-listed frequency range in MHz")
 
         scan_row=QHBoxLayout()
         self.scan_start=QLineEdit("7000")
@@ -658,8 +666,10 @@ class RadioPanel(QWidget):
         # when long directory labels or the advanced details are shown.
         layout.removeItem(stepping)
         layout.insertLayout(3,stepping)
+        layout.removeWidget(self.ham_band)
+        layout.insertWidget(4,self.ham_band)
         layout.removeItem(tuner_row)
-        layout.insertLayout(4,tuner_row)
+        layout.insertLayout(5,tuner_row)
         receiver_row.removeWidget(self.receiver_connect)
         receiver_row.removeWidget(self.receiver_off)
         discovery_row.removeWidget(self.receiver_external)
@@ -783,7 +793,7 @@ class RadioPanel(QWidget):
             self.ham_frequency_display.setText(f"{integral}.{fraction} MHz")
             self.ham_frequency_detail.setText(
                 f"{self._format_khz(khz)} kHz · {self.mode.currentText()} · "
-                "Pulse requested setting; receiver audio unverified"
+                "Requested"
             )
             self._sync_receiver_band(khz)
         except (ValueError,TypeError):

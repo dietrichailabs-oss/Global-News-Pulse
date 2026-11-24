@@ -579,3 +579,30 @@ def test_range_selector_tracks_tuning_without_losing_explicit_overlap_choice(pan
     panel.frequency.setText("30000")
     assert panel.ham_band.currentIndex()==-1,"Out-of-range request must not show a valid selected window"
     assert len(requested)==1,"Editing a requested frequency must not connect"
+
+
+@pytest.mark.parametrize("larger_font",[False,True])
+def test_compact_tuner_reflow_keeps_actual_step_and_band_size_hints(panel,app,larger_font):
+    panel.setStyleSheet(STYLE.replace("font-size: 12px;","font-size: 13px;") if larger_font else STYLE)
+    panel.radio_tabs.setCurrentIndex(1)
+    panel.resize(600,480)
+    panel.show()
+    panel.ham_details_toggle.setChecked(True)
+    panel.advanced_scan.setChecked(True)
+    surface=panel.radio_tabs.widget(1)
+    for source in curated_websdr_receivers():
+        _select_curated(panel,source["id"])
+        for _ in range(3):
+            app.processEvents()
+        assert panel.width()<=600 and panel.height()<=480,source["id"]
+        step_y=panel.ham_step.mapTo(surface,QPoint(0,0)).y()
+        band_y=panel.ham_band.mapTo(surface,QPoint(0,0)).y()
+        assert band_y>=step_y+panel.ham_step.height(),source["id"]
+        for control in (panel.ham_back,panel.ham_step,panel.ham_forward,panel.ham_band):
+            assert control.isVisible(),source["id"]
+            assert control.width()>=control.minimumSizeHint().width(),(source["id"],control.accessibleName(),control.width(),control.minimumSizeHint().width())
+            assert control.height()>0
+            assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
+        assert panel.ham_details_scroll.viewport().height()>=24
+        assert "Requested" in panel.ham_frequency_detail.text()
+        assert "not verified" in panel.ham_frequency_detail.toolTip()
