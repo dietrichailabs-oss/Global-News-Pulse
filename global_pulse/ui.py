@@ -99,6 +99,41 @@ def label(text="", name=None, wrap=False):
     return w
 
 
+class BoundedStatusLabel(QLabel):
+    """Long source/coverage messages cannot enlarge a top-level window.
+
+    Keep the full accessible text and tooltip; elide just the painted line.
+    Native maximize/restore and user-driven window sizing are untouched.
+    """
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text):
+        value=str(text)
+        super().setText(value)
+        self.setToolTip(value)
+        self.setAccessibleDescription(value)
+
+    def minimumSizeHint(self):
+        return QSize(0,super().minimumSizeHint().height())
+
+    def sizeHint(self):
+        hint=super().sizeHint()
+        return QSize(min(320,hint.width()),hint.height())
+
+    def paintEvent(self,event):
+        painter=QPainter(self)
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(self.contentsRect(),Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignLeft,
+            self.fontMetrics().elidedText(self.text(),Qt.TextElideMode.ElideRight,
+                                          max(0,self.contentsRect().width())))
+        painter.end()
+
+
 def button(text, callback=None, tooltip=None, checkable=False):
     b = QPushButton(text)
     b.setCheckable(checkable)
@@ -462,6 +497,13 @@ class MainWindow(SituationActions, QMainWindow):
         self.search=QLineEdit();self.search.setPlaceholderText("Search events, sources, evidence…");self.search.setClearButtonEnabled(True);self.search.setAccessibleName("Search local event archive");self.search.setMinimumWidth(200)
         self.category=QComboBox();self.category.addItem("All categories","");self.category.setMinimumWidth(135);self.category.setAccessibleName("Category filter")
         self.region=QComboBox();self.region.addItem("All regions","");self.region.setMinimumWidth(125);self.region.setAccessibleName("Region filter")
+        # Publisher region/category names may be long; their contents must
+        # not resize a window or shift the custom native caption controls.
+        for combo in (self.category,self.region):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
+            combo.setToolTip(combo.currentText())
+            combo.currentIndexChanged.connect(lambda _index,c=combo:c.setToolTip(c.currentText()))
         self.time_range=QComboBox();self.time_range.addItems(["24 hours","7 days","30 days","All history"]);self.time_range.setCurrentIndex(1);self.time_range.setAccessibleName("Event time range")
         self.pause_button=button("Pause",self._toggle_monitoring,"Pause or resume monitoring")
         self.pause_button.setMinimumWidth(max(80,self.pause_button.fontMetrics().horizontalAdvance("Resume")+28))
@@ -474,12 +516,12 @@ class MainWindow(SituationActions, QMainWindow):
         self.media.auto_cameras_changed.connect(lambda value:self.controller.set_setting("auto_event_cameras",value))
         if hasattr(self.media, "configure_radio_preferences"):
             self.media.configure_radio_preferences(self.controller.get_setting, self.controller.set_setting)
-        self.status_label=label("Ready. Select an event to inspect its source trail.")
+        self.status_label=BoundedStatusLabel("Ready. Select an event to inspect its source trail.")
         self.statusBar().addWidget(self.status_label,1)
-        self.count_label=label("0 events")
-        self.statusBar().addPermanentWidget(self.count_label)
+        self.count_label=BoundedStatusLabel("0 events")
+        self.statusBar().addPermanentWidget(self.count_label,2)
         self.statusBar().setSizeGripEnabled(True)
-        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self._queue_filter_refresh)
         # Collector events may arrive in bursts while the user is switching
         # tabs. Start the first-due timer once (never restart on every signal).
         # No widgets or QTimer are touched from the collector's worker thread.
@@ -641,7 +683,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.english_headlines.toggled.connect(lambda value:self.controller.set_setting("english_headlines",value))
         feed.heading.addWidget(self.english_headlines)
         self.sort_combo=QComboBox();self.sort_combo.addItems(["Latest first","Highest importance","Most reports"]);self.sort_combo.currentIndexChanged.connect(self._populate_feed);feed.heading.addWidget(self.sort_combo)
-        self.feed_list=QListWidget();self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
+        self.feed_list=QListWidget();self.feed_list.setUniformItemSizes(True);self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
         # Clicking even an already-selected item is an explicit request for
         # its evidence view; initial auto-selection does NOT hide World Overview.
         self.feed_list.itemClicked.connect(
@@ -1145,6 +1187,7 @@ class MainWindow(SituationActions, QMainWindow):
             self.refresh_data()
             return
         self.search_timer.stop()
+        self._last_navigation_at=time.monotonic()
         self._idle_snapshot_generation+=1
         if not self._filter_refresh_pending:
             # Old results remain visible, explicitly marked and noninteractive.
@@ -1511,7 +1554,8 @@ class MainWindow(SituationActions, QMainWindow):
                 # worker returned. Compute it on the same bounded worker;
                 # pass back the exact source object identities for validation.
                 from .crisis_overlay import build_country_activity, load_crisis_context
-                from .map_widget import _map_category, prepare_country_evidence
+                from .map_widget import (_map_category, prepare_country_evidence,
+                                         prepare_country_source_facts, prepare_point_source_index)
                 category_key=(None if map_categories is None else
                               frozenset(_map_category(c) for c in map_categories))
                 evidence=result["country_evidence"][:5000]
@@ -1526,7 +1570,11 @@ class MainWindow(SituationActions, QMainWindow):
                 classified=build_country_activity(
                     selected if crisis_events is None else crisis_events,
                     now=classification_now,single_record_credits=credits)
+                observations=result["observations"][:10000]
+                facts=prepare_country_source_facts(evidence,observations,map_country_rows)
                 result["map_classification"]={
+                    "source_facts":facts,
+                    "point_source_index":prepare_point_source_index(result["map_events"][:5000],facts),
                     "category_key":category_key,
                     "disabled_hazards":disabled_hazards,
                     "record_ids":tuple(id(record) for record in evidence),
@@ -1538,8 +1586,8 @@ class MainWindow(SituationActions, QMainWindow):
                                             if isinstance(item,dict)),
                     "evidence_index":prepare_country_evidence(
                         selected,result["observations"][:10000],map_country_rows,
-                        credits,category_key,
-                        **({"disabled_hazards":disabled_hazards} if disabled_hazards else {})),
+                        credits,category_key,disabled_hazards=disabled_hazards,
+                        source_facts=facts),
                 }
                 after=store.content_revision()
                 result["revision_before"]=before
@@ -2132,6 +2180,7 @@ class MainWindow(SituationActions, QMainWindow):
                     combo.clear();combo.addItem(all_title,"")
                     for value in values:combo.addItem(value,value)
                     combo.setCurrentIndex(combo.findData(current))
+                    combo.setToolTip(combo.currentText())
                 finally:
                     combo.blockSignals(blocked)
 
@@ -3015,16 +3064,19 @@ class MainWindow(SituationActions, QMainWindow):
         self.world_map.density=checked;self.world_map.update()
 
     def _toggle_hazards(self, checked):
+        self._last_navigation_at=time.monotonic()
         self.world_map.set_hazards_enabled(checked)
         self._sync_hazard_controls()
         self._refresh_hazard_coverage()
 
     def _toggle_hazard_kind(self, kind, checked):
+        self._last_navigation_at=time.monotonic()
         self.world_map.set_hazard_layer(kind, checked)
         self._sync_hazard_controls()
         self._refresh_hazard_coverage()
 
     def _reset_hazards(self):
+        self._last_navigation_at=time.monotonic()
         self.world_map.reset_hazard_layers()
         self._sync_hazard_controls()
         self._refresh_hazard_coverage()

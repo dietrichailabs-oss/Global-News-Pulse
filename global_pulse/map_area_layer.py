@@ -16,10 +16,14 @@ class WarningAreaLayer:
         self.owner = owner
         self.paths = []
         self.omitted = 0
+        self._visible_key = None
+        self._visible_paths = ()
 
     def set_events(self, events):
         self.paths = []
         self.omitted = 0
+        self._visible_key = None
+        self._visible_paths = ()
         vertices = 0
         for event in events:
             context = event.get("status") == "pending" and event.get("map_history_incomplete") is True
@@ -50,9 +54,18 @@ class WarningAreaLayer:
 
     def visible(self):
         categories = self.owner.categories
-        return [(path, event, area) for path, event, area in self.paths
+        key = (id(self.paths), len(self.paths),
+               None if categories is None else frozenset(categories),
+               self.owner.disabled_hazards())
+        if key != self._visible_key:
+            self._visible_paths = tuple(
+                (path,event,area) for path,event,area in self.paths
                 if (categories is None or event.get("category") in categories)
-                and self.owner.warning_area_visible(event, area)]
+                and self.owner.warning_area_visible(event, area))
+            self._visible_key = key
+        # Keep the original list-return contract and do not expose the cache
+        # itself to a caller that might mutate the returned collection.
+        return list(self._visible_paths)
 
     def paint(self, painter):
         painter.save()

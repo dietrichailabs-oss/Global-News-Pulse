@@ -1,4 +1,5 @@
 """Vector glyphs; marker severity colors and verification rings remain unchanged."""
+from functools import lru_cache
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
@@ -17,8 +18,19 @@ _PATHS = {
     "other": (((0,-.98),(.95,0),(0,.98),(-.95,0),(0,-.98)),((0,-.46),(0,.15)),((0,.48),(0,.54))),
 }
 
+@lru_cache(maxsize=12)
+def _glyph_paths(kind):
+    paths=[]
+    for coordinates in _PATHS.get(kind,()):
+        path=QPainterPath(QPointF(*coordinates[0]))
+        for coordinate in coordinates[1:]:
+            path.lineTo(QPointF(*coordinate))
+        paths.append(path)
+    return tuple(paths)
+
+
 def draw_hazard_glyph(painter,center,radius,kind,color):
-    paths=_PATHS.get(kind)
+    paths=_glyph_paths(kind)
     if not paths:
         return
     painter.save()
@@ -27,10 +39,7 @@ def draw_hazard_glyph(painter,center,radius,kind,color):
         painter.scale(radius,radius)
         painter.setPen(QPen(QColor(color),.17,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        for coordinates in paths:
-            path=QPainterPath(QPointF(*coordinates[0]))
-            for coordinate in coordinates[1:]:
-                path.lineTo(QPointF(*coordinate))
+        for path in paths:
             painter.drawPath(path)
     finally:
         painter.restore()
