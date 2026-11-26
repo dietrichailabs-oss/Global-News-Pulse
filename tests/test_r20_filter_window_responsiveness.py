@@ -146,6 +146,8 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
         import threading
         gui=threading.get_ident()
         trace=[]
+        preference_busy=[0]
+        revision_busy=[0]
         clock=time.perf_counter
         origin=clock()
         def record(kind, **fields):
@@ -174,7 +176,10 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
         original_revision=ctl.store.content_revision_if_available
         def revision():
             value=original_revision()
-            record("revision_probe", value=value)
+            if value is None:
+                revision_busy[0]+=1
+            else:
+                record("revision_probe", value=value)
             return value
         monkeypatch.setattr(ctl.store,"content_revision_if_available",revision)
         original_pref=getattr(ctl._headlines,"enabled_if_available",None)
@@ -182,11 +187,11 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
             def preference():
                 value=original_pref()
                 if value is None:
-                    record("headline_preference_busy")
+                    preference_busy[0]+=1
                 return value
             monkeypatch.setattr(ctl._headlines,"enabled_if_available",preference)
 
-        def state():
+        def capture_filter_state():
             return dict(pending=w._filter_refresh_pending,
                         inflight=w._idle_snapshot_inflight,
                         refreshing=w._refreshing, generation=w._idle_snapshot_generation,
@@ -197,20 +202,20 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
                         filter_remaining=w._filter_refresh_timer.remainingTime(),
                         deferred=len(ctl._headlines.deferred),
                         deferred_interval=ctl._headlines.deferred_timer.interval(),
-                        count=w.count_label.text(), status=w.status_label.text())
+                        count=w.count_label.text()[:240], status=w.status_label.text()[:240])
         last[0]=time.perf_counter()
         timer.start()
         for category in ("Health","Disaster",""):
             index=w.category.findData(category)
             assert index>=0
-            record("category_request", category=category, state=state())
+            record("category_request", category=category, state=capture_filter_state())
             w.category.setCurrentIndex(index)
             limit=time.monotonic()+12
             previous=None
             while w._filter_refresh_pending and time.monotonic()<limit:
                 app.processEvents()
                 QTest.qWait(10)
-                current=state()
+                current=capture_filter_state()
                 # Log transitions, not every 10ms wait or timer countdown.
                 key=tuple(str(current[k]) for k in (
                     "pending","inflight","refreshing","generation","scope","selected",
@@ -218,10 +223,19 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
                 if key!=previous:
                     record("state", state=current)
                     previous=key
-            record("category_end", category=category, state=state(),
-                   heartbeat_max_ms=max(heartbeat,default=0))
-            print("R20_FILTER_TRACE="+json.dumps(trace,default=str),flush=True)
+            # Always emit the terminal state separately from bounded trace storage.
+            terminal=dict(kind="category_end", category=category,
+                          state=capture_filter_state(),
+                          heartbeat_max_ms=max(heartbeat,default=0),
+                          headline_preference_busy=preference_busy[0],
+                          revision_probe_busy=revision_busy[0],
+                          recorded_events=len(trace))
+            for entry in trace:
+                print("R20_FILTER_TRACE="+json.dumps(entry,default=str),flush=True)
+            print("R20_FILTER_END="+json.dumps(terminal,default=str),flush=True)
             trace.clear()
+            preference_busy[0]=0
+            revision_busy[0]=0
             assert not w._filter_refresh_pending
             if category:
                 assert w._events and all(e["category"]==category for e in w._events)

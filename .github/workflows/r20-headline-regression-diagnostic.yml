@@ -48,14 +48,24 @@ jobs:
           rc=0
           for trial in 1 2; do
             for variant in old new; do
-              (
+              if (
                 cd "$RUNNER_TEMP/gp-headline-$variant" || exit 1
-                echo "R20_ISOLATION=$variant trial=$trial head=$(git rev-parse HEAD)"
+                actual=$(git rev-parse HEAD) || exit 1
+                case "$variant" in
+                  old) expected=ccec1a711afbbf656f5f1f0f3303732cbe71365a ;;
+                  new) expected=03a72dc7fde4b9e180b5576cfdfe2dbc985bde79 ;;
+                  *) exit 1 ;;
+                esac
+                test "$actual" = "$expected" || exit 1
+                echo "R20_ISOLATION=$variant trial=$trial head=$actual"
                 cp "$diagnostic" "tests/test_r20_filter_window_responsiveness.py" || exit 1
                 git diff --exit-code -- global_pulse requirements-bootstrap.lock requirements-build.lock || exit 1
                 python -m pytest -q -s --tb=short tests/test_r20_filter_window_responsiveness.py
-              )
-              result=$?
+              ); then
+                result=0
+              else
+                result=$?
+              fi
               echo "R20_ISOLATION_EXIT=$result variant=$variant trial=$trial"
               if [ "$result" -ne 0 ]; then rc=1; fi
             done
