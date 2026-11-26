@@ -472,7 +472,9 @@ class MainWindow(SituationActions, QMainWindow):
         # Delayed headline/collector repaint must not silently re-star a row.
         self._feed_explicitly_cleared=False
         self._events=[]
-        self._overview_events=[]  # Category candidates from existing feed/map reads.
+        self._overview_events=[]  # Priority candidates from existing feed/map reads.
+        self._daily_brief_snapshot=None
+        self._displayed_brief_key=None
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -929,7 +931,7 @@ class MainWindow(SituationActions, QMainWindow):
         controls=QHBoxLayout();self.brief_period=QComboBox();self.brief_period.addItems(["Daily","Weekly"]);controls.addWidget(self.brief_period)
         controls.addWidget(button("Generate brief",self._generate_brief));controls.addStretch();controls.addWidget(button("Export brief…",self._export_brief));controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
         self.brief_browser=QTextBrowser();self.brief_browser.setOpenExternalLinks(False);self.brief_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));panel.layout.addWidget(self.brief_browser,1)
-        panel.layout.addWidget(label("Briefs are grounded in locally retained source records. They cannot fill gaps in source coverage or monitoring downtime.","Muted",True));self.pages.addWidget(panel)
+        panel.layout.addWidget(label("Daily is the opening dated snapshot until Generate brief or a new UTC day. The Monitor overview continues to update. Briefs cannot fill gaps in local source coverage.","Muted",True));self.pages.addWidget(panel)
 
     def _build_settings(self):
         scroll=QScrollArea();scroll.setWidgetResizable(True);body=QWidget();layout=QVBoxLayout(body);layout.setContentsMargins(20,15,20,20);layout.setSpacing(15)
@@ -1189,7 +1191,7 @@ class MainWindow(SituationActions, QMainWindow):
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
-        elif index==5:self._generate_brief()
+        elif index==5:self._generate_brief(preserve_daily=True)
 
     def open_page(self,index):
         previous=self.pages.currentIndex()
@@ -1532,7 +1534,8 @@ class MainWindow(SituationActions, QMainWindow):
         feed_sort_index=self.sort_combo.currentIndex()
         controller=self.controller
         signal=self._idle_snapshot_ready
-        brief_pending=not self._idle_brief_inflight
+        brief_pending=(not self._idle_brief_inflight
+                       and not self._has_current_daily_brief(brief_period))
         if brief_pending:
             self._idle_brief_inflight=True
         self._idle_snapshot_inflight=True
@@ -1982,6 +1985,9 @@ class MainWindow(SituationActions, QMainWindow):
             self._dirty_pages.update(
                 range(1,6) if _idle_snapshot is None else (1,2,4,5)
             )
+            if (self._has_current_daily_brief(self.brief_period.currentText().lower())
+                    and self._displayed_brief_key==self._daily_brief_snapshot["key"]):
+                self._dirty_pages.discard(5)
             if _idle_snapshot is None:
                 filters=self.events_filters()
                 self._events=self.controller.events(**filters)
@@ -2850,8 +2856,22 @@ class MainWindow(SituationActions, QMainWindow):
         event_id=a.get("event_id") or (a.get("event") or {}).get("id")
         if event_id:self.navigate_event(event_id)
 
-    def _generate_brief(self, *, idle=False):
+    def _has_current_daily_brief(self, period):
+        snapshot=self._daily_brief_snapshot
+        return (period=="daily" and snapshot is not None
+                and snapshot["day"]==datetime.now(timezone.utc).date().isoformat())
+
+    def _generate_brief(self, *, idle=False, preserve_daily=False):
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
+        if (idle or preserve_daily) and self._has_current_daily_brief(period):
+            snapshot=self._daily_brief_snapshot
+            if self._displayed_brief_key!=snapshot["key"]:
+                self.brief_browser.setHtml(snapshot["html"])
+                self._displayed_brief_key=snapshot["key"]
+            self._deferred_brief_events=None
+            self._deferred_brief_revision=None
+            self._deferred_brief_period=None
+            return True
         # The Brief collector already runs on a worker. During hidden/visible
         # no-click presentation, NEVER execute a fresh Brief SQL query on Qt,
         # even if the Store lock is acquired after the earlier warm probe.
@@ -2886,16 +2906,52 @@ class MainWindow(SituationActions, QMainWindow):
         self._deferred_brief_events=None
         self._deferred_brief_revision=None
         self._deferred_brief_period=None
+        generated=datetime.now(timezone.utc)
         events=(cached if valid else self.controller.brief_events(
-            since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period))
+            since=(generated-timedelta(days=days)).isoformat(),period=period))
+        from .core import build_brief
         from .brief_rendering import brief_html
-        self.brief_browser.setHtml(brief_html(events,period))
+        markdown=build_brief(events,period,generated_at=generated)
+        rendered=brief_html(events,period,markdown=markdown)
+        key=(period,generated.isoformat())
+        self.brief_browser.setHtml(rendered)
+        self._displayed_brief_key=key
+        if period=="daily":
+            self._daily_brief_snapshot={
+                "day":generated.date().isoformat(),"key":key,
+                "markdown":markdown,"html":rendered,
+            }
+            # At launch the two intelligence views share the same opening
+            # evidence. Subsequent Monitor revisions use its ordinary exact
+            # selected scope; the Daily snapshot is not silently rewritten.
+            if (not self._background_warm_enabled and not self._history_at
+                    and not self.category.currentData() and not self.region.currentData()
+                    and not self.search.text().strip()):
+                from .brief_selection import overview_evidence_candidates,overview_html
+                self._overview_events=overview_evidence_candidates(events,())
+                self._update_world_overview(precomputed_html=overview_html(
+                    self._overview_events,label="opening Daily Brief snapshot — last 24 hours and retained critical alerts"))
         return True
 
     def _export_brief(self):
         path,_=QFileDialog.getSaveFileName(self,"Export intelligence brief","Global-Pulse-brief.html","HTML with severity colors (*.html);;Markdown (*.md);;Text (*.txt)")
         if path:
-            try:self.controller.export_brief(path,self.brief_period.currentText().lower());self.status_label.setText("Intelligence brief exported.")
+            try:
+                period=self.brief_period.currentText().lower()
+                snapshot=self._daily_brief_snapshot
+                if period=="daily" and snapshot is not None:
+                    from .security import atomic_text
+                    from pathlib import Path
+                    if Path(path).suffix.lower() in {".html",".htm"}:
+                        text=snapshot["html"]
+                    else:
+                        text=snapshot["markdown"]
+                        if self.controller.demo:
+                            text="# SYNTHETIC TEST DATA — NOT REAL EVENTS\n\n"+text
+                    atomic_text(path,text)
+                else:
+                    self.controller.export_brief(path,period)
+                self.status_label.setText("Intelligence brief exported.")
             except Exception as exc:QMessageBox.warning(self,"Export failed",str(exc))
 
     def _export_events(self):

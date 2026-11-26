@@ -54,6 +54,9 @@ _DOMAIN_ALIASES = {
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2,
                   "informational": 1, "unassessed": 0}
 _INACTIVE = {"retracted", "cancelled", "canceled", "expired", "resolved", "closed", "ended"}
+# Same existing map inventory bound, plus the bounded feed/brief candidate pool.
+MAX_PRIORITY_RECORDS = 5500
+MAX_CRITICAL_ALERTS = 5000
 _DOMAIN_COLOR = {
     "Conflict & security":"#e77482",
     "Unrest & civil affairs":"#ebbe72",
@@ -123,6 +126,45 @@ def _rank(item):
             min(max(int(item.get("report_count") or 0), 0), 100))
 
 
+def is_active_critical(item):
+    """Map red is recorded critical importance, never inferred verification."""
+    return (isinstance(item,dict) and bool(item.get("id"))
+            and str(item.get("status") or "active").casefold()=="active"
+            and str(item.get("severity") or "").casefold()=="critical"
+            and not item.get("future_dated"))
+
+
+def priority_rank(item):
+    # Current developments precede historical/withdrawn/future context.
+    # Within each state the recorded importance, then date, decides order.
+    current=(str(item.get("status") or "active").casefold() not in _INACTIVE
+             and not item.get("future_dated"))
+    return (current, *_rank(item))
+
+
+def priority_heading(item):
+    if (str(item.get("status") or "active").casefold() in _INACTIVE
+            or item.get("future_dated")):
+        return "Historical or withdrawn context"
+    return {"critical":"Critical alerts", "high":"High priority",
+            "moderate":"Moderate priority", "informational":"Informational updates"
+            }.get(str(item.get("severity") or "").casefold(),"Unassessed importance")
+
+
+def critical_alerts(events):
+    seen=set()
+    rows=[]
+    for item in islice(events or (),MAX_PRIORITY_RECORDS):
+        if not is_active_critical(item):
+            continue
+        identity=str(item["id"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        rows.append(item)
+    return sorted(rows,key=priority_rank,reverse=True)[:MAX_CRITICAL_ALERTS]
+
+
 def _routine_medicine_notice(item):
     """Recognize narrow document forms, never guess an incident category.
 
@@ -158,7 +200,7 @@ def balanced_brief_sections(events, *, per_domain=3, max_total=30,
         raise ValueError("Brief limits must be positive")
     pools = defaultdict(list)
     seen = set()
-    for item in list(events)[:1500]:
+    for item in islice(events, MAX_PRIORITY_RECORDS):
         if not isinstance(item, dict):
             continue
         identity = str(item.get("id") or "")
@@ -200,19 +242,30 @@ def overview_evidence_candidates(feed_events, map_evidence, *, per_domain=2):
         raise ValueError("Overview domain cap must be between one and three")
     pools = defaultdict(list)
     seen = set()
+    critical = []
+    # Prefer the canonical map-evidence projection for a critical record
+    # already present in both exact-revision inventories; other feed rows
+    # retain their original source identity and bounded selection.
+    map_red={str(row["id"]):row for row in islice(map_evidence or (),5000)
+             if is_active_critical(row)}
     for inventory in (feed_events, map_evidence):
-        for item in islice(inventory or (), 5000):
+        for item in islice(inventory or (), MAX_PRIORITY_RECORDS):
             if not isinstance(item, dict):
                 continue
             identity = str(item.get("id") or "")
             if not identity or identity in seen:
                 continue
             seen.add(identity)
+            item=map_red.get(identity,item)
+            if is_active_critical(item):
+                critical.append(item)
+                continue
             bucket = pools[_overview_domain(item)]
             bucket.append(item)
             bucket.sort(key=_overview_rank, reverse=True)
             del bucket[per_domain:]
-    return [item for domain in BRIEF_DOMAINS for item in pools.get(domain, ())]
+    return (critical_alerts(critical) +
+            [item for domain in BRIEF_DOMAINS for item in pools.get(domain, ())])
 
 
 def _source_time_label(report, event):
@@ -285,17 +338,30 @@ def _overview_card(item):
     )
 
 
+def _compact_critical_card(item):
+    """One source-linked line per additional red alert, not a new claim."""
+    title=escape(str(item.get("title") or "Untitled source record")[:260])
+    identity=quote(str(item.get("id")),safe="")
+    location=escape(str(item.get("country") or item.get("region") or "Location unspecified")[:100])
+    verification=escape(str(item.get("verification") or "unverified")[:32])
+    updated=escape(str(item.get("updated_at") or item.get("published_at") or "unknown")[:40])
+    retained=" · retained; no newer status" if item.get("retained_on_map") else ""
+    return ("<p style='margin:2px 0 5px'><b style='color:#f06475'>CRITICAL</b> · "
+            "<a style='color:#e5e3f2' href='pulse-event://open/"+identity+"'>"+title+"</a>"
+            "<br><span style='color:#aeb9c9;font-size:10px'>"+location+" · "+verification+
+            " · record update "+updated+retained+"</span></p>")
+
+
 def overview_html(events, *, label="visible local feed"):
-    """Compact HTML for a read-only sidebar, with local event detail links."""
-    limited = list(events)[:1000]
-    # A direct renderer call must apply the same presentation policy as the
-    # worker's shortlist, without mutating canonical records or reading Store.
-    shortlist = overview_evidence_candidates(limited, ())
-    routine = [item for item in shortlist if _routine_medicine_notice(item)]
-    situations = [item for item in shortlist if not _routine_medicine_notice(item)]
+    """Compact live intelligence, red alerts first, then rated importance."""
+    shortlist = overview_evidence_candidates(list(islice(events,MAX_PRIORITY_RECORDS)), ())
+    red=critical_alerts(shortlist)
+    ordinary=[item for item in shortlist if not is_active_critical(item)]
+    routine = [item for item in ordinary if _routine_medicine_notice(item)]
+    situations = [item for item in ordinary if not _routine_medicine_notice(item)]
     blocks = [
         "<h3 style='color:#eee9fa'>World intelligence overview</h3>",
-        "<p style='color:#aeb9c9'>Category-balanced source headlines from the "
+        "<p style='color:#aeb9c9'>Priority-ranked source headlines from the "
         + escape(label) +
         ". Unverified reports are not independently confirmed. "
         "Missing stories mean coverage is absent from these records, "
@@ -303,42 +369,54 @@ def overview_html(events, *, label="visible local feed"):
         "<p style='color:#aeb9c9'>Unassessed describes unrated importance, "
         "not whether a report is true. Official publication and independent "
         "corroboration are shown separately.</p>",
+        "<p style='margin:12px 0 3px'><b style='color:#f06475'>Critical alerts — immediate attention</b></p>",
     ]
-    # The normal Daily Brief uses canonical categories. This overview alone
-    # honors the narrowly attributed publisher-topic fallback above. Allocate
-    # one place per represented topic before filling the unchanged 16-card cap.
-    # Background notices are part of that same total, not an extra allowance.
-    topic_rows = defaultdict(list)
+    if red:
+        blocks.append("<p style='color:#aeb9c9'>"+str(len(red))+
+                      " active critical record(s) in this bounded local inventory; red indicates importance, not confirmed claims.</p>")
+        # Give the first few alerts fuller source context; list every other
+        # red alert compactly and retain its exact event link.
+        blocks.extend(_overview_card(item) if index<3 else _compact_critical_card(item)
+                      for index,item in enumerate(red))
+    else:
+        blocks.append("<p style='color:#818d9f'>No active critical alerts in the supplied local scope. This is not a worldwide all-clear.</p>")
+    topic_rows=defaultdict(list)
     for item in situations:
         topic_rows[_overview_domain(item)].append(item)
-    sections = defaultdict(list)
-    remaining = 16 - len(routine)
+    selected=[]
+    remaining=16-len(routine)
     for position in range(2):
         for domain in BRIEF_DOMAINS:
-            if remaining and position < len(topic_rows[domain]):
-                sections[domain].append(topic_rows[domain][position])
-                remaining -= 1
-    nonweather = sum(len(rows) for name, rows in sections.items()
-                     if name != "Weather & disasters")
-    for domain in BRIEF_DOMAINS:
-        rows = sections.get(domain, ())
-        color = _DOMAIN_COLOR[domain]
-        blocks.append("<p style='margin:10px 0 3px'><b style='color:" +
-                      color + "'>" + escape(domain) + "</b></p>")
-        if not rows:
-            if domain == "Health & disease" and routine:
-                blocks.append(
-                    "<p style='margin:0 0 6px;color:#aeb9c9'>"
-                    "Only routine medicines/regulatory notices are represented "
-                    "in this selected health sample; they are listed separately "
-                    "below, not presented as outbreak or incident coverage.</p>")
-                continue
+            if remaining and position<len(topic_rows[domain]):
+                selected.append(topic_rows[domain][position])
+                remaining-=1
+    selected.sort(key=priority_rank,reverse=True)
+    heading=None
+    for item in selected:
+        priority=priority_heading(item)
+        if priority!=heading:
+            heading=priority
+            blocks.append("<p style='margin:12px 0 4px'><b style='color:#e6d6fa'>"+escape(heading)+"</b></p>")
+        domain=_overview_domain(item)
+        blocks.append("<p style='margin:5px 0 1px'><b style='color:"+_DOMAIN_COLOR[domain]+"'>"+
+                      escape(domain)+"</b></p>")
+        blocks.append(_overview_card(item))
+    present={_overview_domain(item) for item in red+selected}
+    absent=[domain for domain in BRIEF_DOMAINS if domain not in present]
+    if absent:
+        blocks.append("<p style='margin:12px 0 3px'><b style='color:#aeb9c9'>Coverage gaps</b></p>")
+    for domain in absent:
+        blocks.append("<p style='margin:5px 0 3px'><b style='color:"+_DOMAIN_COLOR[domain]+"'>"+escape(domain)+"</b></p>")
+        if domain=="Health & disease" and routine:
+            blocks.append(
+                "<p style='margin:0 0 6px;color:#aeb9c9'>"
+                "Only routine medicines/regulatory notices are represented "
+                "in this selected health sample; they are listed separately "
+                "below, not presented as outbreak or incident coverage.</p>")
+        else:
             blocks.append("<p style='margin:0 0 6px;color:#818d9f'>"
                           "No matching category records in this feed. "
                           "This local coverage gap is not a worldwide all-clear.</p>")
-            continue
-        for item in rows:
-            blocks.append(_overview_card(item))
     if routine:
         blocks.append("<p style='margin:12px 0 3px'><b style='color:#bec6dc'>"
                       "Routine medicines/regulatory notices</b></p>"
@@ -347,7 +425,7 @@ def overview_html(events, *, label="visible local feed"):
                       "Original Health categories and source records remain "
                       "unchanged in the feed and archive.</p>")
         blocks.extend(_overview_card(item) for item in routine)
-    if nonweather == 0:
+    if not any(_overview_domain(item)!="Weather & disasters" for item in red+selected):
         blocks.append("<p style='color:#e4b576'><b>Coverage gap:</b> "
                       "no situation-focused non-weather records were selected "
                       "for this overview. Routine paperwork is not incident "

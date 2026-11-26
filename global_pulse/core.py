@@ -1488,7 +1488,7 @@ class Store:
         changes while reading, retry; on repeated contention use the original
         atomic path rather than return mixed or fabricated evidence.
         """
-        from .brief_selection import _DOMAIN_ALIASES
+        from .brief_selection import _DOMAIN_ALIASES, MAX_CRITICAL_ALERTS, is_active_critical
         count = max(1, min(int(per_domain), 9))
         aliases = sorted(_DOMAIN_ALIASES.items())
         categories = "CASE lower(trim(category)) " + " ".join(
@@ -1510,6 +1510,19 @@ class Store:
             "AND updated_at>=?) WHERE brief_rank<=?"
         )
         values = (*params, _iso(since), count)
+        # A critical alert retained on the map must not be cut by the
+        # per-topic detail limit or rolling briefing window. Keep the same
+        # 5,000-record map ceiling and do not make stale context current.
+        red_sql=("SELECT id FROM events WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+                 "AND json_extract(body,'$.status')='active' "
+                 "AND json_extract(body,'$.severity')='critical' "
+                 "AND COALESCE(json_extract(body,'$.future_dated'),0)=0 "
+                 "ORDER BY updated_at DESC,id LIMIT ?")
+
+        def identities_unlocked():
+            ordinary=[row[0] for row in self._conn.execute(sql,values)]
+            red=[row[0] for row in self._conn.execute(red_sql,(MAX_CRITICAL_ALERTS,))]
+            return list(dict.fromkeys(ordinary+red)),set(ordinary)
 
         def revision_unlocked():
             # Catch this Store's own writes and other SQLite connections'
@@ -1520,12 +1533,12 @@ class Store:
         for _attempt in range(2):
             with self._lock:
                 source_revision = revision_unlocked()
-                ids = [row[0] for row in self._conn.execute(sql, values)]
+                ids,ordinary = identities_unlocked()
             events = []
             for identity in ids:
                 with self._lock:
                     event = self._get_event_unlocked(identity)
-                if event is not None:
+                if event is not None and (identity in ordinary or is_active_critical(event)):
                     events.append(event)
             with self._lock:
                 if revision_unlocked() == source_revision:
@@ -1534,9 +1547,10 @@ class Store:
         # With continuous source mutations, preserve the old atomic read.
         # Never return partially mixed revisions just to pass a heartbeat test.
         with self._lock:
-            ids = self._conn.execute(sql, values).fetchall()
-            return [event for row in ids
-                    if (event := self._get_event_unlocked(row[0])) is not None]
+            ids,ordinary = identities_unlocked()
+            return [event for identity in ids
+                    if (event := self._get_event_unlocked(identity)) is not None
+                    and (identity in ordinary or is_active_critical(event))]
 
     def event_filter_options(self) -> dict[str, list[str]]:
         """Archive-wide selector metadata, independent of any rendered page.
@@ -2090,16 +2104,19 @@ def _markdown_text(value: Any) -> str:
     return plain_text(value, 8000).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("*", "\\*").replace("_", "\\_").replace("#", "\\#").replace("`", "\\`")
 
 
-def build_brief(events: list[dict], period: str = "daily") -> str:
+def build_brief(events: list[dict], period: str = "daily", *, generated_at=None) -> str:
     if period not in {"daily", "weekly"}:
         raise ValueError("Brief period must be daily or weekly")
     limit = 80 if period == "weekly" else 60
     title = "Weekly" if period == "weekly" else "Daily"
-    generated = utcnow()
+    generated = utcnow() if generated_at is None else _iso(generated_at)
     moment = _dt(generated)
     since = moment - timedelta(days=7 if period == "weekly" else 1)
     window = "last 7 days" if period == "weekly" else "last 24 hours"
-    supplied = [e for e in events[:1500] if isinstance(e, dict)]
+    from .brief_selection import (balanced_brief_sections, BRIEF_DOMAINS,
+                                  MAX_PRIORITY_RECORDS, critical_alerts,
+                                  priority_rank, priority_heading)
+    supplied = [e for e in events[:MAX_PRIORITY_RECORDS] if isinstance(e, dict)]
     synthetic = any(e.get("synthetic") for e in supplied)
 
     def text(value, length=300):
@@ -2152,15 +2169,44 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
              "it does not mean a story is false or that verification was completed. "
              "Evidence status describes source attribution and documented independent reporting. "
              "An official statement confirms its publication, not every underlying claim.", ""]
-    # A single high-volume weather adapter can otherwise consume every slot
-    # before one disease, conflict, infrastructure or government record appears.
-    # These are source CATEGORY groupings, never invented news/crisis claims.
-    from .brief_selection import balanced_brief_sections, BRIEF_DOMAINS
+    # Executive priority index includes every admitted active red record,
+    # independent of the detailed topic caps. The source evidence below
+    # remains a bounded, balanced sample; red does not imply verification.
+    red=critical_alerts(supplied)
+    lines.extend(["## Critical alerts — immediate attention", "",
+                  f"{len(red)} active critical record(s) in the supplied local inventory. "
+                  "Severity is recorded importance, not confirmation of underlying claims.", ""])
+    if not red:
+        lines.extend(["No active critical alerts in the supplied scope. This is not a worldwide all-clear.", ""])
+    for event in red:
+        updated=date(event.get("updated_at"))
+        state=" · retained from before reporting window" if updated and updated<since else ""
+        sources=[]
+        for report in event.get("reports",[])[:100]:
+            if not isinstance(report,dict) or report.get("future_dated") or report.get("evidence_status","active")!="active":
+                continue
+            try:
+                url=safe_public_url(report.get("url","")).replace("(","%28").replace(")","%29").replace(" ","%20").replace("<","%3C").replace(">","%3E").replace('"',"%22")
+            except (TypeError,ValueError):
+                continue
+            sources.append(f"[{text(report.get('publisher') or report.get('source_id') or 'Original source',100)}]({url})")
+            break
+        lines.extend([
+            f"- Severity: **CRITICAL** · **{text(event.get('title') or 'Untitled source record',260)}** · "
+            f"{text(event.get('country') or event.get('region') or 'Unspecified location',100)} · "
+            f"Evidence: {text(event.get('verification') or 'unverified',30)} · "
+            f"Record update {text(event.get('updated_at') or 'unknown',60)}{state}"+
+            (" · "+sources[0] if sources else " · inspect local event "+text(event.get("id"),100)),
+            ""
+        ])
+    # A single high-volume weather adapter must not consume every detailed
+    # assessment slot. Select topic coverage first, then sort by importance.
     grouped = balanced_brief_sections(
         supplied, per_domain=8 if period == "daily" else 9,
         max_total=limit, disaster_limit=3 if period == "daily" else 6
     )
-    ranked = [(domain, event) for domain, items in grouped for event in items]
+    ranked = sorted(((domain, event) for domain, items in grouped for event in items),
+                    key=lambda row:priority_rank(row[1]), reverse=True)
     selected = [event for _, event in ranked]
     supplied_count = len({str(e.get("id")) for e in supplied if e.get("id")})
     if not grouped:
@@ -2185,11 +2231,12 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
         ])
         if supplied_count > len(selected):
             lines.extend([f"{supplied_count - len(selected)} additional supplied records are outside the displayed topic limits. "
+                          "The critical-alert index above remains independent of those detail limits. "
                           "Use the feed or event archive for their complete evidence.", ""])
         lines.extend([
             "## Topic coverage", "",
-            "Items are grouped by source category, then by importance and last recorded update. "
-            "These sections do not establish worldwide coverage or verify a crisis.", ""
+            "Detailed assessments are ordered by current importance and then last recorded update, "
+            "with topic-balanced coverage. These sections do not establish worldwide coverage or verify a crisis.", ""
         ])
         present = {domain for domain, _ in grouped}
         absent = [domain for domain in BRIEF_DOMAINS if domain not in present]
@@ -2211,7 +2258,13 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
                              ", ".join(domain for domain in BRIEF_DOMAINS if domain in domains) + ".")
             lines.append("")
     current_domain = None
+    current_priority = None
     for index, (domain, event) in enumerate(ranked, 1):
+        priority=priority_heading(event)
+        if priority!=current_priority:
+            current_priority=priority
+            current_domain=None
+            lines.extend([f"# {priority} — detailed assessments", ""])
         if domain != current_domain:
             current_domain = domain
             lines.extend([f"## {domain}", ""])

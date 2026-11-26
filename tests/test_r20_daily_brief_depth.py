@@ -72,6 +72,8 @@ class DailyBriefDepthTests(unittest.TestCase):
         self.assertEqual(sum("SYNTHETIC Weather update" in line and line.startswith("### ")
                              for line in page.splitlines()), 3)
         self.assertIn("bounded sample, not a global event count", page)
+        red_index=page.split("## Critical alerts — immediate attention",1)[1].split("## At a glance",1)[0]
+        self.assertEqual(red_index.count("SYNTHETIC Weather update"),500)
 
     def test_unassessed_importance_and_official_attribution_remain_separate(self):
         statement = item(1, "Government", official_attribution=True,

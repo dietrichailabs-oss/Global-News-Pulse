@@ -4,9 +4,9 @@ from .core import build_brief
 from .theme import PANEL, PURPLE, SEVERITY, TEXT
 
 
-def brief_html(events, period="daily"):
+def brief_html(events, period="daily", *, markdown=None):
     document = QTextDocument()
-    document.setMarkdown(build_brief(events, period))
+    document.setMarkdown(build_brief(events, period) if markdown is None else markdown)
     # The document is used both in the dark Qt preview and as standalone HTML.
     # Export an explicit matching canvas so source links stay readable in both
     # places rather than inheriting Qt's dark-blue default or a white browser.
