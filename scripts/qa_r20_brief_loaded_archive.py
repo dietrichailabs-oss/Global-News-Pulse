@@ -134,7 +134,10 @@ class PhaseRecorder:
             finally:
                 recorder.spans.append((stage,who,label,begin,time.perf_counter(),
                                        (time.thread_time()-cpu)*1000))
-        self.stack.enter_context(patch.object(obj,name,timed))
+        # Preserve descriptor binding when timing static Store helpers.
+        descriptor=vars(obj).get(name) if isinstance(obj,type) else None
+        replacement=staticmethod(timed) if isinstance(descriptor,staticmethod) else timed
+        self.stack.enter_context(patch.object(obj,name,replacement))
 
     def __enter__(self):
         import global_pulse.core as core
