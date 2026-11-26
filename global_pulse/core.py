@@ -1478,7 +1478,8 @@ class Store:
                                 map_evidence=True, limit=limit,
                                 _crisis_candidates=True, _crisis_now=now)
 
-    def list_brief_events(self, *, since: str, per_domain: int = 9) -> list[dict]:
+    def list_brief_events(self, *, since: str, per_domain: int = 9,
+                          map_since: str | None = None) -> list[dict]:
         """Bounded, category-balanced Brief read without a multi-second Store lock.
 
         Each event still goes through the canonical history/evidence projection.
@@ -1510,19 +1511,49 @@ class Store:
             "AND updated_at>=?) WHERE brief_rank<=?"
         )
         values = (*params, _iso(since), count)
-        # A critical alert retained on the map must not be cut by the
-        # per-topic detail limit or rolling briefing window. Keep the same
-        # 5,000-record map ceiling and do not make stale context current.
-        red_sql=("SELECT id FROM events WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
-                 "AND json_extract(body,'$.status')='active' "
-                 "AND json_extract(body,'$.severity')='critical' "
-                 "AND COALESCE(json_extract(body,'$.future_dated'),0)=0 "
-                 "ORDER BY updated_at DESC,id LIMIT ?")
+        # Use the same canonical projection, accepted-only page ceiling,
+        # ordering and tie-break as the map. An unfiltered Daily/Weekly brief
+        # uses the standard seven-day Monitor scope (plus retained significant
+        # records). Explicit interactive map filters do not change that brief.
+        # Critical rows use the bounded map projection; only the detailed
+        # topic candidates require full history hydration.
+        def map_red():
+            # With no stored red or legacy projection candidate, the map
+            # cannot produce an active critical record. Avoid rehydrating
+            # thousands of ordinary records during ordinary startup.
+            with self._lock:
+                possible=self._conn.execute(
+                    "SELECT 1 FROM events WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+                    "AND (json_extract(body,'$.severity')='critical' OR "
+                    "COALESCE(json_extract(body,'$.evidence_policy_version'),0)<2) LIMIT 1").fetchone()
+            if possible is None:
+                return []
+            return [event for event in self.list_events(
+                map_evidence=True, limit=MAX_CRITICAL_ALERTS,
+                since=map_since or since, keep_significant=True)
+                if is_active_critical(event)]
 
-        def identities_unlocked():
-            ordinary=[row[0] for row in self._conn.execute(sql,values)]
-            red=[row[0] for row in self._conn.execute(red_sql,(MAX_CRITICAL_ALERTS,))]
-            return list(dict.fromkeys(ordinary+red)),set(ordinary)
+        def combine(ordinary, critical):
+            by_id={str(event["id"]):event for event in critical}
+            result=[]
+            seen=set()
+            for event in ordinary:
+                if event is None:
+                    continue
+                identity=str(event["id"])
+                if identity in by_id:
+                    # Preserve complete evidence timeline for bounded detail
+                    # candidates, but canonical current map facts own priority.
+                    event=dict(event, **by_id[identity])
+                elif is_active_critical(event):
+                    # A detail candidate outside the accepted map inventory
+                    # cannot displace a red map record at the cap.
+                    continue
+                if identity not in seen:
+                    result.append(event)
+                    seen.add(identity)
+            result.extend(event for event in critical if str(event["id"]) not in seen)
+            return result
 
         def revision_unlocked():
             # Catch this Store's own writes and other SQLite connections'
@@ -1533,24 +1564,50 @@ class Store:
         for _attempt in range(2):
             with self._lock:
                 source_revision = revision_unlocked()
-                ids,ordinary = identities_unlocked()
+                ids=[row[0] for row in self._conn.execute(sql,values)]
             events = []
             for identity in ids:
                 with self._lock:
                     event = self._get_event_unlocked(identity)
-                if event is not None and (identity in ordinary or is_active_critical(event)):
+                if event is not None:
                     events.append(event)
+            critical=map_red()
             with self._lock:
                 if revision_unlocked() == source_revision:
-                    return events
+                    return combine(events,critical)
 
         # With continuous source mutations, preserve the old atomic read.
         # Never return partially mixed revisions just to pass a heartbeat test.
         with self._lock:
-            ids,ordinary = identities_unlocked()
-            return [event for identity in ids
-                    if (event := self._get_event_unlocked(identity)) is not None
-                    and (identity in ordinary or is_active_critical(event))]
+            ids=[row[0] for row in self._conn.execute(sql,values)]
+            return combine([self._get_event_unlocked(identity) for identity in ids],map_red())
+
+    def brief_manifest_matches(self, manifest, *, nonblocking=False):
+        """Validate source-derived session text against exact retained event revisions.
+
+        Every admitted input is tracked, not just the displayed headline.
+        Ingest, withdrawal, merges and retention rebuilds increment/remove the
+        event revision. Aliased or missing records never validate. Unrelated
+        source/setting writes do not replace an opening Daily Brief.
+        None means busy, not unchanged; no waiting on the GUI export path.
+        """
+        if not self._lock.acquire(blocking=not nonblocking):
+            return None
+        try:
+            expected=dict(manifest)
+            identities=list(expected)
+            for offset in range(0,len(identities),256):
+                chunk=identities[offset:offset+256]
+                marks=",".join("?" for _ in chunk)
+                actual={row["id"]:row["revision"] for row in self._conn.execute(
+                    "SELECT id,revision FROM events WHERE id IN ("+marks+
+                    ") AND id NOT IN (SELECT alias_id FROM event_aliases)",chunk)}
+                if any(actual.get(identity)!=expected[identity] or identity not in actual
+                       for identity in chunk):
+                    return False
+            return True
+        finally:
+            self._lock.release()
 
     def event_filter_options(self) -> dict[str, list[str]]:
         """Archive-wide selector metadata, independent of any rendered page.

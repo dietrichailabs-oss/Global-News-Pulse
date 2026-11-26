@@ -475,6 +475,10 @@ class MainWindow(SituationActions, QMainWindow):
         self._overview_events=[]  # Priority candidates from existing feed/map reads.
         self._daily_brief_snapshot=None
         self._displayed_brief_key=None
+        self._displayed_brief_snapshot=None
+        self._deferred_brief_generated=None
+        self._deferred_brief_markdown=None
+        self._brief_request_epoch=0
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -609,6 +613,8 @@ class MainWindow(SituationActions, QMainWindow):
         # is coalesced to prevent high-frequency map rebuilds between clicks.
         controller.data_changed.connect(self._on_user_data_changed)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
+        if hasattr(controller,"archive_reports_pruned"):
+            controller.archive_reports_pruned.connect(self._brief_reports_pruned)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
         if hasattr(controller, "source_status_changed"):
@@ -929,9 +935,19 @@ class MainWindow(SituationActions, QMainWindow):
     def _build_briefs(self):
         panel=Panel("INTELLIGENCE BRIEFS & EXPORTS")
         controls=QHBoxLayout();self.brief_period=QComboBox();self.brief_period.addItems(["Daily","Weekly"]);controls.addWidget(self.brief_period)
-        controls.addWidget(button("Generate brief",self._generate_brief));controls.addStretch();controls.addWidget(button("Export brief…",self._export_brief));controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
+        controls.addWidget(button("Generate brief",self._request_brief));controls.addStretch()
+        self.brief_export_button=button("Export brief…",self._export_brief)
+        self.brief_export_button.setEnabled(False)
+        controls.addWidget(self.brief_export_button);controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
         self.brief_browser=QTextBrowser();self.brief_browser.setOpenExternalLinks(False);self.brief_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));panel.layout.addWidget(self.brief_browser,1)
-        panel.layout.addWidget(label("Daily is the opening dated snapshot until Generate brief or a new UTC day. The Monitor overview continues to update. Briefs cannot fill gaps in local source coverage.","Muted",True));self.pages.addWidget(panel)
+        self.brief_state_label=label("Opening intelligence brief pending","Muted",True)
+        panel.layout.addWidget(self.brief_state_label)
+        panel.layout.addWidget(label("Daily is the dated opening snapshot; Generate brief, a new UTC day, or a change/removal of its included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
+        self.brief_period.currentIndexChanged.connect(self._brief_period_changed)
+        self._brief_clock_timer=QTimer(self)
+        self._brief_clock_timer.setInterval(30000)
+        self._brief_clock_timer.timeout.connect(self._brief_clock_tick)
+        self._brief_clock_timer.start()
 
     def _build_settings(self):
         scroll=QScrollArea();scroll.setWidgetResizable(True);body=QWidget();layout=QVBoxLayout(body);layout.setContentsMargins(20,15,20,20);layout.setSpacing(15)
@@ -1000,8 +1016,8 @@ class MainWindow(SituationActions, QMainWindow):
         # not simulated user navigation.
         for index in (1,2,3,4,5):
             if index in self._dirty_pages:
-                self._populate_workspace(index)
-                self._dirty_pages.discard(index)
+                if self._populate_workspace(index) is not False:
+                    self._dirty_pages.discard(index)
         success=not (self._dirty_pages & {1,2,3,4,5})
         if success:
             self._background_warm_enabled=True
@@ -1191,7 +1207,7 @@ class MainWindow(SituationActions, QMainWindow):
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
-        elif index==5:self._generate_brief(preserve_daily=True)
+        elif index==5:return self._generate_brief(preserve_daily=True)
 
     def open_page(self,index):
         previous=self.pages.currentIndex()
@@ -1518,9 +1534,17 @@ class MainWindow(SituationActions, QMainWindow):
         # The daily/weekly intelligence brief is another expensive hidden
         # workspace prewarm. Capture its period/cutoff before entering the
         # Store worker; only immutable source dictionaries cross the thread.
+        self._expire_daily_brief()
         brief_period=self.brief_period.currentText().lower()
-        brief_since=(datetime.now(timezone.utc)-timedelta(
+        brief_generated=datetime.now(timezone.utc)
+        brief_since=(brief_generated-timedelta(
             days=1 if brief_period=="daily" else 7)).isoformat()
+        brief_epoch=self._brief_request_epoch
+        daily_snapshot=self._daily_brief_snapshot
+        displayed_snapshot=self._displayed_brief_snapshot
+        manifests=tuple((item["key"],item["manifest"])
+                        for item in (daily_snapshot,displayed_snapshot)
+                        if item is not None and "manifest" in item)
         # Capture the exact UI filter label before the worker starts. This is
         # plain text; the worker must never access Qt widgets.
         overview_label=(self.time_range.currentText().lower() +
@@ -1546,11 +1570,15 @@ class MainWindow(SituationActions, QMainWindow):
                     "explicit_selection_id":explicit_selection_id,
                     "history_at":historical_at,"show_observations":show_observations,
                     "brief_pending":brief_pending,"brief_period":brief_period,
-                    "brief_since":brief_since,"feed_sort_index":feed_sort_index,
+                    "brief_since":brief_since,"brief_generated":brief_generated,
+                    "brief_epoch":brief_epoch,"feed_sort_index":feed_sort_index,
                     "explicit_filter":explicit_filter}
             try:
                 store=controller.store
                 before=store.content_revision()
+                result["brief_manifest_results"]={
+                    key:store.brief_manifest_matches(manifest)
+                    for key,manifest in manifests}
                 # Archive selector metadata is two DISTINCT SQLite scans. The
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
@@ -1692,12 +1720,19 @@ class MainWindow(SituationActions, QMainWindow):
         generation=snapshot["generation"]
         period=snapshot["brief_period"]
         since=snapshot["brief_since"]
+        generated=snapshot.get("brief_generated") or datetime.now(timezone.utc)
+        epoch=snapshot.get("brief_epoch",self._brief_request_epoch)
 
         def collect_brief():
-            brief={"generation":generation,"period":period}
+            brief={"generation":generation,"period":period,
+                   "generated":generated,"epoch":epoch}
             try:
                 before=controller.store.content_revision()
                 brief["events"]=controller.brief_events(since=since,period=period)
+                # Pure text preparation is safe off Qt; only final document
+                # materialization/presentation remains GUI-owned.
+                from .core import build_brief
+                brief["markdown"]=build_brief(brief["events"],period,generated_at=generated)
                 after=controller.store.content_revision()
                 brief["revision_before"]=before
                 brief["revision_after"]=after
@@ -1798,7 +1833,10 @@ class MainWindow(SituationActions, QMainWindow):
             self._idle_brief_inflight=False
             self.status_label.setText("Idle brief update failed: "+brief["error"])
         elif (brief["generation"]==self._idle_snapshot_generation
+              and brief.get("epoch",self._brief_request_epoch)==self._brief_request_epoch
               and brief["period"]==self.brief_period.currentText().lower()
+              and (brief["period"]!="daily" or brief.get("generated",datetime.now(timezone.utc)).date()
+                   ==datetime.now(timezone.utc).date())
               and brief["revision_before"]==brief["revision_after"]):
             revision=self.controller.store.content_revision_if_available()
             if revision is None:
@@ -1813,6 +1851,8 @@ class MainWindow(SituationActions, QMainWindow):
                 self._deferred_brief_events=brief["events"]
                 self._deferred_brief_period=brief["period"]
                 self._deferred_brief_revision=brief["revision_after"]
+                self._deferred_brief_generated=brief.get("generated")
+                self._deferred_brief_markdown=brief.get("markdown")
         else:
             self._idle_brief_inflight=False
         # A stale result is never displayed. Its current-Store fallback is
@@ -1969,8 +2009,14 @@ class MainWindow(SituationActions, QMainWindow):
             _idle_snapshot["revision_before"] if _idle_snapshot is not None
             else self.controller.store.content_revision())
         try:
+            # Check only source revisions included in the frozen document.
+            # Unrelated ingestion must not silently replace an opening brief.
+            self._validate_brief_snapshots(
+                None if _idle_snapshot is None else _idle_snapshot.get("brief_manifest_results",{}))
             # Apply a source-revision-consistent brief snapshot in a later
             # hidden workspace warm. A manual refresh never reuses old briefs.
+            self._deferred_brief_generated=None
+            self._deferred_brief_markdown=None
             self._deferred_brief_events=None
             self._deferred_brief_period=None
             self._deferred_brief_revision=None
@@ -2181,7 +2227,7 @@ class MainWindow(SituationActions, QMainWindow):
                 if _idle_snapshot is None:self._populate_alerts()
                 elif not self._populate_alerts(idle=True):keep_alert_dirty=True
             elif page==5 and _idle_snapshot is None:
-                self._generate_brief()
+                self._generate_brief(preserve_daily=True)
             # A fresh collector snapshot must not synchronously query the
             # Brief Store on Qt. Its separately validated worker result will
             # trigger the next hidden/visible workspace prewarm.
@@ -2861,25 +2907,150 @@ class MainWindow(SituationActions, QMainWindow):
         return (period=="daily" and snapshot is not None
                 and snapshot["day"]==datetime.now(timezone.utc).date().isoformat())
 
+    def _clear_brief_presentation(self, message):
+        self._displayed_brief_key=None
+        self._displayed_brief_snapshot=None
+        self.brief_browser.setPlainText(message)
+        self.brief_state_label.setText(message)
+        self.brief_export_button.setEnabled(False)
+
+    def _discard_brief_read(self):
+        self._deferred_brief_events=None
+        self._deferred_brief_revision=None
+        self._deferred_brief_period=None
+        self._deferred_brief_generated=None
+        self._deferred_brief_markdown=None
+
+    def _validate_brief_snapshots(self, results=None):
+        # Worker results are keyed by the actual capture, not by the period
+        # label. A newer explicit Generate cannot be invalidated by an old job.
+        unique={item["key"]:item for item in
+                (self._displayed_brief_snapshot,self._daily_brief_snapshot)
+                if item is not None}
+        invalid=set()
+        for key,item in unique.items():
+            if key[0]=="daily" and item["day"]!=datetime.now(timezone.utc).date().isoformat():
+                invalid.add(key)
+                continue
+            if results is None:
+                valid=self.controller.store.brief_manifest_matches(item["manifest"],nonblocking=True)
+            else:
+                valid=results.get(key)
+            if valid is False:
+                invalid.add(key)
+            elif valid is None and self._displayed_brief_key==key:
+                self.brief_state_label.setText("Checking retained source revisions — export temporarily unavailable")
+                self.brief_export_button.setEnabled(False)
+            elif valid is True and self._displayed_brief_key==key:
+                self._set_brief_state(item)
+        if invalid:
+            if self._daily_brief_snapshot is not None and self._daily_brief_snapshot["key"] in invalid:
+                self._daily_brief_snapshot=None
+            if self._displayed_brief_key in invalid:
+                self._clear_brief_presentation("Brief expired or its source evidence changed. Preparing a new dated brief.")
+            self._discard_brief_read()
+            self._brief_request_epoch+=1
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:
+                self._schedule_evidence_refresh()
+        return not invalid
+
+    def _set_brief_state(self,item):
+        # Keep the as-of timestamp visible even when the user scrolls past
+        # the document heading. It is not a claim of current world state.
+        self.brief_state_label.setText(
+            item["key"][0].title()+" brief as of "+item["key"][1]+
+            " · fixed opening evidence; Monitor is live" if item["key"][0]=="daily"
+            else "Weekly brief as of "+item["key"][1])
+        self.brief_export_button.setEnabled(
+            item["key"][0]==self.brief_period.currentText().lower()
+            and (item["key"][0]!="daily" or item["day"]==datetime.now(timezone.utc).date().isoformat()))
+
+    def _expire_daily_brief(self):
+        snapshot=self._daily_brief_snapshot
+        if snapshot is None or snapshot["day"]==datetime.now(timezone.utc).date().isoformat():
+            return
+        self._daily_brief_snapshot=None
+        if self._displayed_brief_key==snapshot["key"]:
+            self._clear_brief_presentation("UTC reporting day changed. Preparing a new Daily Brief.")
+        self._discard_brief_read()
+        self._brief_request_epoch+=1
+        self._dirty_pages.add(5)
+
+    def _brief_reports_pruned(self):
+        # Actual removal is a retention/privacy boundary. Clear any text
+        # whose evidence cannot be confirmed immediately, including cached
+        # exports. Never keep a hidden opening brief after its source expires.
+        self._validate_brief_snapshots()
+        snapshots=(self._daily_brief_snapshot,self._displayed_brief_snapshot)
+        if any(item is not None and
+               self.controller.store.brief_manifest_matches(item["manifest"],nonblocking=True) is not True
+               for item in snapshots):
+            self._daily_brief_snapshot=None
+            self._clear_brief_presentation("Source retention changed. Preparing current retained evidence.")
+            self._discard_brief_read()
+            self._brief_request_epoch+=1
+            self._dirty_pages.add(5)
+
+    def _brief_clock_tick(self):
+        if self._force_close or getattr(self.controller,"_closed",False):
+            self._brief_clock_timer.stop()
+            return
+        # Midnight and retention checks do not depend on a collector event.
+        # Probe without waiting for the archive lock, and retry on next tick.
+        self._expire_daily_brief()
+        self._validate_brief_snapshots()
+        if (self.brief_period.currentText().lower()=="daily"
+                and not self._has_current_daily_brief("daily")
+                and self._background_warm_enabled):
+            self._dirty_pages.add(5)
+            self._schedule_evidence_refresh()
+
+    def _brief_period_changed(self,*_args):
+        self._brief_request_epoch+=1
+        self._discard_brief_read()
+        self._clear_brief_presentation("Preparing the selected briefing period…")
+        self._dirty_pages.add(5)
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+            self._schedule_evidence_refresh()
+
+    def _request_brief(self,*_args):
+        # The visible Generate button does not run thousands of source reads
+        # on Qt. Keep the internal synchronous route for masked cold startup.
+        if not self._background_warm_enabled:
+            return self._generate_brief()
+        if self.brief_period.currentText().lower()=="daily":
+            self._daily_brief_snapshot=None
+        self._brief_request_epoch+=1
+        self._discard_brief_read()
+        self._clear_brief_presentation("Generating current source-linked briefing…")
+        self._dirty_pages.add(5)
+        self._schedule_evidence_refresh()
+
     def _generate_brief(self, *, idle=False, preserve_daily=False):
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
         if (idle or preserve_daily) and self._has_current_daily_brief(period):
             snapshot=self._daily_brief_snapshot
+            valid=self.controller.store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
+            if valid is None:
+                self.brief_export_button.setEnabled(False)
+                return False
+            if valid is False:
+                self._validate_brief_snapshots({snapshot["key"]:False})
+                return False
             if self._displayed_brief_key!=snapshot["key"]:
                 self.brief_browser.setHtml(snapshot["html"])
                 self._displayed_brief_key=snapshot["key"]
-            self._deferred_brief_events=None
-            self._deferred_brief_revision=None
-            self._deferred_brief_period=None
+                self._displayed_brief_snapshot=snapshot
+            self._set_brief_state(snapshot)
+            self._discard_brief_read()
             return True
-        # The Brief collector already runs on a worker. During hidden/visible
-        # no-click presentation, NEVER execute a fresh Brief SQL query on Qt,
-        # even if the Store lock is acquired after the earlier warm probe.
-        # Explicit period changes and startup/manual refresh preserve the
-        # previous synchronous, current-source semantics.
         cached=getattr(self,"_deferred_brief_events",None)
         cached_period=getattr(self,"_deferred_brief_period",None)
         cached_revision=getattr(self,"_deferred_brief_revision",None)
+        cached_generated=self._deferred_brief_generated
+        cached_markdown=self._deferred_brief_markdown
         if idle:
             if cached is None or cached_period!=period:
                 if not self._idle_brief_inflight:
@@ -2887,43 +3058,55 @@ class MainWindow(SituationActions, QMainWindow):
                 return False
             revision=self.controller.store.content_revision_if_available()
             if revision is None:
-                # Preserve pending evidence and the dirty Brief workspace;
-                # the next idle turn rechecks the exact source revision.
                 return False
-            if revision!=cached_revision:
-                self._deferred_brief_events=None
-                self._deferred_brief_revision=None
-                self._deferred_brief_period=None
+            if (revision!=cached_revision or
+                    period=="daily" and cached_generated is not None
+                    and cached_generated.date()!=datetime.now(timezone.utc).date()):
+                self._discard_brief_read()
                 if not self._idle_brief_inflight:
                     self._schedule_evidence_refresh()
                 return False
             valid=True
         else:
-            # Direct user request keeps current-source semantics, including
-            # the normal fallback if the cached period/revision is outdated.
             valid=(cached is not None and cached_period==period
-                   and cached_revision==self.controller.store.content_revision())
-        self._deferred_brief_events=None
-        self._deferred_brief_revision=None
-        self._deferred_brief_period=None
-        generated=datetime.now(timezone.utc)
+                   and cached_revision==self.controller.store.content_revision()
+                   and (period!="daily" or cached_generated is None or
+                        cached_generated.date()==datetime.now(timezone.utc).date()))
+        self._discard_brief_read()
+        generated=(cached_generated if valid and cached_generated is not None
+                   else datetime.now(timezone.utc))
         events=(cached if valid else self.controller.brief_events(
             since=(generated-timedelta(days=days)).isoformat(),period=period))
+        manifest=tuple(sorted((str(event["id"]),event.get("revision"))
+                               for event in events if event.get("id")))
+        # These are real Store records. If a correction raced an explicit
+        # read, never expose/export its superseded bytes.
+        checked=self.controller.store.brief_manifest_matches(manifest,nonblocking=True)
+        if checked is not True:
+            self._clear_brief_presentation("Source evidence changed or is busy; briefing refresh pending.")
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:self._schedule_evidence_refresh()
+            return False
         from .core import build_brief
         from .brief_rendering import brief_html
-        markdown=build_brief(events,period,generated_at=generated)
+        markdown=(cached_markdown if valid and cached_markdown is not None
+                  else build_brief(events,period,generated_at=generated))
         rendered=brief_html(events,period,markdown=markdown)
         key=(period,generated.isoformat())
+        snapshot={"day":generated.date().isoformat(),"key":key,
+                  "manifest":manifest,"markdown":markdown,"html":rendered}
+        if (period=="daily" and generated.date()!=datetime.now(timezone.utc).date()
+                or self.controller.store.brief_manifest_matches(manifest,nonblocking=True) is not True):
+            self._clear_brief_presentation("Source evidence changed while preparing the document; refresh pending.")
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:self._schedule_evidence_refresh()
+            return False
         self.brief_browser.setHtml(rendered)
         self._displayed_brief_key=key
+        self._displayed_brief_snapshot=snapshot
+        self._set_brief_state(snapshot)
         if period=="daily":
-            self._daily_brief_snapshot={
-                "day":generated.date().isoformat(),"key":key,
-                "markdown":markdown,"html":rendered,
-            }
-            # At launch the two intelligence views share the same opening
-            # evidence. Subsequent Monitor revisions use its ordinary exact
-            # selected scope; the Daily snapshot is not silently rewritten.
+            self._daily_brief_snapshot=snapshot
             if (not self._background_warm_enabled and not self._history_at
                     and not self.category.currentData() and not self.region.currentData()
                     and not self.search.text().strip()):
@@ -2934,25 +3117,46 @@ class MainWindow(SituationActions, QMainWindow):
         return True
 
     def _export_brief(self):
+        snapshot=self._displayed_brief_snapshot
+        period=self.brief_period.currentText().lower()
+        if (snapshot is None or snapshot["key"]!=self._displayed_brief_key
+                or snapshot["key"][0]!=period or
+                period=="daily" and not self._has_current_daily_brief(period)):
+            self.brief_state_label.setText("Export unavailable until the selected dated brief is ready.")
+            return
         path,_=QFileDialog.getSaveFileName(self,"Export intelligence brief","Global-Pulse-brief.html","HTML with severity colors (*.html);;Markdown (*.md);;Text (*.txt)")
         if path:
             try:
-                period=self.brief_period.currentText().lower()
-                snapshot=self._daily_brief_snapshot
-                if period=="daily" and snapshot is not None:
+                # Modal dialog may have pumped a correction, rollover or a
+                # different Generate. Bind the bytes to the originally visible
+                # document, and do not export if the source is no longer held.
+                if (snapshot is not self._displayed_brief_snapshot
+                        or snapshot["key"]!=self._displayed_brief_key
+                        or snapshot["key"][0]!=self.brief_period.currentText().lower()
+                        or period=="daily" and not self._has_current_daily_brief(period)):
+                    raise ValueError("Displayed brief changed; open export again")
+                store=self.controller.store
+                if not store._lock.acquire(blocking=False):
+                    raise ValueError("Archive busy; export not written")
+                valid=False
+                try:
+                    valid=store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
+                    if valid is not True:
+                        raise ValueError("Source evidence changed; export not written")
                     from .security import atomic_text
                     from pathlib import Path
-                    if Path(path).suffix.lower() in {".html",".htm"}:
-                        text=snapshot["html"]
-                    else:
-                        text=snapshot["markdown"]
-                        if self.controller.demo:
-                            text="# SYNTHETIC TEST DATA — NOT REAL EVENTS\n\n"+text
+                    text=(snapshot["html"] if Path(path).suffix.lower() in {".html",".htm"}
+                          else ("# SYNTHETIC TEST DATA — NOT REAL EVENTS\n\n" if self.controller.demo else "")
+                          +snapshot["markdown"])
+                    # Explicit user export only: serialize retention with
+                    # the same source validation and atomic local file write.
                     atomic_text(path,text)
-                else:
-                    self.controller.export_brief(path,period)
+                finally:
+                    store._lock.release()
+                    if valid is False:self._validate_brief_snapshots({snapshot["key"]:False})
                 self.status_label.setText("Intelligence brief exported.")
-            except Exception as exc:QMessageBox.warning(self,"Export failed",str(exc))
+            except Exception as exc:
+                self.brief_state_label.setText("Export failed: "+str(exc)[:180])
 
     def _export_events(self):
         path,_=QFileDialog.getSaveFileName(self,"Export event archive","Global-Pulse-events.json","JSON (*.json);;CSV (*.csv)")

@@ -162,7 +162,10 @@ def critical_alerts(events):
             continue
         seen.add(identity)
         rows.append(item)
-    return sorted(rows,key=priority_rank,reverse=True)[:MAX_CRITICAL_ALERTS]
+    # Preserve the exact map membership supplied by the caller. Stable
+    # identity is the last tie-break, never a reason to invent a new alert.
+    return sorted(rows,key=lambda item:(priority_rank(item),str(item["id"])),
+                  reverse=True)[:MAX_CRITICAL_ALERTS]
 
 
 def _routine_medicine_notice(item):
@@ -246,9 +249,13 @@ def overview_evidence_candidates(feed_events, map_evidence, *, per_domain=2):
     # Prefer the canonical map-evidence projection for a critical record
     # already present in both exact-revision inventories; other feed rows
     # retain their original source identity and bounded selection.
-    map_red={str(row["id"]):row for row in islice(map_evidence or (),5000)
-             if is_active_critical(row)}
-    for inventory in (feed_events, map_evidence):
+    # The actual accepted map page owns the active-red set when present.
+    # Standalone renderer/brief inputs have no separate map page and keep
+    # their supplied red index. Do not let a newer feed-only candidate or
+    # tie at the cap displace a record already admitted to the map.
+    map_page=list(islice(map_evidence or (),5000))
+    map_red={str(row["id"]):row for row in map_page if is_active_critical(row)}
+    for inventory in (feed_events, map_page):
         for item in islice(inventory or (), MAX_PRIORITY_RECORDS):
             if not isinstance(item, dict):
                 continue
@@ -258,7 +265,8 @@ def overview_evidence_candidates(feed_events, map_evidence, *, per_domain=2):
             seen.add(identity)
             item=map_red.get(identity,item)
             if is_active_critical(item):
-                critical.append(item)
+                if not map_page or identity in map_red:
+                    critical.append(item)
                 continue
             bucket = pools[_overview_domain(item)]
             bucket.append(item)
