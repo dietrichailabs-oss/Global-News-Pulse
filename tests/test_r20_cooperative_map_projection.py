@@ -44,7 +44,9 @@ def test_cooperative_pages_match_atomic_order_evidence_and_retained_projection(t
             return original_page(page)
         with patch.object(store,"_map_evidence_page_unlocked",observed):
             actual=store.list_events(map_evidence=True,limit=300,_cooperative_map=True)
-        assert len(actual)==300 and len(pages)>1 and max(pages)<=32
+        # Adaptive pages grow for ordinary records but retain a finite
+        # row/byte budget; expensive geometry pages have a separate test.
+        assert len(actual)==300 and len(pages)>1 and max(pages)<=128
 
 
 def test_cooperative_page_rejects_concurrent_write_not_mixed_results(tmp_path):
@@ -63,13 +65,16 @@ def test_cooperative_page_rejects_concurrent_write_not_mixed_results(tmp_path):
             finally:committed.set()
         thread=threading.Thread(target=writer)
         thread.start()
-        real_sleep=__import__("time").sleep
-        def yield_after_page(seconds):
+        # Intercept the return of a real hydrated page, after its lock is
+        # released. Do not depend on scheduler speed or a forced fixed sleep.
+        real_page=store._cooperative_map_page
+        def after_page(*args,**kwargs):
+            rows=real_page(*args,**kwargs)
             started.set()
             assert committed.wait(5),"writer could not acquire released map lock"
-            real_sleep(seconds)
+            return rows
         try:
-            with patch("global_pulse.core.time.sleep",side_effect=yield_after_page):
+            with patch.object(store,"_cooperative_map_page",side_effect=after_page):
                 with pytest.raises(MapSnapshotChanged):
                     store.list_events(map_evidence=True,limit=300,_cooperative_map=True)
         finally:
@@ -135,3 +140,49 @@ def test_worker_geometry_keeps_holes_dateline_hits_and_reuses_only_equal_paths()
         world.close();world.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+def test_compact_cooperative_read_uses_one_ordered_query_and_no_id_requery(tmp_path):
+    now=(datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat()
+    with Store(tmp_path/"compact-once.sqlite3",mode="synthetic") as store:
+        assert len(store.ingest([report(i,at=now) for i in range(340)],now=now))==340
+        # The test report fixture supplies provider coordinates.
+        expected=store.list_events(map_view=True,limit=300)
+        assert len(expected)==300
+        queries=[]
+        store._conn.set_trace_callback(queries.append)
+        try:
+            with patch.object(store,"_cooperative_map_page",side_effect=AssertionError("compact read rehydrated IDs")):
+                assert store.list_events(map_view=True,limit=300,_cooperative_map=True)==expected
+        finally:
+            store._conn.set_trace_callback(None)
+        selects=[q for q in queries if q.startswith("SELECT body FROM events")]
+        assert len(selects)==1,selects
+        assert not any(q.startswith("SELECT id,body FROM events WHERE id IN") for q in queries)
+
+
+def test_large_warning_bodies_keep_byte_bounded_cooperative_pages(tmp_path):
+    from math import cos,sin,pi
+    now=(datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat()
+    with Store(tmp_path/"warning-page.sqlite3",mode="synthetic") as store:
+        rows=[]
+        for index in range(40):
+            lon=-100+index
+            ring=[[round(lon+.1*cos(k*2*pi/500),6),round(30+.1*sin(k*2*pi/500),6)] for k in range(500)]
+            ring.append(ring[0])
+            rows.append(report(index,at=now,category="Disaster",severity="critical",
+                official=True,official_scope="measurement",
+                area_geometry={"type":"Polygon","coordinates":[ring]}))
+        assert len(store.ingest(rows,now=now))==40
+        expected=store.list_events(map_evidence=True,limit=40)
+        assert sum(len(e["map_areas"]) for e in expected)==40
+        sizes=[]
+        original=store._map_evidence_page_unlocked
+        def inspect(page):
+            sizes.append((len(page),sum(len(row["body"].encode("utf-8")) for row in page)))
+            return original(page)
+        with patch.object(store,"_map_evidence_page_unlocked",inspect):
+            actual=store.list_events(map_evidence=True,limit=40,_cooperative_map=True)
+        assert actual==expected
+        assert len(sizes)>1
+        assert all(count<=128 and (size<=256*1024 or count==1) for count,size in sizes)

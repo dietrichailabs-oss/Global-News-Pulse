@@ -32,12 +32,22 @@ from global_pulse.hazards import HAZARD_KEYS
 from global_pulse.ui import MainWindow
 
 class RecordingLock:
-    def __init__(self,lock):
+    def __init__(self,lock,profiler=None):
         self.backing=lock
+        self.profiler=profiler
         self.owners={}
         self.sections=[]
+        self.waits=defaultdict(list)
+        self.holds=defaultdict(list)
     def acquire(self,blocking=True,timeout=-1):
+        who=threading.get_ident()
+        outer=who not in self.owners
+        start=time.perf_counter()
         ok=self.backing.acquire(blocking,timeout)
+        if outer and self.profiler is not None:
+            key=(self.profiler.stage+("/gui" if who==self.profiler.gui else "/worker")
+                 +("/acquired" if ok else "/busy"))
+            self.waits[key].append((time.perf_counter()-start)*1000)
         if ok:
             who=threading.get_ident()
             start,depth=self.owners.get(who,(time.perf_counter(),0))
@@ -47,7 +57,11 @@ class RecordingLock:
         who=threading.get_ident()
         start,depth=self.owners[who]
         if depth==1:
-            self.sections.append((time.perf_counter()-start)*1000)
+            elapsed=(time.perf_counter()-start)*1000
+            self.sections.append(elapsed)
+            if self.profiler is not None:
+                key=self.profiler.stage+("/gui" if who==self.profiler.gui else "/worker")
+                self.holds[key].append(elapsed)
             del self.owners[who]
         else:self.owners[who]=(start,depth-1)
         self.backing.release()
@@ -102,6 +116,7 @@ class PhaseRecorder:
         self.stage="setup"
         self.gui=threading.get_ident()
         self.spans=[]
+        self.sleeps=defaultdict(list)
         self.stack=ExitStack()
 
     def wrap(self,obj,name,prefix):
@@ -128,13 +143,31 @@ class PhaseRecorder:
         from global_pulse.map_widget import WorldMap
         from global_pulse.map_area_layer import WarningAreaLayer
         from PySide6.QtWidgets import QTextBrowser
+        # Observe actual sleep delays on both builds, including the older
+        # fixed 1ms/page path, without changing its requested duration.
+        original_sleep=time.sleep
+        recorder=self
+        def timed_sleep(seconds):
+            stage=recorder.stage
+            who="gui" if threading.get_ident()==recorder.gui else "worker"
+            started=time.perf_counter()
+            try:return original_sleep(seconds)
+            finally:
+                if stage=="brief_read" or stage.startswith("category_"):
+                    recorder.sleeps[(stage,who,float(seconds)*1000)].append(
+                        (time.perf_counter()-started)*1000)
+        self.stack.enter_context(patch.object(time,"sleep",timed_sleep))
         targets=(
             (core.Store,"Store",("list_events","_map_evidence_page_unlocked",
+                "_cooperative_map_projection","_cooperative_map_candidates",
+                "_cooperative_map_page","_cooperative_map_yield",
                 "list_brief_events","list_observations","brief_manifest_matches","ingest")),
             (MainWindow,"MainWindow",("refresh_data","_populate_feed","_sync_map_controls",
                 "_populate_filter_options","_update_world_overview","_render_idle_selection",
                 "_render_event","_refresh_translated_headlines","_populate_economy",
-                "_warm_next_workspace","_generate_brief","_validate_brief_snapshots")),
+                "_warm_next_workspace","_generate_brief","_validate_brief_snapshots",
+                "_queue_filter_refresh","_start_filter_refresh","_retry_pending_filter",
+                "_start_idle_snapshot","_apply_idle_snapshot")),
             (WorldMap,"WorldMap",("set_events","_refresh_country_activity",
                 "_visible_cluster_paint_specs","visible_clusters","_paint_country_backdrop",
                 "_mapped_country_paths","_visible_country_badge_specs","paintEvent")),
@@ -175,7 +208,10 @@ class PhaseRecorder:
             longest.append({"stage":stage,"gap_ms":round((end-start)*1000,3),
                             "gui": [row for row in overlaps if row["thread"]=="gui"][:8],
                             "worker":[row for row in overlaps if row["thread"]=="worker"][:5]})
-        return {"spans":rows,"longest_heartbeat_intervals":longest}
+        return {"spans":rows,"longest_heartbeat_intervals":longest,
+                "sleep_observations":[dict(stage=stage,thread=who,requested_ms=requested,
+                    observed=stats(values),total_ms=round(sum(values),3))
+                    for (stage,who,requested),values in sorted(self.sleeps.items())]}
 
 
 def report(index,stamp,*,severity="critical",category="Disaster"):
@@ -205,7 +241,7 @@ def main():
     parser.add_argument("--baseline",action="store_true")
     args=parser.parse_args()
     app=QApplication.instance() or QApplication([])
-    summary={"baseline":args.baseline}
+    summary={"baseline":args.baseline,"trial":os.environ.get("R20_MATCHED_TRIAL","1")}
     started=time.perf_counter()
     runner_root=private_fixture_root()
     with tempfile.TemporaryDirectory(prefix="gp-r20-load-",dir=runner_root) as directory, PhaseRecorder() as profiler:
@@ -275,7 +311,7 @@ def main():
                           for i in range(3200)]
             assert ctl.store.put_observations(observations)==3200
             summary["seed_ms"]=round((time.perf_counter()-started)*1000,3)
-            ctl.store._lock=RecordingLock(ctl.store._lock)
+            ctl.store._lock=RecordingLock(ctl.store._lock,profiler)
             since=(datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
             profiler.stage="map_read"
             phase=time.perf_counter()
@@ -396,7 +432,14 @@ def main():
             summary["archive_events"]=ctl.store.stats()["events"]
             print("R20_MATCHED_LOAD="+json.dumps(summary,sort_keys=True),flush=True)
         finally:
-            print("R20_PHASE_PROFILE="+json.dumps(profiler.report(heartbeat),sort_keys=True),flush=True)
+            profile=profiler.report(heartbeat)
+            lock=ctl.store._lock
+            if isinstance(lock,RecordingLock):
+                profile["lock_waits"]={key:dict(stats(values),total_ms=round(sum(values),3))
+                                       for key,values in sorted(lock.waits.items())}
+                profile["lock_holds"]={key:dict(stats(values),total_ms=round(sum(values),3))
+                                       for key,values in sorted(lock.holds.items())}
+            print("R20_PHASE_PROFILE="+json.dumps(profile,sort_keys=True),flush=True)
             timer.stop()
             launch.set()
             if writer is not None:writer.join(timeout=35)

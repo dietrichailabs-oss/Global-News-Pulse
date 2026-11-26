@@ -1344,41 +1344,85 @@ class Store:
                 results.append(event)
         return results
 
-    def _cooperative_map_projection(self, sql, params, limit, *, evidence, candidate=None):
-        """Freeze ordered identities; hydrate exact pages without a long lock.
-
-        No cursor survives a released lock. A changed source revision cancels
-        the entire read, never publishing a partial or mixed map inventory.
-        """
-        def revision():
-            return (self._conn.total_changes,
-                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
-
+    def _cooperative_map_candidates(self, sql, params, limit, *, evidence):
+        """One ordered inventory read; no live cursor crosses the Store lock."""
         with self._lock:
-            token=revision()
-            identity_sql="SELECT id"+sql[sql.index(" FROM events"):]
-            if not evidence:
-                identities=[row[0] for row in self._conn.execute(
-                    identity_sql+" LIMIT ?",[*params,limit])]
+            token=self.content_revision()
+            if evidence:
+                # Body size is a conservative work hint, not an eligibility
+                # test. Large geometry records receive smaller pages.
+                identity_sql=("SELECT id,length(CAST(body AS BLOB)) AS bytes"+
+                              sql[sql.index(" FROM events"):])
+                rows=[(row["id"],int(row["bytes"] or 0))
+                      for row in self._conn.execute(identity_sql,params)]
+                if len(rows)>MAX_EVENTS:
+                    raise ValueError("Map inventory exceeds archive event bound")
             else:
-                identities=[row[0] for row in self._conn.execute(identity_sql,params)]
-            if len(identities)>MAX_EVENTS:
-                raise ValueError("Map inventory exceeds archive event bound")
+                # The compact point page is already bounded and ordered by
+                # the original SQL. Do not perform 157 ID re-queries just
+                # to retrieve those same 5,000 rows.
+                rows=self._conn.execute(sql+" LIMIT ?",[*params,limit]).fetchall()
+        return token,rows
+
+    def _cooperative_map_page(self, token, chunk):
+        """Hydrate one byte-/row-bounded page at the frozen revision."""
+        with self._lock:
+            if self.content_revision()!=token:
+                raise MapSnapshotChanged("Archive changed between map pages")
+            rows={row["id"]:row for row in self._conn.execute(
+                "SELECT id,body FROM events WHERE id IN ("+
+                ",".join("?" for _ in chunk)+")",chunk)}
+            if len(rows)!=len(chunk):
+                raise MapSnapshotChanged("Map candidate disappeared")
+            return self._map_evidence_page_unlocked([rows[identity] for identity in chunk])
+
+    @staticmethod
+    def _cooperative_map_yield():
+        # Yield to a runnable thread, not a fixed sleep per page. Windows
+        # timer granularity and scheduler contention can amplify even a
+        # nominal 1ms delay hundreds of times during a full map refresh.
+        time.sleep(0)
+
+    def _cooperative_map_projection(self, sql, params, limit, *, evidence, candidate=None):
+        """Bound lock ownership AND completion latency with exact revision checks.
+
+        Capture compact rows once, decode outside the lock. Canonical map
+        evidence retains accepted-only paging: adapt the page size from body
+        bytes and measured hydration time, never from severity or source
+        eligibility. Any mutation rejects the whole result.
+        """
+        token,inventory=self._cooperative_map_candidates(sql,params,limit,evidence=evidence)
         output=[]
-        for offset in range(0,len(identities),32):
-            chunk=identities[offset:offset+32]
-            with self._lock:
-                if revision()!=token:
-                    raise MapSnapshotChanged("Archive changed between map pages")
-                rows={row["id"]:row for row in self._conn.execute(
-                    "SELECT id,body FROM events WHERE id IN ("+
-                    ",".join("?" for _ in chunk)+")",chunk)}
-                if len(rows)!=len(chunk):
-                    raise MapSnapshotChanged("Map candidate disappeared")
-                ordered=[rows[identity] for identity in chunk]
-                hydrated=self._map_evidence_page_unlocked(ordered) if evidence else None
-            if not evidence:
-                hydrated=[json.loads(row["body"]) for row in ordered]
+        offset=0
+        page_limit=128
+        last_yield=time.perf_counter()
+        while offset<len(inventory):
+            if evidence:
+                # At most 128 ordinary rows and 256 KiB of body bytes per
+                # page. An individually larger record still has a slot;
+                # existing geometry, report and archive bounds are unchanged.
+                end=offset
+                size=0
+                while end<len(inventory) and end-offset<page_limit:
+                    next_size=inventory[end][1]
+                    if end>offset and size+next_size>256*1024:
+                        break
+                    size+=next_size
+                    end+=1
+                chunk=[identity for identity,_bytes in inventory[offset:end]]
+                started=time.perf_counter()
+                hydrated=self._cooperative_map_page(token,chunk)
+                elapsed=time.perf_counter()-started
+                # Adaptive target keeps expensive mixed/legacy pages short,
+                # while ordinary compact records avoid needless lock traffic.
+                if elapsed>.035:
+                    page_limit=max(8,page_limit//2)
+                elif elapsed<.012:
+                    page_limit=min(128,page_limit*2)
+            else:
+                end=min(offset+128,len(inventory))
+                hydrated=[json.loads(row["body"]) for row in inventory[offset:end]]
+            offset=end
             for event in hydrated:
                 if evidence and (not event or not (
                         event.get("status")=="active" or event.get("map_history_incomplete") is True)):
@@ -1388,12 +1432,15 @@ class Store:
                 output.append(event)
                 if len(output)>=limit:break
             if len(output)>=limit:break
-            if len(identities)>256:
-                time.sleep(.001)
-        with self._lock:
-            if revision()!=token:
-                raise MapSnapshotChanged("Archive changed during map projection")
+            if offset<len(inventory) and len(inventory)>256:
+                now=time.perf_counter()
+                if now-last_yield>=.025:
+                    self._cooperative_map_yield()
+                    last_yield=time.perf_counter()
+        if self.content_revision()!=token:
+            raise MapSnapshotChanged("Archive changed during map projection")
         return output
+
 
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,

@@ -276,12 +276,16 @@ jobs:
         shell: bash
         run: |
           python -m compileall -q global_pulse scripts/qa_r20_brief_loaded_archive.py
-          python -m scripts.qa_r20_brief_loaded_archive
+          for trial in 1 2; do
+            R20_MATCHED_TRIAL="$trial" python -m scripts.qa_r20_brief_loaded_archive
+          done
       - name: Matched exact predecessor diagnostic
         if: always()
         shell: bash
         run: |
-          git worktree add --detach "$RUNNER_TEMP/gp-brief-predecessor" a055b226c81eb9fa885db66920d7f8e22d85361b
+          git worktree add --detach "$RUNNER_TEMP/gp-brief-predecessor" c5cb298e429d5e6dd011da8e1a392749c7b0ae24
           probe="$PWD/scripts/qa_r20_brief_loaded_archive.py"
           cd "$RUNNER_TEMP/gp-brief-predecessor"
-          python -c 'import runpy,sys; p=sys.argv.pop(1); runpy.run_path(p,run_name="__main__")' "$probe" --baseline
+          for trial in 1 2; do
+            R20_MATCHED_TRIAL="$trial" python -c 'import runpy,sys; p=sys.argv.pop(1); runpy.run_path(p,run_name="__main__")' "$probe" --baseline
+          done
