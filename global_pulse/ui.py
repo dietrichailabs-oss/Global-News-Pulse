@@ -855,7 +855,39 @@ class MainWindow(SituationActions, QMainWindow):
         self.overview_browser.setSizePolicy(
             QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
         )
-        self.intelligence_pages.addWidget(self.overview_browser)
+        overview_panel=QWidget()
+        overview_layout=QVBoxLayout(overview_panel)
+        overview_layout.setContentsMargins(0,0,0,0)
+        overview_layout.setSpacing(3)
+        self.overview_navigation=QWidget()
+        navigation=QHBoxLayout(self.overview_navigation)
+        navigation.setContentsMargins(0,0,0,0)
+        navigation.setSpacing(3)
+        self.overview_previous=button("‹",lambda:self._show_overview_page(self._overview_page_index-1),"Previous critical-alert page")
+        self.overview_next=button("›",lambda:self._show_overview_page(self._overview_page_index+1),"Next critical-alert page")
+        self.overview_page_number=QSpinBox()
+        self.overview_page_number.setAccessibleName("Intelligence overview page number")
+        self.overview_page_number.setKeyboardTracking(False)
+        self.overview_page_number.setRange(1,1)
+        self.overview_page_number.valueChanged.connect(lambda value:self._show_overview_page(value-1))
+        self.overview_page_status=BoundedStatusLabel("")
+        self.overview_page_status.setAccessibleName("Intelligence overview page and critical-alert count")
+        self.overview_assessments=button("Assessments",lambda:self._show_overview_page(len(self._overview_pages)-1),"Jump to further prioritized assessments")
+        for control in (self.overview_previous,self.overview_next):
+            control.setFixedWidth(26)
+        navigation.addWidget(self.overview_previous)
+        navigation.addWidget(self.overview_page_number)
+        navigation.addWidget(self.overview_next)
+        navigation.addWidget(self.overview_page_status,1)
+        navigation.addWidget(self.overview_assessments)
+        self.overview_navigation.hide()
+        overview_layout.addWidget(self.overview_navigation)
+        overview_layout.addWidget(self.overview_browser,1)
+        self._overview_pages=()
+        self._overview_page_index=0
+        self._overview_visible_html=""
+        self._overview_display_scope=None
+        self.intelligence_pages.addWidget(overview_panel)
         self.intelligence_pages.addWidget(self.intel_scroll)
         self.intelligence_mode.currentIndexChanged.connect(
             self.intelligence_pages.setCurrentIndex
@@ -1611,11 +1643,12 @@ class MainWindow(SituationActions, QMainWindow):
                 # formatted rich HTML on Qt for EVERY collector revision,
                 # including before the first owner click. Use immutable
                 # source evidence on this same revision-checked worker.
-                from .brief_selection import overview_evidence_candidates, overview_html
+                from .brief_selection import overview_evidence_candidates, overview_documents
                 result["overview_events"]=overview_evidence_candidates(
                     result["feed"],result["country_evidence"])
-                result["overview_html"]=overview_html(
+                result["overview_documents"]=overview_documents(
                     result["overview_events"],label=overview_label)
+                result["overview_html"]=result["overview_documents"]["full"]
                 result["map_events"]=controller.events(**dict(map_filters,_cooperative_map=True))
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
@@ -2111,6 +2144,7 @@ class MainWindow(SituationActions, QMainWindow):
                               if _idle_snapshot is None
                               else _idle_snapshot["country_evidence"])
             overview_precomputed=None
+            overview_documents_precomputed=None
             # The selected archive pin may have been prepended to the feed on
             # Qt since the worker snapshot; in that case recompute from the
             # modified visible feed so the older selected source stays linked.
@@ -2124,6 +2158,7 @@ class MainWindow(SituationActions, QMainWindow):
             if feed_unchanged_for_worker:
                 self._overview_events=_idle_snapshot["overview_events"]
                 overview_precomputed=_idle_snapshot["overview_html"]
+                overview_documents_precomputed=_idle_snapshot.get("overview_documents")
             else:
                 from .brief_selection import overview_evidence_candidates
                 self._overview_events=overview_evidence_candidates(
@@ -2190,7 +2225,8 @@ class MainWindow(SituationActions, QMainWindow):
                         self.sort_combo.currentIndex()==_idle_snapshot["feed_sort_index"])
                     else None),
             )
-            self._update_world_overview(precomputed_html=overview_precomputed)
+            self._update_world_overview(precomputed_html=overview_precomputed,
+                                        documents=overview_documents_precomputed)
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
             count=len(self._events);self.feed_count.setText(str(count))
@@ -2490,23 +2526,68 @@ class MainWindow(SituationActions, QMainWindow):
                                       if use_row else None))
                 self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
-    def _update_world_overview(self, *, precomputed_html=None):
-        """Only the explicit/modified-feed path formats overview HTML on Qt."""
-        if precomputed_html is None:
-            from .brief_selection import overview_html
-            scope=(self.time_range.currentText().lower() +
-                   (", filtered" if self.category.currentData() or
-                    self.region.currentData() or self.search.text().strip()
-                    else ", all categories"))
-            updated=overview_html(
-                self._overview_events,label=scope+" local feed and retained map evidence")
-        else:
-            updated=precomputed_html
-        if updated != self._overview_html_cached:
-            position=self.overview_browser.verticalScrollBar().value()
-            self.overview_browser.setHtml(updated)
+    def _show_overview_page(self,index,*,preserve_scroll=False):
+        if not self._overview_pages:return
+        index=max(0,min(int(index),len(self._overview_pages)-1))
+        self._overview_page_index=index
+        document,identities,caption=self._overview_pages[index]
+        if document!=self._overview_visible_html:
+            position=self.overview_browser.verticalScrollBar().value() if preserve_scroll else 0
+            self.overview_browser.setHtml(document)
             self.overview_browser.verticalScrollBar().setValue(position)
-            self._overview_html_cached=updated
+            self._overview_visible_html=document
+        total=len(self._overview_pages)
+        blocked=self.overview_page_number.blockSignals(True)
+        try:
+            self.overview_page_number.setRange(1,total)
+            self.overview_page_number.setValue(index+1)
+        finally:
+            self.overview_page_number.blockSignals(blocked)
+        self.overview_previous.setEnabled(index>0)
+        self.overview_next.setEnabled(index+1<total)
+        self.overview_assessments.setEnabled(index+1<total)
+        self.overview_page_status.setText(f"{index+1}/{total} · {caption}")
+        self.overview_navigation.setVisible(total>1)
+
+    def _update_world_overview(self, *, precomputed_html=None, documents=None):
+        """Only one bounded page reaches Qt; retain the full exact inventory."""
+        if documents is None:
+            if precomputed_html is None:
+                from .brief_selection import overview_documents
+                scope=(self.time_range.currentText().lower() +
+                       (", filtered" if self.category.currentData() or
+                        self.region.currentData() or self.search.text().strip()
+                        else ", all categories"))
+                documents=overview_documents(
+                    self._overview_events,label=scope+" local feed and retained map evidence")
+            else:
+                # Compatibility for an exact unpaged precomputed caller.
+                documents={"full":precomputed_html,
+                           "pages":((precomputed_html,(),"Overview"),)}
+        scope=self._archive_scope_key()
+        same_scope=scope==self._overview_display_scope
+        old_page=self._overview_page_index if same_scope else 0
+        old_ids=()
+        old_assessment=False
+        if same_scope and self._overview_pages:
+            _,old_ids,old_caption=self._overview_pages[old_page]
+            old_assessment=old_caption=="Further assessments"
+        self._overview_html_cached=documents["full"]
+        self._overview_pages=documents["pages"]
+        self._overview_display_scope=scope
+        if old_assessment and len(self._overview_pages)>1:
+            index=len(self._overview_pages)-1
+        elif old_ids:
+            # Preserve the first retained identity in the page when new
+            # red alerts insert ahead of it. Removed identities cannot stay
+            # actionable, and a new filter resets to the first red page.
+            positions={identity:index for index,(_html,identities,_caption)
+                       in enumerate(self._overview_pages) for identity in identities}
+            index=next((positions[identity] for identity in old_ids
+                        if identity in positions),old_page)
+        else:
+            index=old_page
+        self._show_overview_page(index,preserve_scroll=same_scope and index==old_page)
 
     def _open_overview_event(self, url):
         """Only local event IDs are actionable; never treat links as web URLs."""
@@ -3123,9 +3204,9 @@ class MainWindow(SituationActions, QMainWindow):
             if (not self._background_warm_enabled and not self._history_at
                     and not self.category.currentData() and not self.region.currentData()
                     and not self.search.text().strip()):
-                from .brief_selection import overview_evidence_candidates,overview_html
+                from .brief_selection import overview_evidence_candidates,overview_documents
                 self._overview_events=overview_evidence_candidates(events,())
-                self._update_world_overview(precomputed_html=overview_html(
+                self._update_world_overview(documents=overview_documents(
                     self._overview_events,label="opening Daily Brief snapshot — last 24 hours and retained critical alerts"))
         return True
 

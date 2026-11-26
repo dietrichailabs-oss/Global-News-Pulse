@@ -170,13 +170,13 @@ class PhaseRecorder:
                 "_render_event","_refresh_translated_headlines","_populate_economy",
                 "_warm_next_workspace","_generate_brief","_validate_brief_snapshots",
                 "_queue_filter_refresh","_start_filter_refresh","_retry_pending_filter",
-                "_start_idle_snapshot","_apply_idle_snapshot")),
+                "_start_idle_snapshot","_apply_idle_snapshot","_show_overview_page")),
             (WorldMap,"WorldMap",("set_events","_refresh_country_activity",
                 "_visible_cluster_paint_specs","visible_clusters","_paint_country_backdrop",
                 "_mapped_country_paths","_visible_country_badge_specs","paintEvent")),
             (WarningAreaLayer,"WarningAreaLayer",("set_events","paint","visible")),
             (QTextBrowser,"QTextBrowser",("setHtml","setPlainText")),
-            (selection,"selection",("overview_evidence_candidates","overview_html")),
+            (selection,"selection",("overview_evidence_candidates","overview_html","overview_documents")),
             (core,"core",("build_brief",)),
             (rendering,"rendering",("brief_html",)),
         )
@@ -364,6 +364,17 @@ def main():
                 assert summary["opening_red_lines"]==5000
                 assert summary["opening_missing_source_links"]==0
                 assert summary["opening_overview_missing"]==0
+            if hasattr(w,"_overview_pages"):
+                page_ids=tuple(identity for _,identities,_ in w._overview_pages for identity in identities)
+                assert len(page_ids)==5000 and set(page_ids)==expected
+                assert max(len(ids) for _,ids,_ in w._overview_pages)<=100
+                assert w._overview_page_index==0
+                summary["opening_overview_pages"]=len(w._overview_pages)
+                summary["opening_visible_overview_bytes"]=len(w._overview_visible_html.encode("utf-8"))
+                summary["opening_full_overview_bytes"]=len(w._overview_html_cached.encode("utf-8"))
+                w._show_overview_page(len(w._overview_pages)-2)
+                assert w._overview_pages[w._overview_page_index][1][-1]==page_ids[-1]
+                w._show_overview_page(0)
             assert len(w.world_map.area_layer.paths)>=180
             assert len(w._observations)>=3200
             economic=w.world_map.economic_observations

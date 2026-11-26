@@ -360,8 +360,16 @@ def _compact_critical_card(item):
             " · record update "+updated+retained+"</span></p>")
 
 
-def overview_html(events, *, label="visible local feed"):
-    """Compact live intelligence, red alerts first, then rated importance."""
+OVERVIEW_ALERT_PAGE_SIZE=100
+
+
+def overview_documents(events, *, label="visible local feed"):
+    """Full evidence document plus bounded, ordered GUI presentation pages.
+
+    Keep all critical IDs, source links, ordinary coverage and original
+    priority ordering. Only the visible QTextBrowser document is paged.
+    All strings are prepared from the same immutable source selection.
+    """
     shortlist = overview_evidence_candidates(list(islice(events,MAX_PRIORITY_RECORDS)), ())
     red=critical_alerts(shortlist)
     ordinary=[item for item in shortlist if not is_active_critical(item)]
@@ -379,15 +387,18 @@ def overview_html(events, *, label="visible local feed"):
         "corroboration are shown separately.</p>",
         "<p style='margin:12px 0 3px'><b style='color:#f06475'>Critical alerts — immediate attention</b></p>",
     ]
+    red_blocks=[]
     if red:
         blocks.append("<p style='color:#aeb9c9'>"+str(len(red))+
                       " active critical record(s) in this bounded local inventory; red indicates importance, not confirmed claims.</p>")
         # Give the first few alerts fuller source context; list every other
         # red alert compactly and retain its exact event link.
-        blocks.extend(_overview_card(item) if index<3 else _compact_critical_card(item)
-                      for index,item in enumerate(red))
+        red_blocks=[_overview_card(item) if index<3 else _compact_critical_card(item)
+                    for index,item in enumerate(red)]
     else:
         blocks.append("<p style='color:#818d9f'>No active critical alerts in the supplied local scope. This is not a worldwide all-clear.</p>")
+    header="".join(blocks)
+    blocks=[]
     topic_rows=defaultdict(list)
     for item in situations:
         topic_rows[_overview_domain(item)].append(item)
@@ -443,4 +454,23 @@ def overview_html(events, *, label="visible local feed"):
                   "Open any title to inspect its original sources, dates, "
                   "corrections, and evidence trail. The full feed may contain "
                   "additional reports not shown in this short overview.</p>")
-    return "".join(blocks)
+    assessments="".join(blocks)
+    full=header+"".join(red_blocks)+assessments
+    if len(red)<=OVERVIEW_ALERT_PAGE_SIZE:
+        return {"full":full,"pages":((full,tuple(str(e["id"]) for e in red),"Overview"),)}
+    pages=[]
+    for start in range(0,len(red),OVERVIEW_ALERT_PAGE_SIZE):
+        stop=min(start+OVERVIEW_ALERT_PAGE_SIZE,len(red))
+        caption=f"Critical {start+1}–{stop} of {len(red)}"
+        notice="<p style='color:#aeb9c9'><b>"+caption+"</b> · Use the page controls to view every alert.</p>"
+        pages.append((header+notice+"".join(red_blocks[start:stop]),
+                      tuple(str(e["id"]) for e in red[start:stop]),caption))
+    pages.append((header+"<p style='color:#aeb9c9'>All "+str(len(red))+
+                  " critical alerts are available on the preceding pages.</p>"+assessments,
+                  (),"Further assessments"))
+    return {"full":full,"pages":tuple(pages)}
+
+
+def overview_html(events, *, label="visible local feed"):
+    """Complete source-linked overview; presentation can use bounded pages."""
+    return overview_documents(events,label=label)["full"]
