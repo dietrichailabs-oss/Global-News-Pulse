@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QSplitter, QStackedWidget, QListWidget, QListWidgetItem, QTextBrowser,
     QTableWidget, QTableWidgetItem, QTableView, QHeaderView, QCheckBox, QSpinBox, QTimeEdit,
     QSlider, QGroupBox, QScrollArea, QFileDialog, QMessageBox, QCompleter,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy, QWidgetAction,
 )
 
 from .map_widget import WorldMap, CATEGORY_COLORS
@@ -175,10 +175,51 @@ class RadarLogo(QWidget):
         p.drawEllipse(QPointF(9, 21), 1.5, 1.5)
 
 
+class HazardLayerAction(QWidgetAction):
+    """Persistent, keyboard-accessible toggle with a visible checked row."""
+    def __init__(self, menu, text, icon=None):
+        super().__init__(menu)
+        self.setText(text)
+        self.setCheckable(True)
+        self._label=text
+        self.control=QToolButton(menu)
+        self.control.setCheckable(True)
+        self.control.setAccessibleName(text)
+        self.control.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.control.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.control.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+        if icon is not None:
+            self.setIcon(icon)
+            self.control.setIcon(icon)
+        self.control.setMinimumWidth(234)
+        self.control.setStyleSheet(
+            "QToolButton { text-align:left; padding:6px 10px; color:#b5bac7; "
+            "background:#191a20; border:1px solid transparent; border-radius:4px; }"
+            "QToolButton:checked:enabled { color:#f0eaff; background:#4b386b; "
+            "border-color:#8c73c0; font-weight:600; }"
+            "QToolButton:hover:enabled, QToolButton:focus:enabled { border-color:#b69bdd; }"
+            "QToolButton:disabled { color:#747784; background:#191a20; }"
+        )
+        self.setDefaultWidget(self.control)
+        self.control.toggled.connect(self.setChecked)
+        self.changed.connect(self.sync_control)
+        self.sync_control()
+
+    def sync_control(self):
+        blocked=self.control.blockSignals(True)
+        try:
+            self.control.setChecked(self.isChecked())
+            self.control.setEnabled(self.isEnabled())
+            self.control.setText(("✓  " if self.isChecked() and self.isEnabled() else "    ")+self._label)
+        finally:
+            self.control.blockSignals(blocked)
+
+
 class TitleBar(QFrame):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
+        self.native_chrome = bool(getattr(window,"_native_window_chrome",False))
         self.setObjectName("TitleBar")
         self.setFixedHeight(42)
         layout = QHBoxLayout(self)
@@ -200,17 +241,22 @@ class TitleBar(QFrame):
             b.clicked.connect(fn)
             layout.addWidget(b)
             if text == "□": self.maximize_button = b
+            # On Windows the real system caption owns maximize/restore,
+            # minimize, close, Snap and nonclient input. Retain our branding
+            # strip without a second set of competing window controls.
+            if self.native_chrome:b.hide()
 
     def toggle_maximized(self):
         self.window.showNormal() if self.window.isMaximized() else self.window.showMaximized()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.window.windowHandle():
+        if (not self.native_chrome and event.button() == Qt.MouseButton.LeftButton
+                and self.window.windowHandle()):
             self.window.windowHandle().startSystemMove()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if not self.native_chrome and event.button() == Qt.MouseButton.LeftButton:
             self.toggle_maximized()
 
 
@@ -475,7 +521,12 @@ class MainWindow(SituationActions, QMainWindow):
         self._settings_data_changed=False
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        # Use the supported Windows system frame. The old frameless
+        # WM_NCHITTEST/HTMAXBUTTON path could toggle on a nonclient release
+        # without a matching press, and mixed-DPI coordinates were ambiguous.
+        self._native_window_chrome=sys.platform=="win32"
+        self.setWindowFlags(Qt.WindowType.Window if self._native_window_chrome
+                            else Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setMinimumSize(960,640)
         self.resize(1440,940)
         self.setStyleSheet(STYLE)
@@ -501,7 +552,9 @@ class MainWindow(SituationActions, QMainWindow):
         # not resize a window or shift the custom native caption controls.
         for combo in (self.category,self.region):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            combo.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
+            combo.setMinimumContentsLength(9)
+            combo.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)
+            combo.setMaximumWidth(210)
             combo.setToolTip(combo.currentText())
             combo.currentIndexChanged.connect(lambda _index,c=combo:c.setToolTip(c.currentText()))
         self.time_range=QComboBox();self.time_range.addItems(["24 hours","7 days","30 days","All history"]);self.time_range.setCurrentIndex(1);self.time_range.setAccessibleName("Event time range")
@@ -589,14 +642,14 @@ class MainWindow(SituationActions, QMainWindow):
         self.hazard_button.setAccessibleName("Natural hazard map layers and marker legend")
         self.hazard_button.setToolTip("Toggle hazard symbols and warning areas within the current map scope. Does not change source collection.")
         self.hazard_menu=QMenu(self.hazard_button)
-        self.hazard_master=self.hazard_menu.addAction("Show natural hazard reports")
-        self.hazard_master.setCheckable(True)
+        self.hazard_master=HazardLayerAction(self.hazard_menu,"Show natural hazard reports")
+        self.hazard_menu.addAction(self.hazard_master)
         self.hazard_master.toggled.connect(self._toggle_hazards)
         self.hazard_menu.addSeparator()
         self.hazard_actions={}
         for kind,text in HAZARD_LABELS.items():
-            action=self.hazard_menu.addAction(hazard_icon(kind),text)
-            action.setCheckable(True)
+            action=HazardLayerAction(self.hazard_menu,text,hazard_icon(kind))
+            self.hazard_menu.addAction(action)
             action.toggled.connect(lambda checked,k=kind:self._toggle_hazard_kind(k,checked))
             self.hazard_actions[kind]=action
         self.hazard_menu.addSeparator()
@@ -941,11 +994,12 @@ class MainWindow(SituationActions, QMainWindow):
         This runs once while the dashboard is hidden, no live media starts,
         and future report or settings changes still mark workspaces dirty.
         """
-        current=self.pages.currentIndex()
+        # Populate without changing the active stack. This is data warmup,
+        # not simulated user navigation.
         for index in (1,2,3,4,5):
             if index in self._dirty_pages:
-                self.open_page(index)
-        self.open_page(current)
+                self._populate_workspace(index)
+                self._dirty_pages.discard(index)
         success=not (self._dirty_pages & {1,2,3,4,5})
         if success:
             self._background_warm_enabled=True
@@ -955,19 +1009,27 @@ class MainWindow(SituationActions, QMainWindow):
         """Render the first real-sized Map/Economy frames before releasing splash.
 
         Data prewarming does not itself trigger Qt paintEvent for hidden tabs.
-        Expose the disabled window under the on-top splash just long enough
-        for Qt to settle its actual DPI/layout, draw the heavyweight first
-        frames, and verify their cache keys. Never open video or network here.
+        Materialize the real-sized Qt layout with an off-screen top-level
+        window, draw the heavyweight first frames, and verify their keys.
+        The splash remains the only exposed window during traversal. Never
+        open video or network here.
         """
         if not self._background_warm_enabled or self._dirty_pages.intersection(range(1, 6)):
             return False
         previous_page = self.pages.currentIndex()
         was_enabled = self.isEnabled()
         self._initial_painted_pages = set()
+        was_visible=self.isVisible()
+        was_offscreen=self.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+        was_opacity=self.windowOpacity()
+        ready=False
         self.setEnabled(False)
+        if was_visible:self.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
+        self.setWindowOpacity(0.0)
         try:
-            # A hidden widget's geometry is not the real Windows viewport.
-            # Rendering at its default size would get invalidated on show().
+            # Show only to Qt's layout/paint system, not the desktop. All
+            # stacked page traversal must finish before the native reveal.
             self.show()
             splash.raise_()
             app.processEvents()
@@ -1013,17 +1075,26 @@ class MainWindow(SituationActions, QMainWindow):
             expected_chart_key = (
                 chart.width(), chart.height(), chart.devicePixelRatioF(),
             )
-            return (
+            ready = (
                 world._projected_view_key == expected_map_key
                 and len(world._projected_paths) == len(world._countries)
                 and chart._chart_pixmap is not None
                 and chart._chart_cache_key == expected_chart_key
                 and self._initial_painted_pages == set(range(7))
             )
+            return ready
         finally:
             if self.pages.currentIndex() != previous_page:
                 self.open_page(previous_page)
+            self.hide()
+            self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,was_offscreen)
+            self.setWindowOpacity(was_opacity)
             self.setEnabled(was_enabled)
+            if ready or was_visible:
+                # The initial page is restored before the one real reveal.
+                # No hidden workspace traversal follows this show().
+                self.show()
+                splash.raise_()
             # This disabled-window traversal is splash-owned geometry/first
             # paint work, NOT a user tab click. Retaining its navigation stamp
             # artificially delayed the first real no-click collector update
@@ -3085,11 +3156,13 @@ class MainWindow(SituationActions, QMainWindow):
         blocked=self.hazard_master.blockSignals(True)
         self.hazard_master.setChecked(self.world_map.hazards_enabled)
         self.hazard_master.blockSignals(blocked)
+        self.hazard_master.sync_control()
         for kind,action in self.hazard_actions.items():
             blocked=action.blockSignals(True)
             action.setChecked(self.world_map.hazard_layers[kind])
             action.setEnabled(self.world_map.hazards_enabled)
             action.blockSignals(blocked)
+            action.sync_control()
 
     def _refresh_hazard_coverage(self):
         if not hasattr(self,"count_label") or self._filter_refresh_pending:
@@ -3211,74 +3284,3 @@ class MainWindow(SituationActions, QMainWindow):
         super().resizeEvent(event)
         if hasattr(self,"titlebar"):self.titlebar.tagline.setVisible(self.width()>=1200)
         if hasattr(self,"last_label"):self.last_label.setVisible(self.width()>=1100)
-
-    def showEvent(self,event):
-        super().showEvent(event)
-        if sys.platform=="win32" and not getattr(self,"_native_configured",False):
-            self._configure_windows_frame()
-
-    def _configure_windows_frame(self):
-        """Retain native window management while drawing our own title bar."""
-        try:
-            import ctypes
-            from ctypes import wintypes
-            user32=ctypes.windll.user32
-            get_long=user32.GetWindowLongPtrW;get_long.argtypes=[wintypes.HWND,ctypes.c_int];get_long.restype=ctypes.c_ssize_t
-            set_long=user32.SetWindowLongPtrW;set_long.argtypes=[wintypes.HWND,ctypes.c_int,ctypes.c_ssize_t];set_long.restype=ctypes.c_ssize_t
-            hwnd=int(self.winId());style=get_long(hwnd,-16)
-            set_long(hwnd,-16,style | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000)
-            user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_uint]
-            user32.SetWindowPos.restype=wintypes.BOOL
-            user32.SetWindowPos(hwnd,None,0,0,0,0,0x0020|0x0001|0x0002|0x0004)
-            self._native_configured=True
-        except (AttributeError,OSError):
-            self._native_configured=False
-
-    def nativeEvent(self,event_type,message):
-        if sys.platform!="win32":return False,0
-        try:
-            import ctypes
-            from ctypes import wintypes
-            msg=wintypes.MSG.from_address(int(message))
-            if msg.message==0x0083 and msg.wParam: # WM_NCCALCSIZE
-                return True,0
-            if msg.message==0x0024: # WM_GETMINMAXINFO: keep taskbar work area.
-                class MinMaxInfo(ctypes.Structure):
-                    _fields_=[("reserved",wintypes.POINT),("max_size",wintypes.POINT),("max_position",wintypes.POINT),("min_track",wintypes.POINT),("max_track",wintypes.POINT)]
-                class MonitorInfo(ctypes.Structure):
-                    _fields_=[("size",wintypes.DWORD),("monitor",wintypes.RECT),("work",wintypes.RECT),("flags",wintypes.DWORD)]
-                user32=ctypes.windll.user32
-                user32.MonitorFromWindow.argtypes=[wintypes.HWND,wintypes.DWORD];user32.MonitorFromWindow.restype=wintypes.HANDLE
-                monitor=user32.MonitorFromWindow(msg.hwnd,2)
-                info=MonitorInfo();info.size=ctypes.sizeof(info)
-                user32.GetMonitorInfoW.argtypes=[wintypes.HANDLE,ctypes.POINTER(MonitorInfo)];user32.GetMonitorInfoW.restype=wintypes.BOOL
-                if user32.GetMonitorInfoW(monitor,ctypes.byref(info)):
-                    mmi=ctypes.cast(msg.lParam,ctypes.POINTER(MinMaxInfo)).contents
-                    mmi.max_position.x=info.work.left-info.monitor.left;mmi.max_position.y=info.work.top-info.monitor.top
-                    mmi.max_size.x=info.work.right-info.work.left;mmi.max_size.y=info.work.bottom-info.work.top
-                    mmi.min_track.x=int(self.minimumWidth()*self.devicePixelRatioF());mmi.min_track.y=int(self.minimumHeight()*self.devicePixelRatioF())
-                    return True,0
-            if msg.message==0x0084: # WM_NCHITTEST
-                # Message coordinates are physical pixels; map Qt caption button
-                # geometry through devicePixelRatio to support mixed DPI screens.
-                rect=wintypes.RECT();ctypes.windll.user32.GetWindowRect(msg.hwnd,ctypes.byref(rect))
-                x=ctypes.c_short(msg.lParam&0xffff).value-rect.left;y=ctypes.c_short((msg.lParam>>16)&0xffff).value-rect.top
-                ratio=self.devicePixelRatioF();qx,qy=x/ratio,y/ratio
-                if not self.isMaximized():
-                    margin=7;left=qx<margin;right=qx>self.width()-margin;top=qy<margin;bottom=qy>self.height()-margin
-                    if top and left:return True,13
-                    if top and right:return True,14
-                    if bottom and left:return True,16
-                    if bottom and right:return True,17
-                    if left:return True,10
-                    if right:return True,11
-                    if top:return True,12
-                    if bottom:return True,15
-                max_button=self.titlebar.maximize_button;position=max_button.mapTo(self,QPoint(0,0))
-                if QRectF(position.x(),position.y(),max_button.width(),max_button.height()).contains(QPointF(qx,qy)):return True,9 # HTMAXBUTTON / Windows 11 Snap menu
-            if msg.message==0x00A1 and msg.wParam==9:return True,0 # WM_NCLBUTTONDOWN
-            if msg.message==0x00A2 and msg.wParam==9: # WM_NCLBUTTONUP
-                self.titlebar.toggle_maximized();return True,0
-        except (ValueError,TypeError,AttributeError,OSError):pass
-        return super().nativeEvent(event_type,message)
-
