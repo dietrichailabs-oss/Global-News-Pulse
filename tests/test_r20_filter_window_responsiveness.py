@@ -5,6 +5,7 @@ timings cannot establish physical Windows compositor or live-media acceptance.
 """
 import os
 import time
+import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -144,20 +145,83 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
         original=ctl.events
         import threading
         gui=threading.get_ident()
+        trace=[]
+        clock=time.perf_counter
+        origin=clock()
+        def record(kind, **fields):
+            if len(trace)<4000:
+                trace.append(dict(kind=kind, ms=round((clock()-origin)*1000,3),
+                                  thread="gui" if threading.get_ident()==gui else "worker",
+                                  **fields))
+        def observe(snapshot):
+            # Never access widgets from the signal's emitting thread.
+            record("snapshot", **{key:snapshot.get(key) for key in (
+                "scope","generation","selected_id","archive_pin_id",
+                "explicit_selection_id","revision_before","revision_after",
+                "retry_snapshot","error","explicit_filter")})
+        w._idle_snapshot_ready.connect(observe)
         def guarded(**kwargs):
             assert threading.get_ident()!=gui,"category click queried SQLite on GUI"
-            return original(**kwargs)
+            record("events_start", filters=kwargs)
+            try:
+                result=original(**kwargs)
+                record("events_end", rows=len(result), filters=kwargs)
+                return result
+            except Exception as exc:
+                record("events_error", error=type(exc).__name__+": "+str(exc)[:160])
+                raise
         monkeypatch.setattr(ctl,"events",guarded)
+        original_revision=ctl.store.content_revision_if_available
+        def revision():
+            value=original_revision()
+            record("revision_probe", value=value)
+            return value
+        monkeypatch.setattr(ctl.store,"content_revision_if_available",revision)
+        original_pref=getattr(ctl._headlines,"enabled_if_available",None)
+        if original_pref is not None:
+            def preference():
+                value=original_pref()
+                if value is None:
+                    record("headline_preference_busy")
+                return value
+            monkeypatch.setattr(ctl._headlines,"enabled_if_available",preference)
+
+        def state():
+            return dict(pending=w._filter_refresh_pending,
+                        inflight=w._idle_snapshot_inflight,
+                        refreshing=w._refreshing, generation=w._idle_snapshot_generation,
+                        scope=w._archive_scope_key(), selected=w._selected_id,
+                        archive_pin=w._archive_selection_id,
+                        explicit_selection=w._explicit_feed_selection_id,
+                        filter_timer=w._filter_refresh_timer.isActive(),
+                        filter_remaining=w._filter_refresh_timer.remainingTime(),
+                        deferred=len(ctl._headlines.deferred),
+                        deferred_interval=ctl._headlines.deferred_timer.interval(),
+                        count=w.count_label.text(), status=w.status_label.text())
         last[0]=time.perf_counter()
         timer.start()
         for category in ("Health","Disaster",""):
             index=w.category.findData(category)
             assert index>=0
+            record("category_request", category=category, state=state())
             w.category.setCurrentIndex(index)
             limit=time.monotonic()+12
+            previous=None
             while w._filter_refresh_pending and time.monotonic()<limit:
                 app.processEvents()
                 QTest.qWait(10)
+                current=state()
+                # Log transitions, not every 10ms wait or timer countdown.
+                key=tuple(str(current[k]) for k in (
+                    "pending","inflight","refreshing","generation","scope","selected",
+                    "archive_pin","explicit_selection","filter_timer","count","status"))
+                if key!=previous:
+                    record("state", state=current)
+                    previous=key
+            record("category_end", category=category, state=state(),
+                   heartbeat_max_ms=max(heartbeat,default=0))
+            print("R20_FILTER_TRACE="+json.dumps(trace,default=str),flush=True)
+            trace.clear()
             assert not w._filter_refresh_pending
             if category:
                 assert w._events and all(e["category"]==category for e in w._events)
