@@ -238,5 +238,5 @@ jobs:
         run: |
           git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
           python -m compileall -q global_pulse
-          python -m pytest -q -s --tb=short tests/test_r20_executive_brief_snapshot.py tests/test_r20_daily_brief_depth.py tests/test_issue64_intelligence_brief.py tests/test_issue22_idle_overview_worker.py tests/test_issue22_idle_brief_worker.py tests/test_issue22_idle_brief_presentation.py tests/test_issue22_idle_brief_lock_commit.py tests/test_issue22_brief_store_lock_yield.py
+          python -m pytest -q -s --tb=short tests/test_r20_executive_brief_snapshot.py tests/test_r20_daily_brief_depth.py tests/test_issue64_intelligence_brief.py tests/test_issue64_archive_overview_boundary.py tests/test_issue22_idle_overview_worker.py tests/test_issue22_idle_brief_worker.py tests/test_issue22_idle_brief_presentation.py tests/test_issue22_idle_brief_lock_commit.py tests/test_issue22_brief_store_lock_yield.py
           git diff --exit-code
