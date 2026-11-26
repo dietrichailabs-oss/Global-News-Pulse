@@ -2476,11 +2476,13 @@ class MainWindow(SituationActions, QMainWindow):
         # validated collector snapshot. Looking up the preference once PER
         # row would reacquire collector-owned SQLite hundreds of times.
         english_enabled=self.english_headlines.isChecked()
+        role=Qt.ItemDataRole.UserRole
+        selected_row=None
         for index in range(self.feed_list.count()):
             item=self.feed_list.item(index)
             if item is None:
                 continue
-            event=item.data(Qt.ItemDataRole.UserRole)
+            event=item.data(role)
             if not isinstance(event,dict):
                 continue
             view=(self.controller.headline_view(event,defer_language=True,
@@ -2493,27 +2495,23 @@ class MainWindow(SituationActions, QMainWindow):
             if title != item.text():
                 item.setText(title)
             if event.get("_display_title") != title or event.get("_translation_label") != view["label"]:
-                item.setData(Qt.ItemDataRole.UserRole,dict(
-                    event,_display_title=title,_translation_label=view["label"]
-                ))
+                event=dict(event,_display_title=title,_translation_label=view["label"])
+                item.setData(role,event)
                 item.setToolTip(
                     "<div style='white-space:pre-wrap'>" +
                     esc(view["label"]+"\nOriginal: "+view["original"]+
                         "\n"+str(event.get("recap",""))) + "</div>"
                 )
+            if selected_row is None and str(event.get("id",""))==self._selected_id:
+                selected_row=event
         if self._selected_id:
             # The selected visible feed row already holds the source evidence
             # and Star state displayed by the last revision-checked update.
             # No-click language callbacks must not re-open the Store for
             # selected event lookup OR its star button. Explicit navigation
             # and historical playback retain their canonical Store paths.
-            role=Qt.ItemDataRole.UserRole
-            selected_row=next((
-                self.feed_list.item(i).data(role)
-                for i in range(self.feed_list.count())
-                if str((self.feed_list.item(i).data(role) or {}).get("id",""))
-                   ==self._selected_id
-            ),None)
+            # Retain the selected row from the same pass; repeated QVariant
+            # conversions can copy hundreds of full source dictionaries.
             use_row=(not self._history_at and isinstance(selected_row,dict)
                      and "_situation_starred" in selected_row)
             event=selected_row if use_row else self._selected_event()

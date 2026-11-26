@@ -145,6 +145,8 @@ class PhaseRecorder:
         import global_pulse.brief_rendering as rendering
         from global_pulse.map_widget import WorldMap
         from global_pulse.map_area_layer import WarningAreaLayer
+        from global_pulse.headline_translation import HeadlineTranslations
+        from global_pulse.translation import Translator
         from PySide6.QtWidgets import QTextBrowser
         # Observe actual sleep delays on both builds, including the older
         # fixed 1ms/page path, without changing its requested duration.
@@ -176,6 +178,9 @@ class PhaseRecorder:
                 "_mapped_country_paths","_visible_country_badge_specs","paintEvent")),
             (WarningAreaLayer,"WarningAreaLayer",("set_events","paint","visible")),
             (QTextBrowser,"QTextBrowser",("setHtml","setPlainText")),
+            (HeadlineTranslations,"HeadlineTranslations",("_drain_deferred","view","_headline_language")),
+            (Translator,"Translator",("installed",)),
+            (Controller,"Controller",("_headline_preference_if_available",)),
             (selection,"selection",("overview_evidence_candidates","overview_html","overview_documents")),
             (core,"core",("build_brief",)),
             (rendering,"rendering",("brief_html",)),

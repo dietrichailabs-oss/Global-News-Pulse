@@ -160,7 +160,7 @@ jobs:
         run: |
           git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
           python -m compileall -q global_pulse
-          python -m pytest -q -s --tb=short tests/test_r20_filter_window_responsiveness.py tests/test_warmed_category_filter.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_coverage_single_pass.py tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_map_classification_worker.py tests/test_issue22_idle_map_evidence_index_worker.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue22_startup_idle_profile.py tests/test_issue58_map_paint_cache.py tests/test_owner_night_category_filter_canonical.py
+          python -m pytest -q -s --tb=short tests/test_r20_filter_window_responsiveness.py tests/test_warmed_category_filter.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_coverage_single_pass.py tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_map_classification_worker.py tests/test_issue22_idle_map_evidence_index_worker.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue22_startup_idle_profile.py tests/test_issue58_map_paint_cache.py tests/test_owner_night_category_filter_canonical.py tests/test_issue22_idle_headline_signal.py tests/test_issue22_idle_headline_pref.py tests/test_issue64_deferred_cold_headlines.py tests/test_issue64_bounded_headline_routing.py tests/test_headline_desktop_flow.py tests/test_r20_passive_headline_contention.py
           git diff --exit-code
   startup_chrome:
     runs-on: ${{ matrix.os }}
@@ -283,7 +283,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          git worktree add --detach "$RUNNER_TEMP/gp-brief-predecessor" 4b30e62b8ad73752e03e0af38a4822c6001ca8bf
+          git worktree add --detach "$RUNNER_TEMP/gp-brief-predecessor" ccec1a711afbbf656f5f1f0f3303732cbe71365a
           probe="$PWD/scripts/qa_r20_brief_loaded_archive.py"
           cd "$RUNNER_TEMP/gp-brief-predecessor"
           for trial in 1 2; do
