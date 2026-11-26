@@ -11,11 +11,15 @@ import json
 import math
 import os
 import statistics
+import stat
 import tempfile
 import threading
 import time
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
+from contextlib import ExitStack
+from functools import wraps
+from collections import defaultdict
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
@@ -60,6 +64,120 @@ def stats(values):
             "p95_ms":round(values[min(len(values)-1,math.ceil(.95*len(values))-1)],3),
             "max_ms":round(values[-1],3)}
 
+def path_facts(path):
+    raw=Path(path)
+    info={"original":str(raw),"absolute":str(raw.absolute()),"resolved":str(raw.resolve())}
+    try:
+        meta=raw.lstat()
+        info.update(mode=stat.filemode(meta.st_mode),attributes=getattr(meta,"st_file_attributes",0),
+                    links=meta.st_nlink,symlink=stat.S_ISLNK(meta.st_mode))
+    except FileNotFoundError:
+        info["exists"]=False
+    return info
+
+
+def private_fixture_root():
+    # Do not change the application's archive admission policy. The hosted
+    # runner may spell its default temp directory via a redirected/8.3 path.
+    # Select a private child of the canonical runner-owned temp directory.
+    supplied=Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+    root=supplied.resolve(strict=True)
+    meta=root.lstat()
+    print("R20_TEMP_ROOT="+json.dumps({"default":path_facts(tempfile.gettempdir()),
+        "runner":path_facts(supplied),"canonical":path_facts(root)},sort_keys=True),flush=True)
+    assert root.is_absolute() and root.resolve(strict=True)==root
+    assert stat.S_ISDIR(meta.st_mode) and not stat.S_ISLNK(meta.st_mode)
+    assert not getattr(meta,"st_file_attributes",0)&0x400
+    return root
+
+
+class PhaseRecorder:
+    """Non-substitutive call timing, same instrumentation on both exact builds.
+
+    Spans are nested, not additive. Identify actual main-thread operations
+    overlapping the longest heartbeat intervals, and separately report
+    worker source preparation and Store lock ownership.
+    """
+    def __init__(self):
+        self.stage="setup"
+        self.gui=threading.get_ident()
+        self.spans=[]
+        self.stack=ExitStack()
+
+    def wrap(self,obj,name,prefix):
+        original=getattr(obj,name,None)
+        if not callable(original):return
+        label=prefix+"."+name
+        recorder=self
+        @wraps(original)
+        def timed(*args,**kwargs):
+            stage=recorder.stage
+            who="gui" if threading.get_ident()==recorder.gui else "worker"
+            begin=time.perf_counter()
+            cpu=time.thread_time()
+            try:return original(*args,**kwargs)
+            finally:
+                recorder.spans.append((stage,who,label,begin,time.perf_counter(),
+                                       (time.thread_time()-cpu)*1000))
+        self.stack.enter_context(patch.object(obj,name,timed))
+
+    def __enter__(self):
+        import global_pulse.core as core
+        import global_pulse.brief_selection as selection
+        import global_pulse.brief_rendering as rendering
+        from global_pulse.map_widget import WorldMap
+        from global_pulse.map_area_layer import WarningAreaLayer
+        from PySide6.QtWidgets import QTextBrowser
+        targets=(
+            (core.Store,"Store",("list_events","_map_evidence_page_unlocked",
+                "list_brief_events","list_observations","brief_manifest_matches","ingest")),
+            (MainWindow,"MainWindow",("refresh_data","_populate_feed","_sync_map_controls",
+                "_populate_filter_options","_update_world_overview","_render_idle_selection",
+                "_render_event","_refresh_translated_headlines","_populate_economy",
+                "_warm_next_workspace","_generate_brief","_validate_brief_snapshots")),
+            (WorldMap,"WorldMap",("set_events","_refresh_country_activity",
+                "_visible_cluster_paint_specs","visible_clusters","_paint_country_backdrop",
+                "_mapped_country_paths","_visible_country_badge_specs","paintEvent")),
+            (WarningAreaLayer,"WarningAreaLayer",("set_events","paint","visible")),
+            (QTextBrowser,"QTextBrowser",("setHtml","setPlainText")),
+            (selection,"selection",("overview_evidence_candidates","overview_html")),
+            (core,"core",("build_brief",)),
+            (rendering,"rendering",("brief_html",)),
+        )
+        for obj,prefix,names in targets:
+            for name in names:self.wrap(obj,name,prefix)
+        return self
+
+    def __exit__(self,*args):
+        return self.stack.__exit__(*args)
+
+    def report(self,heartbeat):
+        by_phase=defaultdict(list)
+        cpu=defaultdict(list)
+        for stage,who,label,start,end,elapsed_cpu in self.spans:
+            key=stage+"/"+who+"/"+label
+            by_phase[key].append((end-start)*1000)
+            cpu[key].append(elapsed_cpu)
+        rows={key:dict(stats(values),total_ms=round(sum(values),3),
+                       cpu_total_ms=round(sum(cpu[key]),3))
+              for key,values in sorted(by_phase.items())}
+        longest=[]
+        for start,end,stage in sorted(heartbeat,key=lambda gap:gap[1]-gap[0],reverse=True)[:8]:
+            overlaps=[]
+            for phase,who,label,a,b,elapsed_cpu in self.spans:
+                overlap=max(0,min(end,b)-max(start,a))*1000
+                if overlap>=5:
+                    overlaps.append({"thread":who,"operation":label,"stage":phase,
+                                     "overlap_ms":round(overlap,3),
+                                     "call_ms":round((b-a)*1000,3),
+                                     "cpu_ms":round(elapsed_cpu,3)})
+            overlaps.sort(key=lambda row:row["overlap_ms"],reverse=True)
+            longest.append({"stage":stage,"gap_ms":round((end-start)*1000,3),
+                            "gui": [row for row in overlaps if row["thread"]=="gui"][:8],
+                            "worker":[row for row in overlaps if row["thread"]=="worker"][:5]})
+        return {"spans":rows,"longest_heartbeat_intervals":longest}
+
+
 def report(index,stamp,*,severity="critical",category="Disaster"):
     lon=-166+(index*137%33200)/100
     lat=-62+(index*83%12400)/100
@@ -89,15 +207,24 @@ def main():
     app=QApplication.instance() or QApplication([])
     summary={"baseline":args.baseline}
     started=time.perf_counter()
-    with tempfile.TemporaryDirectory() as directory:
-        ctl=Controller(Path(directory),demo=True)
+    runner_root=private_fixture_root()
+    with tempfile.TemporaryDirectory(prefix="gp-r20-load-",dir=runner_root) as directory, PhaseRecorder() as profiler:
+        original=Path(directory)
+        canonical=original.resolve(strict=True)
+        meta=canonical.lstat()
+        print("R20_FIXTURE_PATH="+json.dumps(path_facts(original),sort_keys=True),flush=True)
+        assert canonical.parent==runner_root and stat.S_ISDIR(meta.st_mode)
+        assert not stat.S_ISLNK(meta.st_mode) and not getattr(meta,"st_file_attributes",0)&0x400
+        ctl=Controller(canonical,demo=True)
         w=None
         timer=QTimer()
         gaps=[]
+        heartbeat=[]
         last=[time.perf_counter()]
         def beat():
             now=time.perf_counter()
             gaps.append((now-last[0])*1000)
+            heartbeat.append((last[0],now,profiler.stage))
             last[0]=now
         timer.setInterval(20)
         timer.timeout.connect(beat)
@@ -106,6 +233,14 @@ def main():
         written=threading.Event()
         writer_errors=[]
         try:
+            from global_pulse.archive_storage import footprint
+            db=ctl.store.path
+            print("R20_FIXTURE_DATABASE="+json.dumps(
+                {suffix or "database":path_facts(Path(str(db)+suffix))
+                 for suffix in ("","-wal","-shm","-journal")},sort_keys=True),flush=True)
+            assert Path(db).parent==canonical
+            footprint(db)
+            profiler.stage="seed"
             now=datetime.now(timezone.utc)-timedelta(minutes=4)
             recent=now.isoformat()
             retained=(now-timedelta(days=8)).isoformat()
@@ -128,8 +263,13 @@ def main():
             ctl.store.ingest([dict(revoked,kind="retraction",status="retracted",
                                    title="FICTIONAL withdrawn loaded record")],now=recent)
             assert ctl.store.stats()["events"]>=5500
-            observations=[{"indicator":f"fixture_{i%2}","indicator_name":"Synthetic measurement",
-                           "country":f"Test Country {i%200:03d}","date":str(1990+i//200),
+            # Real bundled geography names, synthetic measurements only.
+            # 20 map countries x 2 indicators x 80 historical annual dates.
+            countries=("France","Germany","Italy","Spain","Portugal","United Kingdom",
+                       "Belgium","Netherlands","Poland","Austria","Switzerland","Sweden",
+                       "Norway","Finland","Denmark","Greece","Canada","Mexico","Brazil","Argentina")
+            observations=[{"indicator":f"fixture_{(i//20)%2}","indicator_name":"Synthetic measurement",
+                           "country":countries[i%20],"date":str(1930+i//40),
                            "value":float(i%100),"source_id":"offline-measurement",
                            "url":f"https://example.invalid/obs/{i}","synthetic":True}
                           for i in range(3200)]
@@ -137,6 +277,7 @@ def main():
             summary["seed_ms"]=round((time.perf_counter()-started)*1000,3)
             ctl.store._lock=RecordingLock(ctl.store._lock)
             since=(datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
+            profiler.stage="map_read"
             phase=time.perf_counter()
             map_rows=ctl.store.list_events(map_evidence=True,limit=5000,since=since,keep_significant=True)
             summary["map_read_ms"]=round((time.perf_counter()-phase)*1000,3)
@@ -146,6 +287,7 @@ def main():
                        for e in map_rows for a in e.get("map_areas",[]))>=90000
             cutoff=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
             ctl.store._lock.sections.clear()
+            profiler.stage="brief_read"
             phase=time.perf_counter()
             brief=ctl.brief_events(since=cutoff,period="daily")
             summary["brief_read_ms"]=round((time.perf_counter()-phase)*1000,3)
@@ -160,12 +302,14 @@ def main():
             if not args.baseline:
                 assert actual==expected,(len(expected-actual),len(actual-expected))
                 assert {str(e["id"]) for e in critical_alerts(live)}==expected
+            profiler.stage="first_paint"
             phase=time.perf_counter()
             w=MainWindow(ctl)
             w.resize(1440,940)
             w.show()
             app.processEvents()
             summary["window_first_paint_ms"]=round((time.perf_counter()-phase)*1000,3)
+            profiler.stage="opening_workspaces"
             phase=time.perf_counter()
             assert w.prepare_initial_workspaces()
             summary["opening_workspace_ms"]=round((time.perf_counter()-phase)*1000,3)
@@ -183,11 +327,16 @@ def main():
                 assert summary["opening_overview_missing"]==0
             assert len(w.world_map.area_layer.paths)>=180
             assert len(w._observations)>=3200
+            economic=w.world_map.economic_observations
+            assert len(economic)==20,len(economic)
+            assert sum(entry["count"] for entry in economic.values())==3200
+            summary["map_economy_countries"]=len(economic)
             w._workspace_warm_timer.stop()
             w._evidence_refresh_timer.stop()
             geometry=w.geometry()
             state=w.windowState()
             toggles=[]
+            profiler.stage="hazard_toggle"
             last[0]=time.perf_counter()
             timer.start()
             for enabled in (False,True,False,True):
@@ -223,6 +372,7 @@ def main():
             settles=[]
             with patch.object(ctl,"events",contested):
                 for category in ("Health","Disaster",""):
+                    profiler.stage="category_"+(category or "All")
                     ix=w.category.findData(category)
                     assert ix>=0
                     phase=time.perf_counter()
@@ -246,6 +396,7 @@ def main():
             summary["archive_events"]=ctl.store.stats()["events"]
             print("R20_MATCHED_LOAD="+json.dumps(summary,sort_keys=True),flush=True)
         finally:
+            print("R20_PHASE_PROFILE="+json.dumps(profiler.report(heartbeat),sort_keys=True),flush=True)
             timer.stop()
             launch.set()
             if writer is not None:writer.join(timeout=35)

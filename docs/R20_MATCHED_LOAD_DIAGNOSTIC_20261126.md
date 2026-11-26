@@ -1,0 +1,7 @@
+# Follow-up to independent QA 7200010877
+
+The exact previous Linux probe passed 5,000-ID parity but showed maximum GUI heartbeat 1,175ms and maximum brief Store lock 579ms. Windows failed before seed ingest (archive path safety). Neither is a physical acceptance.
+
+Correct only standalone fixture root: use a private child of the canonical runner-owned temporary directory, verify actual directory attributes/non-reparse status, log supplied/default/absolute/resolved path and database/sidecar lstat facts, and run the unmodified archive footprint guard before ingest. Candidate and exact predecessor use identical path handling. No product security changes or bypass. Existing negative link/reparse checks remain.
+
+Use 3,200 dated synthetic observations assigned to 20 actual bundled country names; assert all map economic rows, unchanged 5k critical/180 polygon/collector/category bounds. Instrument actual methods without replacing their outcomes: Store reads/batches/brief/manifest, GUI feed/overview/selected text, country/area/cluster painting, economic/hidden warm, QTextBrowser presentation, worker pure text. Report duration, per-thread CPU and the operations overlapping the eight longest heartbeat intervals. Spans nest and are not additive. Keep original timing assertions and diagnostics separate from physical acceptance. Add a small actual-Store legacy severity recomputation/alias merge/withdrawn/retained canonical red parity regression. No production changes, no waivers. Use measurements to select smallest subsequent performance correction.
