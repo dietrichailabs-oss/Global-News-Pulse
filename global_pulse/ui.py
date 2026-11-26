@@ -1604,7 +1604,8 @@ class MainWindow(SituationActions, QMainWindow):
                         unchanged_country_cache,before,scope,map_filters))
                 result["country_evidence"]=(
                     reuse_country if reuse_country is not None else
-                    controller.events(**dict(map_filters,map_evidence=True)))
+                    controller.events(**dict(map_filters,map_evidence=True,
+                                             _cooperative_map=True)))
                 result["unchanged_revision_country"]=reuse_country is not None
                 # Overview selection ranked up to 5,000 map records and
                 # formatted rich HTML on Qt for EVERY collector revision,
@@ -1615,7 +1616,7 @@ class MainWindow(SituationActions, QMainWindow):
                     result["feed"],result["country_evidence"])
                 result["overview_html"]=overview_html(
                     result["overview_events"],label=overview_label)
-                result["map_events"]=controller.events(**map_filters)
+                result["map_events"]=controller.events(**dict(map_filters,_cooperative_map=True))
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
                 # The Economy tab is independent of Monitor's search, country
@@ -1658,6 +1659,7 @@ class MainWindow(SituationActions, QMainWindow):
                 from .crisis_overlay import build_country_activity, load_crisis_context
                 from .map_widget import (_map_category, prepare_country_evidence,
                                          prepare_country_source_facts, prepare_point_source_index)
+                from .map_area_layer import prepare_warning_areas
                 category_key=(None if map_categories is None else
                               frozenset(_map_category(c) for c in map_categories))
                 evidence=result["country_evidence"][:5000]
@@ -1666,7 +1668,7 @@ class MainWindow(SituationActions, QMainWindow):
                           _map_category(record.get("category")) in category_key]
                 classification_now=datetime.now(timezone.utc)
                 crisis_events=load_crisis_context(
-                    store,map_filters,evidence,now=classification_now)
+                    store,map_filters,evidence,now=classification_now,cooperative=True)
                 result["crisis_events"]=crisis_events
                 credits=set()
                 classified=build_country_activity(
@@ -1676,6 +1678,7 @@ class MainWindow(SituationActions, QMainWindow):
                 facts=prepare_country_source_facts(evidence,observations,map_country_rows)
                 result["map_classification"]={
                     "source_facts":facts,
+                    "warning_areas":prepare_warning_areas(evidence),
                     "point_source_index":prepare_point_source_index(result["map_events"][:5000],facts),
                     "category_key":category_key,
                     "disabled_hazards":disabled_hazards,
@@ -1695,7 +1698,11 @@ class MainWindow(SituationActions, QMainWindow):
                 result["revision_before"]=before
                 result["revision_after"]=after
             except Exception as error:
-                result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+                from .core import MapSnapshotChanged
+                if isinstance(error,MapSnapshotChanged):
+                    result["retry_snapshot"]=True
+                else:
+                    result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
             try:
                 signal.emit(result)
             except RuntimeError:
@@ -1763,6 +1770,12 @@ class MainWindow(SituationActions, QMainWindow):
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
             self._retry_pending_filter()
+            return
+        if snapshot.get("retry_snapshot"):
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
+            if self._filter_refresh_pending:self._retry_pending_filter()
+            else:self._schedule_evidence_refresh()
             return
         if "error" in snapshot:
             if snapshot.get("brief_pending"):

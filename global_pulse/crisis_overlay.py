@@ -430,7 +430,7 @@ def is_crisis_context_candidate(event: dict, *, now: datetime) -> bool:
     return _scoped_crisis_candidate(event, now, 14) is not None
 
 
-def load_crisis_context(store, map_filters, country_evidence, *, now):
+def load_crisis_context(store, map_filters, country_evidence, *, now, cooperative=False):
     """Separate current crisis context from the ordinary category/display cap.
 
     Preserve search, region, time and significant-retention scope; only the
@@ -445,6 +445,7 @@ def load_crisis_context(store, map_filters, country_evidence, *, now):
         query=map_filters.get("query", ""), region=map_filters.get("region", ""),
         since=map_filters.get("since"),
         keep_significant=bool(map_filters.get("keep_significant")), now=now,
+        **({"cooperative":True} if cooperative else {}),
     )
     # Preserve exact matching object identities for the neutral-ring credit
     # contract. Do not substitute a different version of any source record.

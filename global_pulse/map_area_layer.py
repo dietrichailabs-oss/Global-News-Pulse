@@ -1,16 +1,53 @@
 """Qt rendering of attributed warning polygons, separate from point markers."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainterPath, QPen
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 
 from .map_evidence import wrapped_polygons
 from .theme import SEVERITY
 
 
+MAX_AREAS=200
+MAX_VERTICES=100_000
+
+
+def normalized_coordinates(lon,lat):
+    return ((lon+180.0)/360.0,(85.0-lat)/145.0)
+
+
+def prepare_warning_areas(events):
+    """Plain immutable geometry preparation; safe off the GUI thread."""
+    entries=[]
+    omitted=0
+    vertices=0
+    for event in events:
+        context=event.get("status")=="pending" and event.get("map_history_incomplete") is True
+        if (event.get("status","active")!="active" and not context) or event.get("future_dated"):
+            continue
+        for area in event.get("map_areas",[])[:32]:
+            if context and (not isinstance(area,dict) or area.get("context_only") is not True):
+                continue
+            try:
+                polygons=list(wrapped_polygons(area.get("geometry")))
+            except (AttributeError,ValueError,TypeError):
+                omitted+=1
+                continue
+            size=sum(len(ring) for polygon in polygons for ring in polygon)
+            if len(entries)>=MAX_AREAS or vertices+size>MAX_VERTICES:
+                omitted+=1
+                continue
+            vertices+=size
+            rings=tuple(tuple(normalized_coordinates(*position) for position in ring)
+                        for polygon in polygons for ring in polygon)
+            entries.append((rings,event,area))
+    return {"record_ids":tuple(id(event) for event in events),
+            "entries":tuple(entries),"omitted":omitted}
+
+
 class WarningAreaLayer:
-    MAX_AREAS = 200
-    MAX_VERTICES = 100_000
+    MAX_AREAS = MAX_AREAS
+    MAX_VERTICES = MAX_VERTICES
 
     def __init__(self, owner):
         self.owner = owner
@@ -18,39 +55,34 @@ class WarningAreaLayer:
         self.omitted = 0
         self._visible_key = None
         self._visible_paths = ()
+        self._geometry_paths = {}
 
-    def set_events(self, events):
-        self.paths = []
-        self.omitted = 0
-        self._visible_key = None
-        self._visible_paths = ()
-        vertices = 0
-        for event in events:
-            context = event.get("status") == "pending" and event.get("map_history_incomplete") is True
-            if (event.get("status", "active") != "active" and not context) or event.get("future_dated"):
-                continue
-            for area in event.get("map_areas", [])[:32]:
-                if context and (not isinstance(area, dict) or area.get("context_only") is not True):
-                    continue
-                try:
-                    polygons = list(wrapped_polygons(area.get("geometry")))
-                except (AttributeError, ValueError, TypeError):
-                    self.omitted += 1
-                    continue
-                size = sum(len(ring) for polygon in polygons for ring in polygon)
-                if len(self.paths) >= self.MAX_AREAS or vertices + size > self.MAX_VERTICES:
-                    self.omitted += 1
-                    continue
-                vertices += size
-                path = QPainterPath()
+    def set_events(self, events, *, prepared=None):
+        if (not isinstance(prepared,dict) or
+                prepared.get("record_ids")!=tuple(id(event) for event in events)):
+            prepared=prepare_warning_areas(events)
+        old=self._geometry_paths
+        cache={}
+        paths=[]
+        for rings,event,area in prepared["entries"]:
+            path=old.get(rings)
+            if path is None:
+                path=cache.get(rings)
+            if path is None:
+                path=QPainterPath()
                 path.setFillRule(Qt.FillRule.OddEvenFill)
-                for polygon in polygons:
-                    for ring in polygon:
-                        path.moveTo(self.owner.normalized(*ring[0]))
-                        for position in ring[1:]:
-                            path.lineTo(self.owner.normalized(*position))
-                        path.closeSubpath()
-                self.paths.append((path, event, area))
+                for ring in rings:
+                    path.addPolygon(QPolygonF([QPointF(*position) for position in ring]))
+                    path.closeSubpath()
+            cache[rings]=path
+            paths.append((path,event,area))
+        # Only bounded current geometry is retained. Reuse the value path,
+        # never the superseded source/area references.
+        self._geometry_paths=cache
+        self.paths=paths
+        self.omitted=prepared["omitted"]
+        self._visible_key=None
+        self._visible_paths=()
 
     def visible(self):
         categories = self.owner.categories

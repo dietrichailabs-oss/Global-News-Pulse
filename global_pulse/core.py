@@ -7,6 +7,7 @@ A government attribution is never promoted into proof of its underlying claim.
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from html import unescape
@@ -18,6 +19,7 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+import time
 from typing import Any, Iterable
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from uuid import UUID, uuid4, uuid5
@@ -35,6 +37,10 @@ IGNORED_WORDS = frozenset("a an the and or in on at to of for from with by as is
 MAX_BATCH = 2000
 MAX_REPORTS = 250_000
 MAX_EVENTS = 50_000
+
+
+class MapSnapshotChanged(RuntimeError):
+    """A cooperative current-map read lost its exact source revision."""
 
 
 def utcnow() -> str:
@@ -1338,12 +1344,64 @@ class Store:
                 results.append(event)
         return results
 
+    def _cooperative_map_projection(self, sql, params, limit, *, evidence, candidate=None):
+        """Freeze ordered identities; hydrate exact pages without a long lock.
+
+        No cursor survives a released lock. A changed source revision cancels
+        the entire read, never publishing a partial or mixed map inventory.
+        """
+        def revision():
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+
+        with self._lock:
+            token=revision()
+            identity_sql="SELECT id"+sql[sql.index(" FROM events"):]
+            if not evidence:
+                identities=[row[0] for row in self._conn.execute(
+                    identity_sql+" LIMIT ?",[*params,limit])]
+            else:
+                identities=[row[0] for row in self._conn.execute(identity_sql,params)]
+            if len(identities)>MAX_EVENTS:
+                raise ValueError("Map inventory exceeds archive event bound")
+        output=[]
+        for offset in range(0,len(identities),32):
+            chunk=identities[offset:offset+32]
+            with self._lock:
+                if revision()!=token:
+                    raise MapSnapshotChanged("Archive changed between map pages")
+                rows={row["id"]:row for row in self._conn.execute(
+                    "SELECT id,body FROM events WHERE id IN ("+
+                    ",".join("?" for _ in chunk)+")",chunk)}
+                if len(rows)!=len(chunk):
+                    raise MapSnapshotChanged("Map candidate disappeared")
+                ordered=[rows[identity] for identity in chunk]
+                hydrated=self._map_evidence_page_unlocked(ordered) if evidence else None
+            if not evidence:
+                hydrated=[json.loads(row["body"]) for row in ordered]
+            for event in hydrated:
+                if evidence and (not event or not (
+                        event.get("status")=="active" or event.get("map_history_incomplete") is True)):
+                    continue
+                if candidate is not None and not candidate(event):
+                    continue
+                output.append(event)
+                if len(output)>=limit:break
+            if len(output)>=limit:break
+            if len(identities)>256:
+                time.sleep(.001)
+        with self._lock:
+            if revision()!=token:
+                raise MapSnapshotChanged("Archive changed during map projection")
+        return output
+
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
                     map_evidence: bool = False, *,
                     _crisis_candidates: bool = False,
-                    _crisis_now: datetime | None = None) -> list[dict]:
+                    _crisis_now: datetime | None = None,
+                    _cooperative_map: bool = False) -> list[dict]:
         if _crisis_candidates:
             if not map_evidence or before or category:
                 raise ValueError("Crisis context requires current all-category map evidence")
@@ -1355,7 +1413,8 @@ class Store:
         # search/category/region filters still apply; historical views stay strict.
         limit = max(1, min(int(limit), 5000 if map_view else 2000))
         query = plain_text(query, 500)
-        with self._lock:
+        cooperative=bool(_cooperative_map and map_view and not before)
+        with (nullcontext() if cooperative else self._lock):
             if before:
                 # Historical playback reconstructs what was stored at that time;
                 # a later correction or headline never leaks into an old frame.
@@ -1408,7 +1467,11 @@ class Store:
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
             sql = ("SELECT body FROM events" if map_view and not map_evidence else
                    "SELECT id,body FROM events" if map_evidence else "SELECT id,body,revision FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
-            if map_evidence:
+            if cooperative:
+                candidate=(lambda event:is_crisis_context_candidate(event,now=crisis_now)) if _crisis_candidates else None
+                result=self._cooperative_map_projection(
+                    sql,params,limit,evidence=map_evidence,candidate=candidate)
+            elif map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
                 # NWS bulletins must be checked at read time. Applying the user's
@@ -1457,8 +1520,9 @@ class Store:
                 result = ([json.loads(row[0]) for row in page] if map_view
                           else self._current_feed_page_unlocked(page))
             if map_view:
+                cutoff=_iso(since) if since else None
                 for item in result:
-                    item["retained_on_map"] = bool(keep_significant and since and item["updated_at"] < _iso(since))
+                    item["retained_on_map"] = bool(keep_significant and cutoff and item["updated_at"] < cutoff)
                     # This is a display annotation, never a new source assertion.
                     item["map_retention_note"] = ("Retained significant event; no newer status received. Last update "
                                                   + item["updated_at"]) if item["retained_on_map"] else ""
@@ -1466,7 +1530,8 @@ class Store:
 
 
     def list_crisis_context(self, *, query="", region="", since=None,
-                            keep_significant=False, now=None, limit=5000):
+                            keep_significant=False, now=None, limit=5000,
+                            cooperative=False):
         """Current source candidates; independent of ordinary map display rows.
 
         Reuse canonical history/withdrawal-aware projection and scope. Neither
@@ -1476,7 +1541,8 @@ class Store:
         return self.list_events(query=query, region=region, since=since,
                                 keep_significant=keep_significant,
                                 map_evidence=True, limit=limit,
-                                _crisis_candidates=True, _crisis_now=now)
+                                _crisis_candidates=True, _crisis_now=now,
+                                _cooperative_map=cooperative)
 
     def list_brief_events(self, *, since: str, per_domain: int = 9,
                           map_since: str | None = None) -> list[dict]:
@@ -1517,7 +1583,7 @@ class Store:
         # records). Explicit interactive map filters do not change that brief.
         # Critical rows use the bounded map projection; only the detailed
         # topic candidates require full history hydration.
-        def map_red():
+        def map_red(cooperative=False):
             # With no stored red or legacy projection candidate, the map
             # cannot produce an active critical record. Avoid rehydrating
             # thousands of ordinary records during ordinary startup.
@@ -1530,7 +1596,8 @@ class Store:
                 return []
             return [event for event in self.list_events(
                 map_evidence=True, limit=MAX_CRITICAL_ALERTS,
-                since=map_since or since, keep_significant=True)
+                since=map_since or since, keep_significant=True,
+                _cooperative_map=cooperative)
                 if is_active_critical(event)]
 
         def combine(ordinary, critical):
@@ -1571,7 +1638,10 @@ class Store:
                     event = self._get_event_unlocked(identity)
                 if event is not None:
                     events.append(event)
-            critical=map_red()
+            try:
+                critical=map_red(cooperative=True)
+            except MapSnapshotChanged:
+                continue
             with self._lock:
                 if revision_unlocked() == source_revision:
                     return combine(events,critical)

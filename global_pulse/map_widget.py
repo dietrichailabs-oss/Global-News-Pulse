@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QWidget, QToolTip, QDialog, QVBoxLayout,
 from .theme import SEVERITY
 from .crisis_overlay import build_country_activity, normalize_country
 from .map_evidence import incident_country
-from .map_area_layer import WarningAreaLayer
+from .map_area_layer import WarningAreaLayer, normalized_coordinates
 from .hazards import (HAZARD_KEYS, HAZARD_LABELS, event_hazard_types,
                       area_hazard_types, hazard_visible)
 from .hazard_icons import draw_hazard_glyph
@@ -295,7 +295,7 @@ class WorldMap(QWidget):
 
     @staticmethod
     def normalized(lon, lat):
-        return QPointF((lon + 180.0) / 360.0, (85.0 - lat) / 145.0)
+        return QPointF(*normalized_coordinates(lon,lat))
 
     @property
     def country_names(self):
@@ -391,7 +391,8 @@ class WorldMap(QWidget):
                                        else list(crisis_events)[:5000])
         self._crisis_context_cache = None
         self.observations = [dict(item) for item in observation_source if isinstance(item, dict)]
-        self.area_layer.set_events(self.evidence_events)
+        areas=prepared.get("warning_areas") if source_matches else None
+        self.area_layer.set_events(self.evidence_events,prepared=areas)
         self._cluster_view_key = None
         self._cluster_groups = ()
         self._cluster_paint_key = None
