@@ -51,3 +51,37 @@ def brief_html(events, period="daily", *, markdown=None):
         cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
         cursor.mergeCharFormat(link_format)
     return document.toHtml()
+
+
+# Preview pagination changes only on-screen layout, not the admitted evidence
+# or the original complete Markdown/HTML export. Split at generated Markdown
+# paragraph boundaries; never cut through a URL, inline format, or source row.
+PREVIEW_PAGE_BYTES = 32 * 1024
+
+
+def brief_markdown_pages(markdown):
+    import re
+    if len(markdown.encode("utf-8")) <= PREVIEW_PAGE_BYTES:
+        return (markdown,)
+    pieces = re.split(r"(\n\n+)", markdown)
+    pages, current, size = [], [], 0
+    for offset in range(0, len(pieces), 2):
+        block = "".join(pieces[offset:offset + 2])
+        if not block:
+            continue
+        length = len(block.encode("utf-8"))
+        if current and size + length > PREVIEW_PAGE_BYTES:
+            pages.append("".join(current))
+            current, size = [], 0
+        current.append(block)
+        size += length
+    if current:
+        pages.append("".join(current))
+    return tuple(pages)
+
+
+def brief_preview_pages(markdown, full_html, period):
+    parts = brief_markdown_pages(markdown)
+    if len(parts) == 1:
+        return (full_html,)
+    return tuple(brief_html([], period, markdown=part) for part in parts)

@@ -479,6 +479,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._displayed_brief_snapshot=None
         self._deferred_brief_generated=None
         self._deferred_brief_markdown=None
+        self._deferred_brief_rendered=None
+        self._deferred_brief_preview=None
+        self._brief_preview_index=0
         self._brief_request_epoch=0
         self._requested_brief_target=None
         self._requested_brief_job=None
@@ -983,6 +986,14 @@ class MainWindow(SituationActions, QMainWindow):
         self.brief_export_button.setEnabled(False)
         controls.addWidget(self.brief_export_button);controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
         self.brief_browser=QTextBrowser();self.brief_browser.setOpenExternalLinks(False);self.brief_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));panel.layout.addWidget(self.brief_browser,1)
+        self.brief_preview_controls=QWidget();preview=QHBoxLayout(self.brief_preview_controls);preview.setContentsMargins(0,0,0,0)
+        preview.addWidget(label("Report page","Muted"))
+        self.brief_preview_page=QSpinBox();self.brief_preview_page.setRange(1,1)
+        self.brief_preview_page.setAccessibleName("Brief report page number")
+        self.brief_preview_page.valueChanged.connect(self._change_brief_preview_page)
+        preview.addWidget(self.brief_preview_page)
+        self.brief_preview_count=label("","Muted");preview.addWidget(self.brief_preview_count);preview.addStretch()
+        panel.layout.addWidget(self.brief_preview_controls);self.brief_preview_controls.hide()
         self.brief_state_label=label("Opening intelligence brief pending","Muted",True)
         panel.layout.addWidget(self.brief_state_label)
         panel.layout.addWidget(label("Daily is the dated opening snapshot. An empty opening waits for first eligible evidence; Generate brief, a new UTC day, or a change/removal of included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
@@ -1801,6 +1812,9 @@ class MainWindow(SituationActions, QMainWindow):
                 # materialization/presentation remains GUI-owned.
                 from .core import build_brief
                 brief["markdown"]=build_brief(brief["events"],period,generated_at=generated)
+                from .brief_rendering import brief_html,brief_preview_pages
+                brief["rendered"]=brief_html(brief["events"],period,markdown=brief["markdown"])
+                brief["preview_pages"]=brief_preview_pages(brief["markdown"],brief["rendered"],period)
                 after=controller.store.content_revision()
                 brief["revision_before"]=before
                 brief["revision_after"]=after
@@ -1940,6 +1954,8 @@ class MainWindow(SituationActions, QMainWindow):
                 self._deferred_brief_revision=brief["revision_after"]
                 self._deferred_brief_generated=brief.get("generated")
                 self._deferred_brief_markdown=brief.get("markdown")
+                self._deferred_brief_rendered=brief.get("rendered")
+                self._deferred_brief_preview=brief.get("preview_pages")
         else:
             self._idle_brief_inflight=False
         # A stale result is never displayed. Its current-Store fallback is
@@ -2104,6 +2120,8 @@ class MainWindow(SituationActions, QMainWindow):
             # hidden workspace warm. A manual refresh never reuses old briefs.
             self._deferred_brief_generated=None
             self._deferred_brief_markdown=None
+            self._deferred_brief_rendered=None
+            self._deferred_brief_preview=None
             self._deferred_brief_events=None
             self._deferred_brief_period=None
             self._deferred_brief_revision=None
@@ -3041,9 +3059,55 @@ class MainWindow(SituationActions, QMainWindow):
         return (period=="daily" and snapshot is not None
                 and snapshot["day"]==datetime.now(timezone.utc).date().isoformat())
 
+    def _set_brief_preview_page_control(self,index,count):
+        blocked=self.brief_preview_page.blockSignals(True)
+        self.brief_preview_page.setRange(1,max(1,count))
+        self.brief_preview_page.setValue(index+1)
+        self.brief_preview_page.blockSignals(blocked)
+        self.brief_preview_count.setText("of "+str(count)+" · Export includes the full report")
+        self.brief_preview_controls.setVisible(count>1)
+        self._brief_preview_index=index
+
+    def _present_brief_snapshot(self,snapshot):
+        pages=snapshot.get("preview_pages") or (snapshot["html"],)
+        self.brief_browser.setHtml(pages[0])
+        self._set_brief_preview_page_control(0,len(pages))
+        self._displayed_brief_key=snapshot["key"]
+        self._displayed_brief_snapshot=snapshot
+
+    @Slot(int)
+    def _change_brief_preview_page(self,value):
+        snapshot=self._displayed_brief_snapshot
+        if (snapshot is None or self._force_close
+                or getattr(self.controller,"_closed",False)):
+            return
+        pages=snapshot.get("preview_pages") or (snapshot["html"],)
+        previous=self._brief_preview_index
+        index=value-1
+        if not 0<=index<len(pages) or index==previous:
+            return
+        if (snapshot["key"][0]!=self.brief_period.currentText().lower()
+                or (snapshot["key"][0]=="daily" and not self._has_current_daily_brief("daily"))):
+            self._expire_daily_brief()
+            self._set_brief_preview_page_control(previous,len(pages))
+            return
+        valid=self.controller.store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
+        if valid is False:
+            self._validate_brief_snapshots({snapshot["key"]:False})
+            return
+        if valid is None:
+            self._set_brief_preview_page_control(previous,len(pages))
+            self.brief_state_label.setText("Archive busy; page unchanged. Try the page again.")
+            self.brief_export_button.setEnabled(False)
+            return
+        self.brief_browser.setHtml(pages[index])
+        self._set_brief_preview_page_control(index,len(pages))
+        self._set_brief_state(snapshot)
+
     def _clear_brief_presentation(self, message):
         self._displayed_brief_key=None
         self._displayed_brief_snapshot=None
+        self._set_brief_preview_page_control(0,1)
         self.brief_browser.setPlainText(message)
         self.brief_state_label.setText(message)
         self.brief_export_button.setEnabled(False)
@@ -3054,6 +3118,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._deferred_brief_period=None
         self._deferred_brief_generated=None
         self._deferred_brief_markdown=None
+        self._deferred_brief_rendered=None
+        self._deferred_brief_preview=None
 
     def _validate_brief_snapshots(self, results=None):
         # Worker results are keyed by the actual capture, not by the period
@@ -3279,15 +3345,16 @@ class MainWindow(SituationActions, QMainWindow):
                     result["retry_source"]=True
                 else:
                     from .core import build_brief
-                    from .brief_rendering import brief_html
+                    from .brief_rendering import brief_html,brief_preview_pages
                     markdown=build_brief(events,period,generated_at=generated)
                     # QTextDocument/QTextCursor are reentrant when each thread
                     # constructs and uses its own instance. The existing
                     # renderer creates a private document; no QWidget, shared
                     # document or Qt resource crosses this boundary. Only
                     # immutable text and the manifest reach the GUI callback.
-                    result.update(markdown=markdown,
-                                  html=brief_html(events,period,markdown=markdown))
+                    rendered=brief_html(events,period,markdown=markdown)
+                    result.update(markdown=markdown,html=rendered,
+                                  preview_pages=brief_preview_pages(markdown,rendered,period))
             except Exception as exc:
                 result["error"]=type(exc).__name__+": "+str(exc)[:160]
             try:
@@ -3387,10 +3454,8 @@ class MainWindow(SituationActions, QMainWindow):
             key=(period,generated.isoformat())
             snapshot={"day":generated.date().isoformat(),"key":key,
                       "manifest":result["manifest"],"markdown":result["markdown"],
-                      "html":result["html"]}
-            self.brief_browser.setHtml(snapshot["html"])
-            self._displayed_brief_key=key
-            self._displayed_brief_snapshot=snapshot
+                      "html":result["html"],"preview_pages":result["preview_pages"]}
+            self._present_brief_snapshot(snapshot)
             if period=="daily":
                 self._daily_brief_snapshot=snapshot
             self._set_brief_state(snapshot)
@@ -3421,9 +3486,7 @@ class MainWindow(SituationActions, QMainWindow):
                 self._validate_brief_snapshots({snapshot["key"]:False})
                 return False
             if self._displayed_brief_key!=snapshot["key"]:
-                self.brief_browser.setHtml(snapshot["html"])
-                self._displayed_brief_key=snapshot["key"]
-                self._displayed_brief_snapshot=snapshot
+                self._present_brief_snapshot(snapshot)
             self._set_brief_state(snapshot)
             self._discard_brief_read()
             return True
@@ -3432,6 +3495,8 @@ class MainWindow(SituationActions, QMainWindow):
         cached_revision=getattr(self,"_deferred_brief_revision",None)
         cached_generated=self._deferred_brief_generated
         cached_markdown=self._deferred_brief_markdown
+        cached_rendered=self._deferred_brief_rendered
+        cached_preview=self._deferred_brief_preview
         if idle:
             if cached is None or cached_period!=period:
                 if not self._idle_brief_inflight:
@@ -3469,22 +3534,24 @@ class MainWindow(SituationActions, QMainWindow):
             if self._background_warm_enabled:self._schedule_evidence_refresh()
             return False
         from .core import build_brief
-        from .brief_rendering import brief_html
+        from .brief_rendering import brief_html,brief_preview_pages
         markdown=(cached_markdown if valid and cached_markdown is not None
                   else build_brief(events,period,generated_at=generated))
-        rendered=brief_html(events,period,markdown=markdown)
+        rendered=(cached_rendered if valid and cached_rendered is not None
+                  else brief_html(events,period,markdown=markdown))
+        preview=(cached_preview if valid and cached_preview is not None
+                 else brief_preview_pages(markdown,rendered,period))
         key=(period,generated.isoformat())
         snapshot={"day":generated.date().isoformat(),"key":key,
-                  "manifest":manifest,"markdown":markdown,"html":rendered}
+                  "manifest":manifest,"markdown":markdown,"html":rendered,
+                  "preview_pages":preview}
         if (period=="daily" and generated.date()!=datetime.now(timezone.utc).date()
                 or self.controller.store.brief_manifest_matches(manifest,nonblocking=True) is not True):
             self._clear_brief_presentation("Source evidence changed while preparing the document; refresh pending.")
             self._dirty_pages.add(5)
             if self._background_warm_enabled:self._schedule_evidence_refresh()
             return False
-        self.brief_browser.setHtml(rendered)
-        self._displayed_brief_key=key
-        self._displayed_brief_snapshot=snapshot
+        self._present_brief_snapshot(snapshot)
         self._set_brief_state(snapshot)
         if period=="daily":
             self._daily_brief_snapshot=snapshot

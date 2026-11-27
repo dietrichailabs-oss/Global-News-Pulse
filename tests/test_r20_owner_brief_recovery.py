@@ -592,3 +592,48 @@ def test_reader_start_failure_rolls_back_lease_and_sync_close_refuses_active_rea
     finally:
         release.set()
         assert ctl._settle_brief_readers(timeout=5)
+
+
+def test_large_brief_preview_pages_preserve_full_text_links_and_export(desktop,monkeypatch,tmp_path):
+    from collections import Counter
+    from html.parser import HTMLParser
+    from PySide6.QtWidgets import QFileDialog
+    from global_pulse.brief_rendering import brief_markdown_pages,PREVIEW_PAGE_BYTES
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(i,"critical","Disaster") for i in range(1,301)])
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None
+                     and w._displayed_brief_snapshot is not None)
+    snapshot=w._displayed_brief_snapshot
+    parts=brief_markdown_pages(snapshot["markdown"])
+    pages=snapshot["preview_pages"]
+    assert len(pages)==len(parts)>1
+    assert "".join(parts)==snapshot["markdown"]
+    assert max(len(part.encode("utf-8")) for part in parts)<=PREVIEW_PAGE_BYTES
+    class Links(HTMLParser):
+        def __init__(self,html):
+            super().__init__()
+            self.links=[]
+            self.feed(html)
+        def handle_starttag(self,tag,attrs):
+            if tag=="a" and dict(attrs).get("href"):
+                self.links.append(dict(attrs)["href"])
+    assert Counter(link for page in pages for link in Links(page).links)==Counter(Links(snapshot["html"]).links)
+    assert len(snapshot["manifest"])==300
+    assert w.brief_preview_page.maximum()==len(pages)
+    assert w._brief_preview_index==0
+    w.brief_preview_page.setValue(len(pages))
+    assert w._brief_preview_index==len(pages)-1
+    assert w._displayed_brief_snapshot is snapshot
+    assert "Verification notes" in w.brief_browser.toPlainText()
+    target=tmp_path/"full-paged-report.html"
+    monkeypatch.setattr(QFileDialog,"getSaveFileName",lambda *a,**k:(str(target),"HTML"))
+    w._export_brief()
+    assert target.read_text(encoding="utf-8")==snapshot["html"]
+    # A subsequent correction invalidates every page and the full export.
+    ctl.store.ingest([dict(_report(1,"critical","Disaster"),
+                           title="FICTIONAL corrected paged evidence")])
+    w.brief_preview_page.setValue(1)
+    assert w._displayed_brief_snapshot is None
+    assert not w.brief_export_button.isEnabled()
+    assert w.brief_preview_page.maximum()==1
