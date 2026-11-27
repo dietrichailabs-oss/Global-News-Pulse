@@ -276,9 +276,17 @@ jobs:
         shell: bash
         run: |
           python -m compileall -q global_pulse scripts/qa_r20_brief_loaded_archive.py
+          rc=0
           for trial in 1 2; do
-            R20_MATCHED_TRIAL="$trial" python -m scripts.qa_r20_brief_loaded_archive
+            if R20_MATCHED_TRIAL="$trial" python -m scripts.qa_r20_brief_loaded_archive; then
+              result=0
+            else
+              result=$?
+            fi
+            echo "R20_CANDIDATE_EXIT=$result trial=$trial"
+            if [ "$result" -ne 0 ]; then rc=1; fi
           done
+          exit "$rc"
       - name: Matched exact predecessor diagnostic
         if: always()
         shell: bash

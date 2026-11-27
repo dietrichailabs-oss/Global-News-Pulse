@@ -101,8 +101,7 @@ class Controller(QObject):
         self.translator = Translator(self.data_dir)
         from .headline_translation import HeadlineTranslations
         self._headlines = HeadlineTranslations(self.translator, self._workers,
-            lambda: self.get_setting("english_headlines", True), self,
-            enabled_if_available=self._headline_preference_if_available)
+            lambda: self.get_setting("english_headlines", True), self)
         self._headlines.changed.connect(self.feed_translation_changed.emit)
         self.scheduler = Scheduler(self.store, self._on_reports, self._on_source_status, self._on_observations, interval=self.get_setting("interval", 600))
         self._apply_sources()
@@ -337,17 +336,6 @@ class Controller(QObject):
 
     def gdelt_review_retry(self):
         self._gdelt.review_retry()
-
-    def _headline_preference_if_available(self):
-        """Read the live preference without making a passive Qt timer wait."""
-        if self._closed:
-            return False
-        if not self.store._lock.acquire(blocking=False):
-            return None
-        try:
-            return self.get_setting("english_headlines", True) is True
-        finally:
-            self.store._lock.release()
 
     def headline_view(self, event, *, defer_language=False, enabled_override=None):
         # Feed previews may route unknown languages after first GUI paint.
