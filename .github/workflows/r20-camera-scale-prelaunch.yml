@@ -1,0 +1,299 @@
+name: R20 camera scale prelaunch
+on:
+  push:
+    branches: [eng/r20-camera-scale-prelaunch-20261123]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  camera:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Camera integration and existing safeguards
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q --tb=short tests/test_live_camera_integration_qa.py tests/test_live_camera_catalog.py tests/test_live_camera_player.py tests/test_global_camera_expansion.py tests/test_issue22_owner_media_lineup.py tests/test_camera_area_conflicts.py tests/test_camera_payload_admission.py tests/test_warmed_category_filter.py tests/test_websdr_expansion.py tests/test_issue21_sdr_owner_controls.py tests/test_r20_digital_radio.py tests/test_r20_owner_radio_feedback.py
+          git diff --exit-code
+  crisis:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Crisis scope and display-cap regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q --tb=short tests/test_crisis_context_display_cap.py tests/test_issue22_owner_crisis_stripes.py tests/test_crisis_world_press.py tests/test_issue22_undated_crisis_freshness.py tests/test_issue22_idle_crisis_topic_screen.py tests/test_issue22_idle_crisis_single_credit.py tests/test_issue22_idle_map_evidence_index_worker.py tests/test_issue22_map_projection.py tests/test_issue82_batched_map_country_evidence.py tests/test_warmed_category_filter.py
+          git diff --exit-code
+  hazards:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Natural hazard source and map regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q --tb=short tests/test_natural_hazard_layers.py tests/test_sources.py tests/test_issue58_map_paint_cache.py tests/test_owner_night_category_filter_canonical.py tests/test_nws_warning_context_qt.py tests/test_map_evidence_geometry.py tests/test_issue22_idle_map_evidence_index_worker.py
+          git diff --exit-code
+  responsiveness:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Loaded filter, geometry and existing responsiveness regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q -s --tb=short tests/test_r20_filter_window_responsiveness.py tests/test_warmed_category_filter.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_coverage_single_pass.py tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_map_classification_worker.py tests/test_issue22_idle_map_evidence_index_worker.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue22_startup_idle_profile.py tests/test_issue58_map_paint_cache.py tests/test_owner_night_category_filter_canonical.py tests/test_issue22_idle_headline_signal.py tests/test_issue22_idle_headline_pref.py tests/test_issue64_deferred_cold_headlines.py tests/test_issue64_bounded_headline_routing.py tests/test_headline_desktop_flow.py tests/test_r20_passive_headline_contention.py tests/test_r20_headline_read_pause.py tests/test_issue22_idle_collector_snapshot.py
+          git diff --exit-code
+  startup_chrome:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Loaded filter, geometry and existing responsiveness regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q -s --tb=short tests/test_r20_native_startup_hazard_ui.py tests/test_issue82_startup_video_diagnostics.py tests/test_ui_desktop.py tests/test_natural_hazard_layers.py tests/test_r20_filter_window_responsiveness.py tests/test_issue22_startup_idle_profile.py tests/test_e2_workstation_layout.py -k 'not default_404020_composition_and_stacked_sidebar and not four_tiles_do_not_autoconnect_and_stop_on_replacement and not category_controls_keep_original_links_and_honest_empty_states'
+          git diff --exit-code
+  executive_brief:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Loaded filter, geometry and existing responsiveness regressions
+        shell: bash
+        run: |
+          git merge-base --is-ancestor e0a067fdd1b9886da4742abdde950fcf32e10b7f HEAD
+          python -m compileall -q global_pulse
+          python -m pytest -q -s --tb=short tests/test_r20_overview_pagination.py tests/test_r20_cooperative_map_projection.py tests/test_r20_canonical_red_projection.py tests/test_r20_brief_integrity_lifecycle.py tests/test_r20_executive_brief_snapshot.py tests/test_r20_daily_brief_depth.py tests/test_issue64_intelligence_brief.py tests/test_issue64_archive_overview_boundary.py tests/test_issue22_idle_overview_worker.py tests/test_issue22_idle_brief_worker.py tests/test_issue22_idle_brief_presentation.py tests/test_issue22_idle_brief_lock_commit.py tests/test_issue22_brief_store_lock_yield.py
+          git diff --exit-code
+  matched_loaded_archive:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Candidate canonical alert and loaded desktop diagnostic
+        shell: bash
+        run: |
+          python -m compileall -q global_pulse scripts/qa_r20_brief_loaded_archive.py
+          rc=0
+          for trial in 1 2; do
+            if R20_MATCHED_TRIAL="$trial" python -m scripts.qa_r20_brief_loaded_archive; then
+              result=0
+            else
+              result=$?
+            fi
+            echo "R20_CANDIDATE_EXIT=$result trial=$trial"
+            if [ "$result" -ne 0 ]; then rc=1; fi
+          done
+          exit "$rc"
+      - name: Matched exact predecessor diagnostic
+        if: always()
+        shell: bash
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/gp-brief-predecessor" 0cc019ea8e118f8273f4683a93d923ec48c5eb62
+          probe="$PWD/scripts/qa_r20_brief_loaded_archive.py"
+          cd "$RUNNER_TEMP/gp-brief-predecessor"
+          for trial in 1 2; do
+            R20_MATCHED_TRIAL="$trial" python -c 'import runpy,sys; p=sys.argv.pop(1); runpy.run_path(p,run_name="__main__")' "$probe" --baseline
+          done

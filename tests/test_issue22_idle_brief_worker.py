@@ -69,6 +69,10 @@ def _ready(app, controller):
 
 
 def _snapshot(app, window):
+    # Same-day Daily briefs are intentionally frozen. Exercise the same
+    # real worker/lock/stale-source contract at the next-day boundary.
+    if window._daily_brief_snapshot is not None:
+        window._daily_brief_snapshot=dict(window._daily_brief_snapshot,day="1900-01-01")
     window._last_navigation_at=time.monotonic()-10
     window._last_full_refresh_at=time.monotonic()-10
     window._start_idle_snapshot()

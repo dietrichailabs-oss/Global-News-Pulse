@@ -17,7 +17,10 @@ from PySide6.QtWidgets import (QWidget, QToolTip, QDialog, QVBoxLayout,
 from .theme import SEVERITY
 from .crisis_overlay import build_country_activity, normalize_country
 from .map_evidence import incident_country
-from .map_area_layer import WarningAreaLayer
+from .map_area_layer import WarningAreaLayer, normalized_coordinates
+from .hazards import (HAZARD_KEYS, HAZARD_LABELS, event_hazard_types,
+                      area_hazard_types, hazard_visible)
+from .hazard_icons import draw_hazard_glyph
 
 
 def _number(value):
@@ -44,109 +47,118 @@ _CATEGORY_PRIORITY = (
 )
 
 
-def prepare_country_evidence(selected, observations, country_rows, credits, category_key):
-    """Build source-attributed map evidence indexes using plain Python records.
+def prepare_country_source_facts(records, observations, country_rows):
+    """Classify exact source records once, independent of display controls.
 
-    This is shared by the post-splash Store worker and direct Qt fallback.
-    It never touches a widget or Qt painter; its input source records and
-    observation values are preserved for the exact accepted revision.
+    Pure Python: safe on the Store snapshot worker. The map retains these
+    bounded facts for its accepted source/observation identity; changing a
+    category or hazard layer must not reparse thousands of reports or dated
+    observations inside paintEvent or an action slot.
     """
-    # Keep precisely attributed, country-only archives discoverable even
-    # when they have no point/area or do not qualify for a current crisis
-    # stripe. These are *records*, not new crisis assertions.
     countries = {normalize_country(c["name"]) for c in country_rows}
-    country_only_evidence = {}
-    country_category_evidence = {}
-    # Count the same coverage points/unlocated records while scanning
-    # this selected evidence *once*. Counts include synthetic records,
-    # as they did in coverage_summary; those records remain excluded
-    # from source-backed crisis/country evidence indexes.
-    coverage_points = 0
-    coverage_unlocated = 0
-    for record in selected:
+    rows = []
+    for record in records:
         country = normalize_country(incident_country(record))
-        located = WorldMap.has_location(record)
-        if located:
-            coverage_points += 1
-        elif not record.get("map_areas") and country not in countries:
-            coverage_unlocated += 1
-        if record.get("synthetic"):
-            continue
-        if not country or country not in countries:
-            continue
-        # A country-category circle summarizes attributable SOURCE
-        # records, including those separately represented by a real
-        # incident point/area or a corroborated current crisis stripe.
-        # It NEVER denotes a new incident at the country label.
-        category = str(record.get("category") or "News").strip().title()
-        category_entry = country_category_evidence.setdefault(
-            country, {"count": 0, "events": [], "categories": {}}
-        )
-        category_entry["count"] += 1
-        category_entry["categories"][category] = (
-            category_entry["categories"].get(category, 0) + 1
-        )
-        category_entry["events"].append(record)
-        # Preserve the old neutral/historical country-only index and
-        # its no-double-counting contract. Current supported crises
-        # stay in the separate stripe, not this neutral archive.
-        if located or record.get("map_areas"):
-            continue
-        # The country activity's event_ids are capped at 20 for display:
-        # do not use that truncated list to decide what is neutral.
-        # Reuse the exact accepted crisis classifier on each *record*,
-        # not the country aggregate (which may contain other records).
-        # A qualifying current report must not also be counted or
-        # drawn as neutral historical country-only evidence.
-        if (id(record), country) in credits:
-            continue
-        entry = country_only_evidence.setdefault(
-            country, {"count": 0, "events": [], "categories": {}}
-        )
-        entry["count"] += 1
-        category = str(record.get("category") or "News").strip().title()
-        entry["categories"][category] = entry["categories"].get(category, 0) + 1
-        # Keep all *already bounded* evidence identities (max 5,000).
-        # Display remains capped to 30 rows, but queries must search
-        # beyond the first 30 or important stories are unreachable.
-        entry["events"].append(record)
-
+        rows.append((record, _map_category(record.get("category")),
+                     event_hazard_types(record), country if country in countries else "",
+                     WorldMap.has_location(record), bool(record.get("map_areas")),
+                     bool(record.get("synthetic"))))
     # Economic observations are dated measurements, not crisis events.
     # Map them by provider ISO3 code when possible, then by exact
     # country-name identity. They use a separate outline and tooltip.
     economic_observations = {}
-    if category_key is None or "Economy" in category_key:
-        code_to_country = {
-            str(c.get("code") or "").upper(): normalize_country(c["name"])
-            for c in country_rows if c.get("code")
-        }
-        valid_countries = {normalize_country(c["name"]) for c in country_rows}
-        for observation in observations:
-            code = str(observation.get("country_code") or "").upper()
-            country = code_to_country.get(code) or normalize_country(
-                observation.get("country_name") or observation.get("country")
-            )
-            if not country or country not in valid_countries:
-                continue
-            date = str(observation.get("observation_date") or observation.get("date") or "")
-            if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
-                continue
-            entry = economic_observations.setdefault(
-                country, {"count": 0, "latest": "", "indicators": set()}
-            )
-            entry["count"] += 1
-            entry["latest"] = max(entry["latest"], date)
-            indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
-            if indicator and len(entry["indicators"]) < 8:
-                entry["indicators"].add(indicator)
+    code_to_country = {
+        str(c.get("code") or "").upper(): normalize_country(c["name"])
+        for c in country_rows if c.get("code")
+    }
+    valid_countries = {normalize_country(c["name"]) for c in country_rows}
+    for observation in observations:
+        code = str(observation.get("country_code") or "").upper()
+        country = code_to_country.get(code) or normalize_country(
+            observation.get("country_name") or observation.get("country")
+        )
+        if not country or country not in valid_countries:
+            continue
+        date = str(observation.get("observation_date") or observation.get("date") or "")
+        if not re.fullmatch(r"\d{4}(?:-\d{2}(?:-\d{2})?)?", date):
+            continue
+        entry = economic_observations.setdefault(
+            country, {"count": 0, "latest": "", "indicators": set()}
+        )
+        entry["count"] += 1
+        entry["latest"] = max(entry["latest"], date)
+        indicator = str(observation.get("indicator_name") or observation.get("indicator") or "").strip()
+        if indicator and len(entry["indicators"]) < 8:
+            entry["indicators"].add(indicator)
+
+    return {"rows": tuple(rows), "economic_observations": economic_observations}
+
+
+def prepare_country_evidence(selected, observations, country_rows, credits, category_key,
+                             *, disabled_hazards=(), source_facts=None):
+    """Project the exact bounded source facts onto a category/hazard view.
+
+    Direct callers may still supply the selected source dictionaries; the
+    warmed worker supplies all immutable facts, independent of either layer.
+    Preserve record order and single-record crisis credit semantics.
+    """
+    facts = (source_facts if source_facts is not None else
+             prepare_country_source_facts(selected, observations, country_rows))
+    country_only_evidence = {}
+    country_category_evidence = {}
+    coverage_points = 0
+    coverage_unlocated = 0
+    for record, category, hazards, country, located, area, synthetic in facts["rows"]:
+        if category_key is not None and category not in category_key:
+            continue
+        if disabled_hazards and not hazard_visible(hazards, disabled_hazards):
+            continue
+        if located:
+            coverage_points += 1
+        elif not area and not country:
+            coverage_unlocated += 1
+        if synthetic or not country:
+            continue
+        entry = country_category_evidence.setdefault(
+            country, {"count": 0, "events": [], "categories": {}})
+        entry["count"] += 1
+        entry["categories"][category] = entry["categories"].get(category, 0) + 1
+        entry["events"].append(record)
+        if located or area or (id(record), country) in credits:
+            continue
+        entry = country_only_evidence.setdefault(
+            country, {"count": 0, "events": [], "categories": {}})
+        entry["count"] += 1
+        entry["categories"][category] = entry["categories"].get(category, 0) + 1
+        entry["events"].append(record)
 
     return {
-        "country_only_evidence":country_only_evidence,
-        "country_category_evidence":country_category_evidence,
-        "economic_observations":economic_observations,
-        "coverage_points":coverage_points,
-        "coverage_unlocated":coverage_unlocated,
+        "country_only_evidence": country_only_evidence,
+        "country_category_evidence": country_category_evidence,
+        "economic_observations": (facts["economic_observations"]
+                                 if category_key is None or "Economy" in category_key else {}),
+        "coverage_points": coverage_points,
+        "coverage_unlocated": coverage_unlocated,
     }
+
+
+def prepare_point_source_index(events, source_facts):
+    """Precompute point location and hazard facts for the accepted source page."""
+    by_identity = {str(row.get("id")): types
+                   for row, _category, types, _country, _located, _area, _synthetic
+                   in source_facts["rows"] if row.get("id")}
+    types_by_object = {}
+    counts = {}
+    for row in events:
+        if not WorldMap.has_location(row):
+            continue
+        identity = str(row.get("id"))
+        types = by_identity[identity] if identity in by_identity else event_hazard_types(row)
+        types_by_object[id(row)] = types
+        counts[types] = counts.get(types, 0) + 1
+    return {"point_ids": tuple(id(row) for row in events),
+            "types": types_by_object, "counts": counts,
+            "count": sum(counts.values())}
 
 
 class WorldMap(QWidget):
@@ -166,9 +178,18 @@ class WorldMap(QWidget):
         self.events = []
         self.gdelt_layer = None
         self.evidence_events = []
+        self._crisis_context_events = None
+        self._crisis_context_cache = None
         self.observations = []
         self.economic_observations = {}
         self._activity_categories = object()
+        self._activity_hazard_key = None
+        self.hazards_enabled = True
+        self.hazard_layers = dict.fromkeys(HAZARD_KEYS, True)
+        self._point_hazard_types = {}
+        self._point_hazard_counts = {}
+        self._country_source_facts = None
+        self._activity_credits = set()
         # Reuse the exact event classification in the activity-index pass for
         # the summary. Re-scanning up to 5,000 events on every idle UI refresh
         # was measured as part of the blocked main-thread coverage hot path.
@@ -274,7 +295,7 @@ class WorldMap(QWidget):
 
     @staticmethod
     def normalized(lon, lat):
-        return QPointF((lon + 180.0) / 360.0, (85.0 - lat) / 145.0)
+        return QPointF(*normalized_coordinates(lon,lat))
 
     @property
     def country_names(self):
@@ -284,7 +305,9 @@ class WorldMap(QWidget):
         return {"zoom": self.zoom, "pan_x": self.pan_x, "pan_y": self.pan_y, "density": self.density, "labels": self.labels,
                 "categories": sorted(self.categories) if self.categories is not None else None,
                 "crisis_overlay_enabled": self.crisis_overlay_enabled,
-                "crisis_layers": dict(self.crisis_layers)}
+                "crisis_layers": dict(self.crisis_layers),
+                "hazards_enabled": self.hazards_enabled,
+                "hazard_layers": dict(self.hazard_layers)}
 
     def restore_view(self, state):
         if not isinstance(state, dict):
@@ -303,6 +326,12 @@ class WorldMap(QWidget):
             for key in ("conflict", "unrest", "migration"):
                 if key in layers:
                     self.crisis_layers[key] = bool(layers[key])
+        self.hazards_enabled = state.get("hazards_enabled", True) is not False
+        layers = state.get("hazard_layers")
+        self.hazard_layers = {
+            kind: (layers.get(kind, True) is not False if isinstance(layers, dict) else True)
+            for kind in HAZARD_KEYS
+        }
         self.update()
 
     def reset_view(self):
@@ -320,7 +349,7 @@ class WorldMap(QWidget):
         return self._transform().map(self.normalized(lon, lat))
 
     def set_events(self, events, *, country_events=None, observations=None,
-                   preclassified_country=None):
+                   preclassified_country=None, crisis_events=None):
         # A worker may supply pure-Python classification, never widget data.
         # This short-lived token is consumed exactly once by the matching
         # source snapshot. Direct calls keep the original GUI classifier.
@@ -329,19 +358,41 @@ class WorldMap(QWidget):
         self._pending_observation_ids = tuple(id(item) for item in observation_source
                                               if isinstance(item, dict))
         self.events = list(events)[:5000]
-        # Preserve the original all-point (not category-filtered) footer
-        # semantics without re-scanning up to 5,000 events per paint.
-        self._footer_point_count = sum(self.has_location(item) for item in self.events)
-        # Every source replacement invalidates painted stripes/neutral/economy
-        # outlines even if Python reuses a source-list object identifier.
+        # Source replacement always invalidates the painted source state.
+        # Within a snapshot, hazard toggles only invalidate the country
+        # raster when actual outlines/stripes change, not counts alone.
         self._country_backdrop_key = None
         self._country_backdrop_pixmap = None
         self._country_badge_key = None
         self._country_badge_specs = ()
         self._country_badge_hits = []
         self.evidence_events = list(country_events)[:5000] if country_events is not None else list(self.events)
+        country_rows=tuple({"name":str(c["name"]), "code":str(c.get("code") or "")}
+                           for c in self._countries)
+        prepared=preclassified_country
+        source_matches=(isinstance(prepared,dict)
+                        and prepared.get("record_ids")==tuple(id(row) for row in self.evidence_events)
+                        and prepared.get("country_rows")==country_rows
+                        and prepared.get("observation_ids")==self._pending_observation_ids)
+        facts=prepared.get("source_facts") if source_matches else None
+        self._country_source_facts=(facts if isinstance(facts,dict) else
+            prepare_country_source_facts(self.evidence_events,
+                [row for row in observation_source if isinstance(row,dict)],country_rows))
+        point_index=prepared.get("point_source_index") if source_matches else None
+        if (not isinstance(point_index,dict)
+                or point_index.get("point_ids")!=tuple(id(row) for row in self.events)):
+            point_index=prepare_point_source_index(self.events,self._country_source_facts)
+        self._point_hazard_types=point_index["types"]
+        self._point_hazard_counts=point_index["counts"]
+        self._footer_point_count=point_index["count"]
+        # Direct/legacy and historical views retain their original classifier.
+        # A separate current context owns stripes, not ordinary category rings.
+        self._crisis_context_events = (None if crisis_events is None
+                                       else list(crisis_events)[:5000])
+        self._crisis_context_cache = None
         self.observations = [dict(item) for item in observation_source if isinstance(item, dict)]
-        self.area_layer.set_events(self.evidence_events)
+        areas=prepared.get("warning_areas") if source_matches else None
+        self.area_layer.set_events(self.evidence_events,prepared=areas)
         self._cluster_view_key = None
         self._cluster_groups = ()
         self._cluster_paint_key = None
@@ -356,7 +407,8 @@ class WorldMap(QWidget):
 
     def _refresh_country_activity(self):
         key = None if self.categories is None else frozenset(_map_category(c) for c in self.categories)
-        if key != self._activity_categories:
+        disabled = self.disabled_hazards()
+        if key != self._activity_categories or disabled != self._activity_hazard_key:
             selected = [e for e in self.evidence_events if key is None or _map_category(e.get("category")) in key]
             # Use one evidence-time boundary for both the current crisis layer
             # and neutral archive classification. Local Store refresh time must
@@ -367,20 +419,30 @@ class WorldMap(QWidget):
             # neutral-archive pass; never repeat a full 5k-record source/date
             # classifier once per country-only row on the GUI thread.
             prepared=self._pending_preclassified_country
-            if (isinstance(prepared, dict)
-                    and prepared.get("category_key")==key
-                    and prepared.get("record_ids")==tuple(
-                        id(record) for record in self.evidence_events)):
-                # The worker's source dictionaries are the very same objects
-                # handed to set_events. Never reuse an index after a category
-                # change or a copied/changed report; fall back to normal local
-                # classification for direct/map-only updates.
-                self.country_activity=prepared["activity"]
-                single_record_credits=prepared["credits"]
+            context=self._crisis_context_events
+            context_ids=(None if context is None else tuple(id(record) for record in context))
+            prepared_matches=(isinstance(prepared, dict)
+                              and prepared.get("record_ids")==tuple(
+                                  id(record) for record in self.evidence_events)
+                              and prepared.get("crisis_record_ids")==context_ids)
+            if context is not None and self._crisis_context_cache is not None:
+                # Local category toggles rebuild ordinary rings, not stripes.
+                self.country_activity, single_record_credits = self._crisis_context_cache
+            elif key == self._activity_categories:
+                # Even direct/historical views must not rerun the source/date
+                # classifier merely because a hazard visibility switch moved.
+                single_record_credits = self._activity_credits
             else:
-                single_record_credits = set()
-                self.country_activity = build_country_activity(
-                    selected, now=now, single_record_credits=single_record_credits)
+                if prepared_matches and (context is not None or prepared.get("category_key")==key):
+                    self.country_activity=prepared["activity"]
+                    single_record_credits=prepared["credits"]
+                else:
+                    single_record_credits = set()
+                    self.country_activity = build_country_activity(
+                        selected if context is None else context,
+                        now=now, single_record_credits=single_record_credits)
+                if context is not None:
+                    self._crisis_context_cache=(self.country_activity, single_record_credits)
             country_rows = tuple(
                 {"name":str(c["name"]), "code":str(c.get("code") or "")} for c in self._countries)
             # Source-category and historical/economy ring indexes are pure
@@ -389,22 +451,58 @@ class WorldMap(QWidget):
             # Direct calls, changed views and copied/mutated source records
             # always use the same local implementation (fail closed).
             indexed = (prepared.get("evidence_index")
-                       if (isinstance(prepared, dict)
+                       if (prepared_matches
                            and prepared.get("category_key")==key
-                           and prepared.get("record_ids")==tuple(
-                               id(record) for record in self.evidence_events)
                            and prepared.get("country_rows")==country_rows
+                           and prepared.get("disabled_hazards", frozenset())==disabled
                            and prepared.get("observation_ids")==self._pending_observation_ids)
                        else None)
             if not isinstance(indexed, dict):
                 indexed = prepare_country_evidence(
-                    selected, self.observations, country_rows, single_record_credits, key)
+                    selected, self.observations, country_rows, single_record_credits, key,
+                    disabled_hazards=disabled, source_facts=self._country_source_facts)
             self.country_only_evidence = indexed["country_only_evidence"]
             self.country_category_evidence = indexed["country_category_evidence"]
             self.economic_observations = indexed["economic_observations"]
             self._coverage_points = indexed["coverage_points"]
             self._coverage_unlocated = indexed["coverage_unlocated"]
             self._activity_categories = key
+            self._activity_hazard_key = disabled
+            self._activity_credits = single_record_credits
+
+    def disabled_hazards(self):
+        return frozenset(kind for kind in HAZARD_KEYS
+                         if not self.hazards_enabled or not self.hazard_layers[kind])
+
+    def set_hazards_enabled(self, enabled):
+        self.hazards_enabled = bool(enabled)
+        self._hazard_visibility_changed()
+
+    def set_hazard_layer(self, kind, enabled):
+        if kind not in self.hazard_layers:
+            raise ValueError("Unknown hazard map layer")
+        self.hazard_layers[kind] = bool(enabled)
+        self._hazard_visibility_changed()
+
+    def reset_hazard_layers(self):
+        self.hazards_enabled = True
+        self.hazard_layers = dict.fromkeys(HAZARD_KEYS, True)
+        self._hazard_visibility_changed()
+
+    def _hazard_visibility_changed(self):
+        self._hits.clear()
+        self._country_badge_hits.clear()
+        self._country_badge_key = None
+        self.update()
+        self.view_changed.emit()
+
+    def warning_area_visible(self, event, area):
+        disabled = self.disabled_hazards()
+        return not disabled or hazard_visible(area_hazard_types(event, area), disabled)
+
+    def _point_types(self, event):
+        types = self._point_hazard_types.get(id(event))
+        return event_hazard_types(event) if types is None else types
 
     def coverage_summary(self):
         self._refresh_country_activity()
@@ -433,8 +531,12 @@ class WorldMap(QWidget):
         Warning geometry and zoom remain live so layer toggles and camera
         changes do not display stale counts or imply unsupported locations.
         """
+        disabled = self.disabled_hazards()
+        count = (sum(n for types,n in self._point_hazard_counts.items()
+                     if hazard_visible(types, disabled))
+                 if disabled else self._footer_point_count)
         return (
-            f"{self._footer_point_count} points / {len(self.evidence_events)} reports assessed"
+            f"{count} points / {len(self.evidence_events)} reports assessed"
             f" · {len(self.area_layer.visible())} warning areas · {self.zoom:.1f}×"
         )
 
@@ -473,27 +575,39 @@ class WorldMap(QWidget):
                 continue
         return max(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "source publication undated"
 
-    def show_country_evidence(self, name, *, include_current=False, initial_category=None):
+    def show_country_evidence(self, name, *, include_current=False, initial_category=None,
+                              activity_context=False):
         """Searchable attributed archive; never infer an incident's location.
 
         Exactly 30 results are rendered at once, but searches cover the entire
         bounded (max 5,000 identities) country-evidence index. Records lacking
         country evidence must be found via the clearly separate global search.
         """
-        entry = (self.country_category_evidence_for(name) if include_current
-                 else self.country_evidence_for(name))
+        if activity_context:
+            identities=set(self.country_activity_for(name).get("event_ids", ()))
+            records=[record for record in (self._crisis_context_events or ())
+                     if str(record.get("id", "")) in identities]
+            entry={"count":len(records), "events":records} if records else {}
+        else:
+            entry = (self.country_category_evidence_for(name) if include_current
+                     else self.country_evidence_for(name))
         if not entry:
             return False
         if self.country_dialog:
             self.country_dialog.close()
         dialog = QDialog(self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        title = "Country-attributed source records" if include_current else "Country-only source records"
+        title = ("Recent crisis reporting" if activity_context else
+                 "Country-attributed source records" if include_current else "Country-only source records")
+        record_label = "source-linked crisis reports" if activity_context else "country-attributed records"
         dialog.setWindowTitle(f"{title} — {name}")
         dialog.resize(690, 550)
         layout = QVBoxLayout(dialog)
         explainer = QLabel(
-            ("Country-level category circles are SOURCE summaries, never incident points. "
+            ("Recent source-linked reports supporting the country stripe; bounded evidence shortlist, "
+             "not a legal declaration of crisis. "
+             if activity_context else
+             "Country-level category circles are SOURCE summaries, never incident points. "
              "Some records may separately have valid incident geometry or qualify "
              "for a current activity stripe. Dates and evidence must be inspected. "
              if include_current else
@@ -572,11 +686,13 @@ class WorldMap(QWidget):
                 listing.setCurrentRow(0)
                 count_label.setText(
                     f"Showing {min(30, len(matches))} of {len(matches)} matching "
-                    f"country-attributed records ({entry['count']} total). "
+                    f"{record_label} ({entry['count']} total). "
                     "Search covers the full country list, not only its first 30."
                 )
             else:
                 count_label.setText(
+                    "No matching crisis reports in this evidence shortlist."
+                    if activity_context else
                     "No matching country-attributed records. An aviation story "
                     "may lack independent US incident geography; use Search full news "
                     "archive to search all locally collected headlines."
@@ -702,8 +818,9 @@ class WorldMap(QWidget):
     def visible_clusters(self):
         selected_categories = (None if self.categories is None else
                                frozenset(_map_category(c) for c in self.categories))
+        disabled = self.disabled_hazards()
         key = (id(self.events), len(self.events), self.width(), self.height(),
-               self.zoom, self.pan_x, self.pan_y, selected_categories)
+               self.zoom, self.pan_x, self.pan_y, selected_categories, disabled)
         if key == self._cluster_view_key:
             return self._cluster_groups
         groups = defaultdict(list)
@@ -714,7 +831,8 @@ class WorldMap(QWidget):
         for event in self.events:
             if (not self.has_location(event) or
                     (selected_categories is not None and
-                     _map_category(event.get("category")) not in selected_categories)):
+                     _map_category(event.get("category")) not in selected_categories)
+                    or (disabled and not hazard_visible(self._point_types(event), disabled))):
                 continue
             p = transform.map(self.normalized(event["longitude"], event["latitude"]))
             if -20 < p.x() < self.width() + 20 and -20 < p.y() < self.height() + 20:
@@ -746,11 +864,19 @@ class WorldMap(QWidget):
             representative = max(
                 group, key=lambda item: severity_order.get(
                     item[0].get("severity"), 0))[0]
+            disabled = self.disabled_hazards()
+            kinds = {tuple(k for k in self._point_types(event) if k not in disabled)
+                     for event, _point in group}
+            # A mixed-location cluster is a neutral count; an individual
+            # multi-hazard record uses its first enabled canonical type.
+            common = next(iter(kinds)) if len(kinds)==1 else ()
+            kind = common[0] if common and (size==1 or len(common)==1) else ""
             specs.append({
+                "hazard": kind,
                 "group": group,
                 "size": size,
                 "center": center,
-                "radius": 6 if size == 1 else min(14, 8 + math.log2(size) * 2),
+                "radius": (9 if kind else 6) if size == 1 else min(14, 8 + math.log2(size) * 2),
                 "color": QColor(SEVERITY.get(
                     representative.get("severity"), SEVERITY["unassessed"])),
                 "verification": representative.get("verification", "unverified"),
@@ -915,8 +1041,12 @@ class WorldMap(QWidget):
         ratio = self.devicePixelRatioF()
         backing_key = (
             self.width(), self.height(), ratio, self.zoom, self.pan_x, self.pan_y,
-            id(self.events), id(self.country_activity),
-            id(self.country_only_evidence), id(self.economic_observations),
+            # Only these style facts affect the actual raster, not counts,
+            # source IDs, or which unrelated hazard/category was toggled.
+            tuple(sorted((country, tuple(kind for kind in ("conflict","unrest","migration")
+                                         if entry.get(kind,0)))
+                         for country,entry in self.country_activity.items())),
+            frozenset(self.country_only_evidence), frozenset(self.economic_observations),
             self._activity_categories, self.selected_country,
             self._hover_country, self.crisis_overlay_enabled,
             tuple(sorted(self.crisis_layers.items())),
@@ -1004,7 +1134,17 @@ class WorldMap(QWidget):
             if marker["approximate"]:
                 painter.setPen(QPen(QColor("#131927"), 1.5))
                 painter.drawLine(QPointF(center.x()-3, center.y()), QPointF(center.x()+3, center.y()))
-            if size > 1:
+            if marker["hazard"]:
+                draw_hazard_glyph(painter, center, radius*.63, marker["hazard"], "#0b111b")
+                if size > 1:
+                    painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                    painter.setPen(QPen(QColor("#c9d1df"), .8))
+                    painter.setBrush(QColor("#10151c"))
+                    badge = QRectF(center.x()+radius*.35, center.y()+radius*.35,
+                                   max(18, painter.fontMetrics().horizontalAdvance(str(size))+8), 14)
+                    painter.drawRoundedRect(badge, 3, 3)
+                    painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, str(size))
+            elif size > 1:
                 painter.setPen(QColor("#0c111b")); painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
                 painter.drawText(QRectF(center.x()-radius,center.y()-radius,radius*2,radius*2),Qt.AlignmentFlag.AlignCenter,str(len(group)))
             self._hits.append((center, radius+8, group))
@@ -1151,6 +1291,12 @@ class WorldMap(QWidget):
             self.selected_country = self._hover_country
             self.country_selected.emit(self._hover_country)
             self.update()
+            activity=self.country_activity_for(self._hover_country)
+            if (self._crisis_context_events is not None and self.crisis_overlay_enabled
+                    and any(self.crisis_layers.get(kind, True) and activity.get(kind, 0)
+                            for kind in ("conflict", "unrest", "migration"))
+                    and self.show_country_evidence(self._hover_country, activity_context=True)):
+                return
             if self.country_evidence_for(self._hover_country):
                 self.show_country_evidence(self._hover_country)
 
@@ -1168,6 +1314,9 @@ class WorldMap(QWidget):
             color=SEVERITY.get(severity,SEVERITY["unassessed"])
             lines.append(f"<span style='color:{color}'>{html.escape(str(severity).upper())}</span> · {html.escape(str(e.get('title','Event')))}")
             lines.append(html.escape(str(e.get("verification","unverified")))+" · "+html.escape(str(e.get("updated_at",""))))
+            kinds=event_hazard_types(e)
+            if kinds:
+                lines.append(html.escape("Hazard type: "+", ".join(HAZARD_LABELS[k] for k in kinds)))
             if e.get("map_retention_note"):
                 lines.append(html.escape(e["map_retention_note"]))
         if len(events)>8:lines.append(f"{len(events)-8} more — click for the complete list")

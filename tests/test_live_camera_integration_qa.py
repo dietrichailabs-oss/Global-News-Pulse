@@ -321,3 +321,68 @@ def test_snapshot_backend_refuses_live_rows_before_network(panel):
     item = next(row for row in camera_catalog() if row.get("playback") == "live_video")
     with pytest.raises(ValueError, match="snapshot"):
         RealSnapshot(item, panel)
+
+
+@pytest.mark.parametrize("auto", [False, True])
+def test_news_reordering_does_not_disconnect_manual_live_camera(panel, auto):
+    panel.tabs.setCurrentWidget(panel.camera_page)
+    panel.restore_auto_cameras(auto)
+    tile = select_camera(panel, "gpc-1770-live")
+    assert tile.watch() is True
+    player = tile.camera
+    status = tile.note.text()
+    for event in (
+        {"id": "nz", "title": "Mount Ruapehu volcanic activity", "severity": "high"},
+        {"id": "us", "title": "Grand Canyon wildfire", "severity": "high"},
+        None,
+    ):
+        panel.set_event(event)
+        assert tile._current()["id"] == "gpc-1770-live"
+        assert tile.camera is player and player.active
+        assert player.start_count == 1 and player.stop_count == 0
+        assert tile.note.text() == status
+    assert len(FakeLiveCamera.instances) == 1 and not FakeSnapshot.instances
+
+
+def test_live_filter_keeps_selected_session_but_snapshots_filter_stops_it(panel):
+    tile = select_camera(panel, "gpc-1770-live")
+    assert tile.watch() is True
+    player = tile.camera
+    panel.camera_kind.setCurrentIndex(panel.camera_kind.findData("live_video"))
+    assert tile._current()["id"] == "gpc-1770-live"
+    assert tile.camera is player and player.active
+    assert tile.selector.count() == len(LIVE_IDS)
+    panel.camera_kind.setCurrentIndex(panel.camera_kind.findData("snapshot"))
+    assert tile.camera is None and not player.active
+    assert tile.selector.count() == 14
+    assert all(tile.selector.itemData(i).get("snapshot_url") for i in range(14))
+    assert len(FakeLiveCamera.instances) == 1 and not FakeSnapshot.instances
+
+
+def test_live_filter_composes_with_search_and_region_without_autoplay(panel):
+    panel.camera_kind.setCurrentIndex(panel.camera_kind.findData("live_video"))
+    panel.camera_search.setText("1770")
+    assert panel.camera.selector.count() == 1
+    assert panel.camera._current()["id"] == "gpc-1770-live"
+    assert "1 / 17" in panel.camera_status.text()
+    panel.camera_region.setCurrentIndex(panel.camera_region.findData("Europe"))
+    assert panel.camera._current() == {}
+    assert "0 / 17" in panel.camera_status.text()
+    assert not FakeLiveCamera.instances and not FakeSnapshot.instances
+
+
+def test_live_consent_survives_news_reordering_not_removal(panel, monkeypatch):
+    tile = select_camera(panel, "gpc-1770-live")
+    def consent(*args, **kwargs):
+        panel.set_event({"id": "nz", "title": "Mount Ruapehu volcanic activity", "severity": "high"})
+        return QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QMessageBox, "question", consent)
+    assert tile.watch() is True
+    assert tile.camera.item["id"] == "gpc-1770-live"
+    tile.user_stop()
+    def remove(*args, **kwargs):
+        panel.camera_kind.setCurrentIndex(panel.camera_kind.findData("snapshot"))
+        return QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QMessageBox, "question", remove)
+    assert tile.watch() is False
+    assert tile.camera is None and len(FakeLiveCamera.instances) == 1

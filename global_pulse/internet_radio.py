@@ -413,8 +413,10 @@ class RadioPanel(QWidget):
         # Keep real vertical headroom for native Windows font metrics. The tab
         # already labels HAM / SDR, so start with the selected receiver instead
         # of stacking a duplicate eyebrow above the actual controls.
-        layout.setContentsMargins(6,6,6,6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6,4,6,4)
+        # Reserve a little more vertical room for the independent band row.
+        # Keep all font sizes, natural control minima and the details viewport.
+        layout.setSpacing(3)
         self.ham_receiver_name=QLabel("Choose a public receiver")
         self.ham_receiver_name.setTextFormat(Qt.TextFormat.PlainText)
         self.ham_receiver_name.setWordWrap(True)
@@ -429,10 +431,13 @@ class RadioPanel(QWidget):
             "padding:4px;border:1px solid #407b67;border-radius:8px;"
         )
         layout.addWidget(self.ham_frequency_display)
-        self.ham_frequency_detail=QLabel("7100 kHz · USB · Pulse requested setting")
+        self.ham_frequency_detail=QLabel("7100 kHz · USB · Requested")
         self.ham_frequency_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ham_frequency_detail.setTextFormat(Qt.TextFormat.PlainText)
-        self.ham_frequency_detail.setWordWrap(True)
+        # One concise line leaves vertical room for a real, separate band
+        # selector at compact Windows sizes. Do not hide the uncertainty.
+        self.ham_frequency_detail.setWordWrap(False)
+        self.ham_frequency_detail.setToolTip("Pulse requested frequency and mode; receiver audio and tuning are not verified.")
         self.ham_frequency_detail.setAccessibleName("Exact requested kilohertz and mode; operator playback unverified")
         layout.addWidget(self.ham_frequency_detail)
         self.ham_bands=QLabel(
@@ -611,10 +616,15 @@ class RadioPanel(QWidget):
         self.ham_forward.setAccessibleName("Tune higher by selected kilohertz step")
         self.ham_forward.clicked.connect(lambda:self.step_receiver(1))
         stepping.addWidget(self.ham_back)
-        stepping.addWidget(self.ham_step)
-        stepping.addWidget(self.ham_band,1)
+        stepping.addWidget(self.ham_step,1)
         stepping.addWidget(self.ham_forward)
         layout.addLayout(stepping)
+        # Windows Qt's measured minimum widths for step and band selectors
+        # are 180–192 and 288–309 px respectively. Keeping them with both
+        # buttons in one row forced the panel to 724–772 px. Give the band
+        # selector the full row; retain its actual readable size hint.
+        layout.addWidget(self.ham_band)
+        self.ham_band.setToolTip("Select an operator-listed frequency range in MHz")
 
         scan_row=QHBoxLayout()
         self.scan_start=QLineEdit("7000")
@@ -658,8 +668,10 @@ class RadioPanel(QWidget):
         # when long directory labels or the advanced details are shown.
         layout.removeItem(stepping)
         layout.insertLayout(3,stepping)
+        layout.removeWidget(self.ham_band)
+        layout.insertWidget(4,self.ham_band)
         layout.removeItem(tuner_row)
-        layout.insertLayout(4,tuner_row)
+        layout.insertLayout(5,tuner_row)
         receiver_row.removeWidget(self.receiver_connect)
         receiver_row.removeWidget(self.receiver_off)
         discovery_row.removeWidget(self.receiver_external)
@@ -691,7 +703,7 @@ class RadioPanel(QWidget):
         self.ham_details_scroll.setWidget(self.ham_details)
         self.ham_details_scroll.setMaximumHeight(180)
         self.ham_details_scroll.setMinimumHeight(0)
-        self.ham_details_scroll.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Ignored)
+        self.ham_details_scroll.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.ham_details_scroll.hide()
         self.ham_details_toggle=QPushButton("Receiver details, volume and scan ▸")
         self.ham_details_toggle.setCheckable(True)
@@ -707,7 +719,7 @@ class RadioPanel(QWidget):
         for core_label in (self.ham_receiver_name,self.ham_frequency_display,
                            self.ham_frequency_detail,self.sdr_status,self.directory_summary):
             core_label.setMinimumWidth(0)
-            core_label.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)
+            core_label.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
         self.ham_frequency_display.setMaximumHeight(70)
 
         self.selector.currentIndexChanged.connect(self._station_changed)
@@ -783,7 +795,7 @@ class RadioPanel(QWidget):
             self.ham_frequency_display.setText(f"{integral}.{fraction} MHz")
             self.ham_frequency_detail.setText(
                 f"{self._format_khz(khz)} kHz · {self.mode.currentText()} · "
-                "Pulse requested setting; receiver audio unverified"
+                "Requested"
             )
             self._sync_receiver_band(khz)
         except (ValueError,TypeError):
@@ -1255,6 +1267,7 @@ class RadioPanel(QWidget):
         if index >= 0:
             self.receiver_type.setCurrentIndex(index)
         self.ham_receiver_name.setText(item["name"])
+        self.ham_receiver_name.setToolTip(item["name"])
         self.receiver_picker.setToolTip(str(self.receiver_picker.currentData(Qt.ItemDataRole.ToolTipRole) or ""))
         self.receiver_picker.lineEdit().setCursorPosition(0)
         self.receiver_url.setCursorPosition(0)
@@ -1266,9 +1279,13 @@ class RadioPanel(QWidget):
             f"{item['name']} — {item['reason']}. The directory does not verify availability."
         )
         self.directory_summary.setText(
-            "Receiver selected · Connect to listen; availability and audio unverified."
+            "Receiver selected · Connect (audio unverified)"
             if self.receiver_connect.isEnabled() else
-            "Browser-only receiver · Open in browser to use the operator's tuner."
+            "Browser-only receiver · Open in browser"
+        )
+        self.directory_summary.setToolTip(
+            "Receiver availability and audio are unverified. "
+            "Browser-only receivers use the operator's original tuner."
         )
 
     def refresh_receiver_directory(self):

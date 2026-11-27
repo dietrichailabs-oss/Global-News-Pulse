@@ -22,10 +22,12 @@ from PySide6.QtWidgets import (
     QSplitter, QStackedWidget, QListWidget, QListWidgetItem, QTextBrowser,
     QTableWidget, QTableWidgetItem, QTableView, QHeaderView, QCheckBox, QSpinBox, QTimeEdit,
     QSlider, QGroupBox, QScrollArea, QFileDialog, QMessageBox, QCompleter,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QSizeGrip, QMenu, QInputDialog, QSizePolicy, QWidgetAction,
 )
 
 from .map_widget import WorldMap, CATEGORY_COLORS
+from .hazards import HAZARD_LABELS
+from .hazard_icons import hazard_icon
 from .situation_actions import SituationActions
 from .theme import STYLE, SEVERITY
 
@@ -97,6 +99,41 @@ def label(text="", name=None, wrap=False):
     return w
 
 
+class BoundedStatusLabel(QLabel):
+    """Long source/coverage messages cannot enlarge a top-level window.
+
+    Keep the full accessible text and tooltip; elide just the painted line.
+    Native maximize/restore and user-driven window sizing are untouched.
+    """
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text):
+        value=str(text)
+        super().setText(value)
+        self.setToolTip(value)
+        self.setAccessibleDescription(value)
+
+    def minimumSizeHint(self):
+        return QSize(0,super().minimumSizeHint().height())
+
+    def sizeHint(self):
+        hint=super().sizeHint()
+        return QSize(min(320,hint.width()),hint.height())
+
+    def paintEvent(self,event):
+        painter=QPainter(self)
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(self.contentsRect(),Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignLeft,
+            self.fontMetrics().elidedText(self.text(),Qt.TextElideMode.ElideRight,
+                                          max(0,self.contentsRect().width())))
+        painter.end()
+
+
 def button(text, callback=None, tooltip=None, checkable=False):
     b = QPushButton(text)
     b.setCheckable(checkable)
@@ -138,10 +175,51 @@ class RadarLogo(QWidget):
         p.drawEllipse(QPointF(9, 21), 1.5, 1.5)
 
 
+class HazardLayerAction(QWidgetAction):
+    """Persistent, keyboard-accessible toggle with a visible checked row."""
+    def __init__(self, menu, text, icon=None):
+        super().__init__(menu)
+        self.setText(text)
+        self.setCheckable(True)
+        self._label=text
+        self.control=QToolButton(menu)
+        self.control.setCheckable(True)
+        self.control.setAccessibleName(text)
+        self.control.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.control.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.control.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+        if icon is not None:
+            self.setIcon(icon)
+            self.control.setIcon(icon)
+        self.control.setMinimumWidth(234)
+        self.control.setStyleSheet(
+            "QToolButton { text-align:left; padding:6px 10px; color:#b5bac7; "
+            "background:#191a20; border:1px solid transparent; border-radius:4px; }"
+            "QToolButton:checked:enabled { color:#f0eaff; background:#4b386b; "
+            "border-color:#8c73c0; font-weight:600; }"
+            "QToolButton:hover:enabled, QToolButton:focus:enabled { border-color:#b69bdd; }"
+            "QToolButton:disabled { color:#747784; background:#191a20; }"
+        )
+        self.setDefaultWidget(self.control)
+        self.control.toggled.connect(self.setChecked)
+        self.changed.connect(self.sync_control)
+        self.sync_control()
+
+    def sync_control(self):
+        blocked=self.control.blockSignals(True)
+        try:
+            self.control.setChecked(self.isChecked())
+            self.control.setEnabled(self.isEnabled())
+            self.control.setText(("✓  " if self.isChecked() and self.isEnabled() else "    ")+self._label)
+        finally:
+            self.control.blockSignals(blocked)
+
+
 class TitleBar(QFrame):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
+        self.native_chrome = bool(getattr(window,"_native_window_chrome",False))
         self.setObjectName("TitleBar")
         self.setFixedHeight(42)
         layout = QHBoxLayout(self)
@@ -163,17 +241,22 @@ class TitleBar(QFrame):
             b.clicked.connect(fn)
             layout.addWidget(b)
             if text == "□": self.maximize_button = b
+            # On Windows the real system caption owns maximize/restore,
+            # minimize, close, Snap and nonclient input. Retain our branding
+            # strip without a second set of competing window controls.
+            if self.native_chrome:b.hide()
 
     def toggle_maximized(self):
         self.window.showNormal() if self.window.isMaximized() else self.window.showMaximized()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.window.windowHandle():
+        if (not self.native_chrome and event.button() == Qt.MouseButton.LeftButton
+                and self.window.windowHandle()):
             self.window.windowHandle().startSystemMove()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if not self.native_chrome and event.button() == Qt.MouseButton.LeftButton:
             self.toggle_maximized()
 
 
@@ -389,7 +472,13 @@ class MainWindow(SituationActions, QMainWindow):
         # Delayed headline/collector repaint must not silently re-star a row.
         self._feed_explicitly_cleared=False
         self._events=[]
-        self._overview_events=[]  # Category candidates from existing feed/map reads.
+        self._overview_events=[]  # Priority candidates from existing feed/map reads.
+        self._daily_brief_snapshot=None
+        self._displayed_brief_key=None
+        self._displayed_brief_snapshot=None
+        self._deferred_brief_generated=None
+        self._deferred_brief_markdown=None
+        self._brief_request_epoch=0
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -405,6 +494,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._deferred_alert_rows=None
         self._deferred_alert_revision=None
         self._idle_snapshot_generation=0
+        self._filter_refresh_pending=False
+        self._filter_pending_widgets=()
         # Last source-consistent display, used only if an evidence signal is a
         # no-op for the underlying SQLite revision. Never a TTL or blind cache.
         self._idle_feed_cache=None
@@ -436,7 +527,12 @@ class MainWindow(SituationActions, QMainWindow):
         self._settings_data_changed=False
         self._force_close=False
         self.setWindowTitle("Global Pulse — Dietrich AI Labs")
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        # Use the supported Windows system frame. The old frameless
+        # WM_NCHITTEST/HTMAXBUTTON path could toggle on a nonclient release
+        # without a matching press, and mixed-DPI coordinates were ambiguous.
+        self._native_window_chrome=sys.platform=="win32"
+        self.setWindowFlags(Qt.WindowType.Window if self._native_window_chrome
+                            else Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setMinimumSize(960,640)
         self.resize(1440,940)
         self.setStyleSheet(STYLE)
@@ -458,6 +554,15 @@ class MainWindow(SituationActions, QMainWindow):
         self.search=QLineEdit();self.search.setPlaceholderText("Search events, sources, evidence…");self.search.setClearButtonEnabled(True);self.search.setAccessibleName("Search local event archive");self.search.setMinimumWidth(200)
         self.category=QComboBox();self.category.addItem("All categories","");self.category.setMinimumWidth(135);self.category.setAccessibleName("Category filter")
         self.region=QComboBox();self.region.addItem("All regions","");self.region.setMinimumWidth(125);self.region.setAccessibleName("Region filter")
+        # Publisher region/category names may be long; their contents must
+        # not resize a window or shift the custom native caption controls.
+        for combo in (self.category,self.region):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(9)
+            combo.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Fixed)
+            combo.setMaximumWidth(210)
+            combo.setToolTip(combo.currentText())
+            combo.currentIndexChanged.connect(lambda _index,c=combo:c.setToolTip(c.currentText()))
         self.time_range=QComboBox();self.time_range.addItems(["24 hours","7 days","30 days","All history"]);self.time_range.setCurrentIndex(1);self.time_range.setAccessibleName("Event time range")
         self.pause_button=button("Pause",self._toggle_monitoring,"Pause or resume monitoring")
         self.pause_button.setMinimumWidth(max(80,self.pause_button.fontMetrics().horizontalAdvance("Resume")+28))
@@ -470,12 +575,12 @@ class MainWindow(SituationActions, QMainWindow):
         self.media.auto_cameras_changed.connect(lambda value:self.controller.set_setting("auto_event_cameras",value))
         if hasattr(self.media, "configure_radio_preferences"):
             self.media.configure_radio_preferences(self.controller.get_setting, self.controller.set_setting)
-        self.status_label=label("Ready. Select an event to inspect its source trail.")
+        self.status_label=BoundedStatusLabel("Ready. Select an event to inspect its source trail.")
         self.statusBar().addWidget(self.status_label,1)
-        self.count_label=label("0 events")
-        self.statusBar().addPermanentWidget(self.count_label)
+        self.count_label=BoundedStatusLabel("0 events")
+        self.statusBar().addPermanentWidget(self.count_label,2)
         self.statusBar().setSizeGripEnabled(True)
-        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self.refresh_data)
+        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180);self.search_timer.timeout.connect(self._queue_filter_refresh)
         # Collector events may arrive in bursts while the user is switching
         # tabs. Start the first-due timer once (never restart on every signal).
         # No widgets or QTimer are touched from the collector's worker thread.
@@ -495,13 +600,21 @@ class MainWindow(SituationActions, QMainWindow):
         # slot could still seize the GUI between fast owner tab clicks.
         self._workspace_warm_timer.setInterval(750)
         self._workspace_warm_timer.timeout.connect(self._warm_next_workspace)
+        self._filter_refresh_timer=QTimer(self)
+        self._filter_refresh_timer.setSingleShot(True)
+        self._filter_refresh_timer.setInterval(75)
+        self._filter_refresh_timer.timeout.connect(self._start_filter_refresh)
         self.search.textChanged.connect(lambda:self.search_timer.start())
-        for combo in (self.category,self.region,self.time_range):combo.currentIndexChanged.connect(self.refresh_data)
+        for combo in (self.category,self.region,self.time_range):
+            combo.currentIndexChanged.connect(self._queue_filter_refresh)
+            combo.activated.connect(self._retry_pending_filter)
         # User/settings changes retain immediate presentation semantics.
         # The collector uses its separate evidence_changed signal; that path
         # is coalesced to prevent high-frequency map rebuilds between clicks.
         controller.data_changed.connect(self._on_user_data_changed)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
+        if hasattr(controller,"archive_reports_pruned"):
+            controller.archive_reports_pruned.connect(self._brief_reports_pruned)
         if hasattr(controller, "notification_changed"):
             controller.notification_changed.connect(self._notification_status_only)
         if hasattr(controller, "source_status_changed"):
@@ -533,6 +646,25 @@ class MainWindow(SituationActions, QMainWindow):
         self.density_check=QCheckBox("Density");self.density_check.toggled.connect(self._density_changed);self.map_panel.heading.addWidget(self.density_check)
         self.layer_button=button("Layers",self._toggle_layer_panel,"Show or hide persistent map layer controls",checkable=True)
         self.layer_button.setChecked(True);self.map_panel.heading.addWidget(self.layer_button)
+        self.hazard_button=QPushButton("Hazards")
+        self.hazard_button.setAccessibleName("Natural hazard map layers and marker legend")
+        self.hazard_button.setToolTip("Toggle hazard symbols and warning areas within the current map scope. Does not change source collection.")
+        self.hazard_menu=QMenu(self.hazard_button)
+        self.hazard_master=HazardLayerAction(self.hazard_menu,"Show natural hazard reports")
+        self.hazard_menu.addAction(self.hazard_master)
+        self.hazard_master.toggled.connect(self._toggle_hazards)
+        self.hazard_menu.addSeparator()
+        self.hazard_actions={}
+        for kind,text in HAZARD_LABELS.items():
+            action=HazardLayerAction(self.hazard_menu,text,hazard_icon(kind))
+            self.hazard_menu.addAction(action)
+            action.toggled.connect(lambda checked,k=kind:self._toggle_hazard_kind(k,checked))
+            self.hazard_actions[kind]=action
+        self.hazard_menu.addSeparator()
+        self.hazard_menu.addAction("Reset all hazard layers", self._reset_hazards)
+        self.hazard_menu.aboutToShow.connect(self._sync_hazard_controls)
+        self.hazard_button.setMenu(self.hazard_menu)
+        self.map_panel.heading.addWidget(self.hazard_button)
         self.map_panel.heading.addWidget(button("−",lambda:self.world_map.zoom_by(.8),"Zoom out"))
         self.map_panel.heading.addWidget(button("+",lambda:self.world_map.zoom_by(1.25),"Zoom in"))
         self.map_panel.heading.addWidget(button("World",self._reset_map,"Reset global map view and geographic filter"))
@@ -594,7 +726,7 @@ class MainWindow(SituationActions, QMainWindow):
         crisis_legend=QHBoxLayout();crisis_legend.setSpacing(8)
         for text,color in (("//// Conflict / war","#d84a52"),("//// Protest / unrest","#e3bd4d"),("==== Migration / displacement","#9a6748")):
             item=label(text);item.setStyleSheet(f"color:{color};font-size:9px;");crisis_legend.addWidget(item)
-        crisis_note=label("source-derived · toggle in Layers","Muted");crisis_note.setToolTip("Country hatching summarizes recent sourced events; it is not a legal declaration of war or crisis.");crisis_legend.addWidget(crisis_note)
+        crisis_note=label("source context · toggle in Layers","Muted");crisis_note.setToolTip("Current crisis stripes are independent of the news-category selector. They summarize recent source evidence within the selected region, search and time scope, using a separate bounded review (up to 5,000 topical candidates). They are not legal declarations of war or crisis; incomplete coverage remains possible. Historical playback never borrows current context.");crisis_legend.addWidget(crisis_note)
         crisis_legend.addStretch();self.map_panel.layout.addLayout(crisis_legend)
         history=row(label("HISTORY","Eyebrow"))
         self.history_slider=QSlider(Qt.Orientation.Horizontal);self.history_slider.setRange(0,1000);self.history_slider.setValue(1000);self.history_slider.setAccessibleName("Historical event playback position")
@@ -612,7 +744,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.english_headlines.toggled.connect(lambda value:self.controller.set_setting("english_headlines",value))
         feed.heading.addWidget(self.english_headlines)
         self.sort_combo=QComboBox();self.sort_combo.addItems(["Latest first","Highest importance","Most reports"]);self.sort_combo.currentIndexChanged.connect(self._populate_feed);feed.heading.addWidget(self.sort_combo)
-        self.feed_list=QListWidget();self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
+        self.feed_list=QListWidget();self.feed_list.setUniformItemSizes(True);self.feed_list.setObjectName("event_feed");self.feed_list.setAccessibleName("News and events");self.feed_list.setItemDelegate(EventDelegate(self.feed_list));self.feed_list.currentItemChanged.connect(self._feed_selected)
         # Clicking even an already-selected item is an explicit request for
         # its evidence view; initial auto-selection does NOT hide World Overview.
         self.feed_list.itemClicked.connect(
@@ -723,7 +855,39 @@ class MainWindow(SituationActions, QMainWindow):
         self.overview_browser.setSizePolicy(
             QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Expanding
         )
-        self.intelligence_pages.addWidget(self.overview_browser)
+        overview_panel=QWidget()
+        overview_layout=QVBoxLayout(overview_panel)
+        overview_layout.setContentsMargins(0,0,0,0)
+        overview_layout.setSpacing(3)
+        self.overview_navigation=QWidget()
+        navigation=QHBoxLayout(self.overview_navigation)
+        navigation.setContentsMargins(0,0,0,0)
+        navigation.setSpacing(3)
+        self.overview_previous=button("‹",lambda:self._show_overview_page(self._overview_page_index-1),"Previous critical-alert page")
+        self.overview_next=button("›",lambda:self._show_overview_page(self._overview_page_index+1),"Next critical-alert page")
+        self.overview_page_number=QSpinBox()
+        self.overview_page_number.setAccessibleName("Intelligence overview page number")
+        self.overview_page_number.setKeyboardTracking(False)
+        self.overview_page_number.setRange(1,1)
+        self.overview_page_number.valueChanged.connect(lambda value:self._show_overview_page(value-1))
+        self.overview_page_status=BoundedStatusLabel("")
+        self.overview_page_status.setAccessibleName("Intelligence overview page and critical-alert count")
+        self.overview_assessments=button("Assessments",lambda:self._show_overview_page(len(self._overview_pages)-1),"Jump to further prioritized assessments")
+        for control in (self.overview_previous,self.overview_next):
+            control.setFixedWidth(26)
+        navigation.addWidget(self.overview_previous)
+        navigation.addWidget(self.overview_page_number)
+        navigation.addWidget(self.overview_next)
+        navigation.addWidget(self.overview_page_status,1)
+        navigation.addWidget(self.overview_assessments)
+        self.overview_navigation.hide()
+        overview_layout.addWidget(self.overview_navigation)
+        overview_layout.addWidget(self.overview_browser,1)
+        self._overview_pages=()
+        self._overview_page_index=0
+        self._overview_visible_html=""
+        self._overview_display_scope=None
+        self.intelligence_pages.addWidget(overview_panel)
         self.intelligence_pages.addWidget(self.intel_scroll)
         self.intelligence_mode.currentIndexChanged.connect(
             self.intelligence_pages.setCurrentIndex
@@ -803,9 +967,19 @@ class MainWindow(SituationActions, QMainWindow):
     def _build_briefs(self):
         panel=Panel("INTELLIGENCE BRIEFS & EXPORTS")
         controls=QHBoxLayout();self.brief_period=QComboBox();self.brief_period.addItems(["Daily","Weekly"]);controls.addWidget(self.brief_period)
-        controls.addWidget(button("Generate brief",self._generate_brief));controls.addStretch();controls.addWidget(button("Export brief…",self._export_brief));controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
+        controls.addWidget(button("Generate brief",self._request_brief));controls.addStretch()
+        self.brief_export_button=button("Export brief…",self._export_brief)
+        self.brief_export_button.setEnabled(False)
+        controls.addWidget(self.brief_export_button);controls.addWidget(button("Export event archive…",self._export_events));panel.layout.addLayout(controls)
         self.brief_browser=QTextBrowser();self.brief_browser.setOpenExternalLinks(False);self.brief_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));panel.layout.addWidget(self.brief_browser,1)
-        panel.layout.addWidget(label("Briefs are grounded in locally retained source records. They cannot fill gaps in source coverage or monitoring downtime.","Muted",True));self.pages.addWidget(panel)
+        self.brief_state_label=label("Opening intelligence brief pending","Muted",True)
+        panel.layout.addWidget(self.brief_state_label)
+        panel.layout.addWidget(label("Daily is the dated opening snapshot; Generate brief, a new UTC day, or a change/removal of its included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
+        self.brief_period.currentIndexChanged.connect(self._brief_period_changed)
+        self._brief_clock_timer=QTimer(self)
+        self._brief_clock_timer.setInterval(30000)
+        self._brief_clock_timer.timeout.connect(self._brief_clock_tick)
+        self._brief_clock_timer.start()
 
     def _build_settings(self):
         scroll=QScrollArea();scroll.setWidgetResizable(True);body=QWidget();layout=QVBoxLayout(body);layout.setContentsMargins(20,15,20,20);layout.setSpacing(15)
@@ -870,11 +1044,12 @@ class MainWindow(SituationActions, QMainWindow):
         This runs once while the dashboard is hidden, no live media starts,
         and future report or settings changes still mark workspaces dirty.
         """
-        current=self.pages.currentIndex()
+        # Populate without changing the active stack. This is data warmup,
+        # not simulated user navigation.
         for index in (1,2,3,4,5):
             if index in self._dirty_pages:
-                self.open_page(index)
-        self.open_page(current)
+                if self._populate_workspace(index) is not False:
+                    self._dirty_pages.discard(index)
         success=not (self._dirty_pages & {1,2,3,4,5})
         if success:
             self._background_warm_enabled=True
@@ -884,19 +1059,27 @@ class MainWindow(SituationActions, QMainWindow):
         """Render the first real-sized Map/Economy frames before releasing splash.
 
         Data prewarming does not itself trigger Qt paintEvent for hidden tabs.
-        Expose the disabled window under the on-top splash just long enough
-        for Qt to settle its actual DPI/layout, draw the heavyweight first
-        frames, and verify their cache keys. Never open video or network here.
+        Materialize the real-sized Qt layout with an off-screen top-level
+        window, draw the heavyweight first frames, and verify their keys.
+        The splash remains the only exposed window during traversal. Never
+        open video or network here.
         """
         if not self._background_warm_enabled or self._dirty_pages.intersection(range(1, 6)):
             return False
         previous_page = self.pages.currentIndex()
         was_enabled = self.isEnabled()
         self._initial_painted_pages = set()
+        was_visible=self.isVisible()
+        was_offscreen=self.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+        was_opacity=self.windowOpacity()
+        ready=False
         self.setEnabled(False)
+        if was_visible:self.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
+        self.setWindowOpacity(0.0)
         try:
-            # A hidden widget's geometry is not the real Windows viewport.
-            # Rendering at its default size would get invalidated on show().
+            # Show only to Qt's layout/paint system, not the desktop. All
+            # stacked page traversal must finish before the native reveal.
             self.show()
             splash.raise_()
             app.processEvents()
@@ -942,17 +1125,26 @@ class MainWindow(SituationActions, QMainWindow):
             expected_chart_key = (
                 chart.width(), chart.height(), chart.devicePixelRatioF(),
             )
-            return (
+            ready = (
                 world._projected_view_key == expected_map_key
                 and len(world._projected_paths) == len(world._countries)
                 and chart._chart_pixmap is not None
                 and chart._chart_cache_key == expected_chart_key
                 and self._initial_painted_pages == set(range(7))
             )
+            return ready
         finally:
             if self.pages.currentIndex() != previous_page:
                 self.open_page(previous_page)
+            self.hide()
+            self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,was_offscreen)
+            self.setWindowOpacity(was_opacity)
             self.setEnabled(was_enabled)
+            if ready or was_visible:
+                # The initial page is restored before the one real reveal.
+                # No hidden workspace traversal follows this show().
+                self.show()
+                splash.raise_()
             # This disabled-window traversal is splash-owned geometry/first
             # paint work, NOT a user tab click. Retaining its navigation stamp
             # artificially delayed the first real no-click collector update
@@ -977,7 +1169,7 @@ class MainWindow(SituationActions, QMainWindow):
         # hidden table reads can starve current source delivery well beyond
         # the navigation cooldown, even when the visible Qt heartbeat ticks.
         # Keep all pages dirty; never claim they were rendered or refreshed.
-        if self._idle_snapshot_inflight:
+        if self._idle_snapshot_inflight or self._filter_refresh_timer.isActive():
             self._workspace_warm_timer.start(250)
             return
         # Never let a hidden-table rebuild interrupt an active sequence of
@@ -1047,7 +1239,7 @@ class MainWindow(SituationActions, QMainWindow):
         elif index==2:self._populate_economy()
         elif index==3:self._populate_sources()
         elif index==4:self._populate_alerts()
-        elif index==5:self._generate_brief()
+        elif index==5:return self._generate_brief(preserve_daily=True)
 
     def open_page(self,index):
         previous=self.pages.currentIndex()
@@ -1107,6 +1299,57 @@ class MainWindow(SituationActions, QMainWindow):
                 self.region.currentData() or "", self.time_range.currentIndex(),
                 self.history_slider.value())
 
+    def _queue_filter_refresh(self, *_args):
+        """Coalesce interactive latest-view filters; preserve old scope until commit."""
+        if self._force_close or getattr(self.controller,"_closed",False):
+            return
+        # Keep the original exact cold-start and historical-replay path.
+        if not self._background_warm_enabled or self.history_slider.value()!=1000:
+            self.refresh_data()
+            return
+        self.search_timer.stop()
+        self._last_navigation_at=time.monotonic()
+        self._idle_snapshot_generation+=1
+        if not self._filter_refresh_pending:
+            # Old results remain visible, explicitly marked and noninteractive.
+            # Never disable the media panel or the filter controls themselves.
+            widgets=(self.world_map,self.lower_split.widget(0),
+                     self.lower_split.widget(2))
+            self._filter_pending_widgets=tuple((widget,widget.isEnabled())
+                                               for widget in widgets)
+            for widget,_enabled in self._filter_pending_widgets:
+                widget.setEnabled(False)
+        self._filter_refresh_pending=True
+        self.count_label.setText("Updating filters · previous results shown")
+        self.status_label.setText("Preparing the selected archive view…")
+        self._filter_refresh_timer.start(75)
+
+    @Slot()
+    def _start_filter_refresh(self):
+        if (not self._filter_refresh_pending or self._force_close
+                or getattr(self.controller,"_closed",False)):
+            return
+        if self._idle_snapshot_inflight or self._refreshing:
+            self._filter_refresh_timer.start(100)
+            return
+        self._filter_refresh_timer.stop()
+        self._start_idle_snapshot()
+
+    def _retry_pending_filter(self, *_args):
+        if (self._filter_refresh_pending and not self._idle_snapshot_inflight
+                and not self._filter_refresh_timer.isActive()):
+            self._filter_refresh_timer.start(75)
+
+    def _finish_filter_refresh(self):
+        if not self._filter_refresh_pending:
+            return
+        self._filter_refresh_timer.stop()
+        self._filter_refresh_pending=False
+        for widget,enabled in self._filter_pending_widgets:
+            widget.setEnabled(enabled)
+        self._filter_pending_widgets=()
+        self.status_label.setText("Filters updated.")
+
     def events_filters(self):
         self._history_at=None
         filters={"query":self.search.text().strip(),"category":self.category.currentData() or "","region":self.region.currentData() or "","limit":500}
@@ -1159,6 +1402,9 @@ class MainWindow(SituationActions, QMainWindow):
         clicks on SQLite queries, map reconciliation, or chart updates.
         """
         if self._force_close or getattr(self.controller, "_closed", False):
+            return
+        if self._filter_refresh_pending:
+            self._retry_pending_filter()
             return
         idle_for=time.monotonic()-self._last_navigation_at
         # A collector revision can be READ on its isolated, revision-checked
@@ -1278,6 +1524,13 @@ class MainWindow(SituationActions, QMainWindow):
             kept.append(projected)
         return kept
 
+    def _set_headline_read_pause(self, reason, paused):
+        # The GUI owns this lifecycle. No polling, no preference read and no
+        # Qt objects are passed to the archive worker.
+        setter=getattr(self.controller,"set_headline_deferred_pause",None)
+        if setter is not None and not self._force_close:
+            setter(reason,paused)
+
     def _start_idle_snapshot(self):
         """Read a bounded collector revision off the main thread, never paint there.
 
@@ -1296,6 +1549,7 @@ class MainWindow(SituationActions, QMainWindow):
         historical_at=self._history_at
         scope=self._archive_scope_key()
         generation=self._idle_snapshot_generation
+        explicit_filter=self._filter_refresh_pending
         # Selection is part of the immutable collector snapshot: a queued
         # no-click refresh may not overwrite a newer user choice.
         selected_id=str(self._selected_id or "")
@@ -1310,6 +1564,7 @@ class MainWindow(SituationActions, QMainWindow):
         # The worker may process plain source dictionaries, never Qt widgets.
         map_categories=(None if self.world_map.categories is None
                         else tuple(self.world_map.categories))
+        disabled_hazards=self.world_map.disabled_hazards()
         # Plain immutable country names/ISO codes only; no Qt painter or
         # QWidget crosses the worker boundary.
         map_country_rows=tuple({"name":str(c["name"]),
@@ -1318,9 +1573,17 @@ class MainWindow(SituationActions, QMainWindow):
         # The daily/weekly intelligence brief is another expensive hidden
         # workspace prewarm. Capture its period/cutoff before entering the
         # Store worker; only immutable source dictionaries cross the thread.
+        self._expire_daily_brief()
         brief_period=self.brief_period.currentText().lower()
-        brief_since=(datetime.now(timezone.utc)-timedelta(
+        brief_generated=datetime.now(timezone.utc)
+        brief_since=(brief_generated-timedelta(
             days=1 if brief_period=="daily" else 7)).isoformat()
+        brief_epoch=self._brief_request_epoch
+        daily_snapshot=self._daily_brief_snapshot
+        displayed_snapshot=self._displayed_brief_snapshot
+        manifests=tuple((item["key"],item["manifest"])
+                        for item in (daily_snapshot,displayed_snapshot)
+                        if item is not None and "manifest" in item)
         # Capture the exact UI filter label before the worker starts. This is
         # plain text; the worker must never access Qt widgets.
         overview_label=(self.time_range.currentText().lower() +
@@ -1334,7 +1597,8 @@ class MainWindow(SituationActions, QMainWindow):
         feed_sort_index=self.sort_combo.currentIndex()
         controller=self.controller
         signal=self._idle_snapshot_ready
-        brief_pending=not self._idle_brief_inflight
+        brief_pending=(not self._idle_brief_inflight
+                       and not self._has_current_daily_brief(brief_period))
         if brief_pending:
             self._idle_brief_inflight=True
         self._idle_snapshot_inflight=True
@@ -1345,10 +1609,15 @@ class MainWindow(SituationActions, QMainWindow):
                     "explicit_selection_id":explicit_selection_id,
                     "history_at":historical_at,"show_observations":show_observations,
                     "brief_pending":brief_pending,"brief_period":brief_period,
-                    "brief_since":brief_since,"feed_sort_index":feed_sort_index}
+                    "brief_since":brief_since,"brief_generated":brief_generated,
+                    "brief_epoch":brief_epoch,"feed_sort_index":feed_sort_index,
+                    "explicit_filter":explicit_filter}
             try:
                 store=controller.store
                 before=store.content_revision()
+                result["brief_manifest_results"]={
+                    key:store.brief_manifest_matches(manifest)
+                    for key,manifest in manifests}
                 # Archive selector metadata is two DISTINCT SQLite scans. The
                 # idle collector path must not run either one on the Qt thread
                 # after splash; include them in the same revision-checked worker.
@@ -1374,18 +1643,20 @@ class MainWindow(SituationActions, QMainWindow):
                         unchanged_country_cache,before,scope,map_filters))
                 result["country_evidence"]=(
                     reuse_country if reuse_country is not None else
-                    controller.events(**dict(map_filters,map_evidence=True)))
+                    controller.events(**dict(map_filters,map_evidence=True,
+                                             _cooperative_map=True)))
                 result["unchanged_revision_country"]=reuse_country is not None
                 # Overview selection ranked up to 5,000 map records and
                 # formatted rich HTML on Qt for EVERY collector revision,
                 # including before the first owner click. Use immutable
                 # source evidence on this same revision-checked worker.
-                from .brief_selection import overview_evidence_candidates, overview_html
+                from .brief_selection import overview_evidence_candidates, overview_documents
                 result["overview_events"]=overview_evidence_candidates(
                     result["feed"],result["country_evidence"])
-                result["overview_html"]=overview_html(
+                result["overview_documents"]=overview_documents(
                     result["overview_events"],label=overview_label)
-                result["map_events"]=controller.events(**map_filters)
+                result["overview_html"]=result["overview_documents"]["full"]
+                result["map_events"]=controller.events(**dict(map_filters,_cooperative_map=True))
                 result["observations"]=(store.list_observations()
                                         if show_observations else [])
                 # The Economy tab is independent of Monitor's search, country
@@ -1425,41 +1696,68 @@ class MainWindow(SituationActions, QMainWindow):
                 # used to run on the GUI thread immediately after the Store
                 # worker returned. Compute it on the same bounded worker;
                 # pass back the exact source object identities for validation.
-                from .crisis_overlay import build_country_activity
-                from .map_widget import _map_category, prepare_country_evidence
+                from .crisis_overlay import build_country_activity, load_crisis_context
+                from .map_widget import (_map_category, prepare_country_evidence,
+                                         prepare_country_source_facts, prepare_point_source_index)
+                from .map_area_layer import prepare_warning_areas
                 category_key=(None if map_categories is None else
                               frozenset(_map_category(c) for c in map_categories))
                 evidence=result["country_evidence"][:5000]
                 selected=[record for record in evidence
                           if category_key is None or
                           _map_category(record.get("category")) in category_key]
+                classification_now=datetime.now(timezone.utc)
+                crisis_events=load_crisis_context(
+                    store,map_filters,evidence,now=classification_now,cooperative=True)
+                result["crisis_events"]=crisis_events
                 credits=set()
                 classified=build_country_activity(
-                    selected, now=datetime.now(timezone.utc),
-                    single_record_credits=credits)
+                    selected if crisis_events is None else crisis_events,
+                    now=classification_now,single_record_credits=credits)
+                observations=result["observations"][:10000]
+                facts=prepare_country_source_facts(evidence,observations,map_country_rows)
                 result["map_classification"]={
+                    "source_facts":facts,
+                    "warning_areas":prepare_warning_areas(evidence),
+                    "point_source_index":prepare_point_source_index(result["map_events"][:5000],facts),
                     "category_key":category_key,
+                    "disabled_hazards":disabled_hazards,
                     "record_ids":tuple(id(record) for record in evidence),
+                    "crisis_record_ids":(None if crisis_events is None else
+                                         tuple(id(record) for record in crisis_events)),
                     "activity":classified, "credits":credits,
                     "country_rows":map_country_rows,
                     "observation_ids":tuple(id(item) for item in result["observations"][:10000]
                                             if isinstance(item,dict)),
                     "evidence_index":prepare_country_evidence(
                         selected,result["observations"][:10000],map_country_rows,
-                        credits,category_key),
+                        credits,category_key,disabled_hazards=disabled_hazards,
+                        source_facts=facts),
                 }
                 after=store.content_revision()
                 result["revision_before"]=before
                 result["revision_after"]=after
             except Exception as error:
-                result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
+                from .core import MapSnapshotChanged
+                if isinstance(error,MapSnapshotChanged):
+                    result["retry_snapshot"]=True
+                else:
+                    result["error"]=f"{type(error).__name__}: {str(error)[:160]}"
             try:
                 signal.emit(result)
             except RuntimeError:
                 # The native window may have been destroyed during shutdown.
                 pass
-        threading.Thread(target=collect, name="pulse-idle-evidence",
-                         daemon=True).start()
+        self._set_headline_read_pause("evidence",True)
+        try:
+            threading.Thread(target=collect, name="pulse-idle-evidence",
+                             daemon=True).start()
+        except Exception:
+            self._idle_snapshot_inflight=False
+            if brief_pending:
+                self._idle_brief_inflight=False
+            self._set_headline_read_pause("evidence",False)
+            raise
 
     def _begin_idle_brief_read(self, snapshot):
         """Read source-balanced brief only AFTER the critical Qt refresh completes.
@@ -1477,12 +1775,19 @@ class MainWindow(SituationActions, QMainWindow):
         generation=snapshot["generation"]
         period=snapshot["brief_period"]
         since=snapshot["brief_since"]
+        generated=snapshot.get("brief_generated") or datetime.now(timezone.utc)
+        epoch=snapshot.get("brief_epoch",self._brief_request_epoch)
 
         def collect_brief():
-            brief={"generation":generation,"period":period}
+            brief={"generation":generation,"period":period,
+                   "generated":generated,"epoch":epoch}
             try:
                 before=controller.store.content_revision()
                 brief["events"]=controller.brief_events(since=since,period=period)
+                # Pure text preparation is safe off Qt; only final document
+                # materialization/presentation remains GUI-owned.
+                from .core import build_brief
+                brief["markdown"]=build_brief(brief["events"],period,generated_at=generated)
                 after=controller.store.content_revision()
                 brief["revision_before"]=before
                 brief["revision_after"]=after
@@ -1493,31 +1798,57 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 pass
 
-        threading.Thread(target=collect_brief,name="pulse-idle-brief",
-                         daemon=True).start()
+        self._set_headline_read_pause("brief",True)
+        try:
+            threading.Thread(target=collect_brief,name="pulse-idle-brief",
+                             daemon=True).start()
+        except Exception:
+            self._idle_brief_inflight=False
+            self._set_headline_read_pause("brief",False)
+            raise
 
     @Slot(object)
     def _apply_idle_snapshot(self, snapshot):
+        try:
+            self._apply_idle_snapshot_result(snapshot)
+        finally:
+            # A retry of the SAME result retains single-flight ownership.
+            # Error, stale generation and successful commit release the pause.
+            if not self._idle_snapshot_inflight:
+                self._set_headline_read_pause("evidence",False)
+
+    def _apply_idle_snapshot_result(self, snapshot):
         """Apply only a current, source-consistent worker result on Qt thread."""
         self._idle_snapshot_inflight=False
         if self._force_close or getattr(self.controller,"_closed",False):
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
             return
-        if "error" in snapshot:
-            if snapshot.get("brief_pending"):
-                self._idle_brief_inflight=False
-            self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
-            return
         if (snapshot["generation"]!=self._idle_snapshot_generation
                 or snapshot["scope"]!=self._archive_scope_key()
                 or snapshot.get("selected_id",str(self._selected_id or ""))!=str(self._selected_id or "")
                 or snapshot.get("archive_pin_id",str(self._archive_selection_id or ""))!=str(self._archive_selection_id or "")
                 or snapshot.get("explicit_selection_id",str(self._explicit_feed_selection_id or ""))!=str(self._explicit_feed_selection_id or "")):
-            # User actions have their own immediate refresh; stale worker
-            # completion must never roll back a newer filter or selection.
+            # Discard stale worker results; a newer filter must still be read.
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
+            self._retry_pending_filter()
+            return
+        if snapshot.get("retry_snapshot"):
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
+            if self._filter_refresh_pending:self._retry_pending_filter()
+            else:self._schedule_evidence_refresh()
+            return
+        if "error" in snapshot:
+            if snapshot.get("brief_pending"):
+                self._idle_brief_inflight=False
+            if self._filter_refresh_pending:
+                self._filter_refresh_timer.stop()
+                self.count_label.setText("Filter failed · previous results shown")
+                self.status_label.setText("Filter read failed; select again to retry.")
+            else:
+                self.status_label.setText("Idle evidence refresh failed: "+snapshot["error"])
             return
         # A precomputed source revision may arrive while the owner is still
         # clicking through warmed pages. Hold the SAME immutable worker result
@@ -1525,7 +1856,7 @@ class MainWindow(SituationActions, QMainWindow):
         # navigation. The later callback checks generation, selection and
         # exact Store revision again; a correction or new report cannot be
         # silently accepted as stale. Do not launch another reader here.
-        if self._background_warm_enabled:
+        if self._background_warm_enabled and not snapshot.get("explicit_filter"):
             idle_for=time.monotonic()-self._last_navigation_at
             if idle_for < 1.8:
                 self._idle_snapshot_inflight=True
@@ -1551,7 +1882,10 @@ class MainWindow(SituationActions, QMainWindow):
             # present a mixed evidence revision or fabricate a status update.
             if snapshot.get("brief_pending"):
                 self._idle_brief_inflight=False
-            self._schedule_evidence_refresh()
+            if self._filter_refresh_pending:
+                self._retry_pending_filter()
+            else:
+                self._schedule_evidence_refresh()
             return
         self.refresh_data(_idle_snapshot=snapshot)
         if snapshot.get("brief_pending"):
@@ -1561,6 +1895,13 @@ class MainWindow(SituationActions, QMainWindow):
 
     @Slot(object)
     def _apply_idle_brief(self, brief):
+        try:
+            self._apply_idle_brief_result(brief)
+        finally:
+            if not self._idle_brief_inflight:
+                self._set_headline_read_pause("brief",False)
+
+    def _apply_idle_brief_result(self, brief):
         """Validate an idle Brief result without waiting for worker-owned SQLite.
 
         A completed Brief read may arrive while the next collector holds the
@@ -1575,7 +1916,10 @@ class MainWindow(SituationActions, QMainWindow):
             self._idle_brief_inflight=False
             self.status_label.setText("Idle brief update failed: "+brief["error"])
         elif (brief["generation"]==self._idle_snapshot_generation
+              and brief.get("epoch",self._brief_request_epoch)==self._brief_request_epoch
               and brief["period"]==self.brief_period.currentText().lower()
+              and (brief["period"]!="daily" or brief.get("generated",datetime.now(timezone.utc)).date()
+                   ==datetime.now(timezone.utc).date())
               and brief["revision_before"]==brief["revision_after"]):
             revision=self.controller.store.content_revision_if_available()
             if revision is None:
@@ -1590,6 +1934,8 @@ class MainWindow(SituationActions, QMainWindow):
                 self._deferred_brief_events=brief["events"]
                 self._deferred_brief_period=brief["period"]
                 self._deferred_brief_revision=brief["revision_after"]
+                self._deferred_brief_generated=brief.get("generated")
+                self._deferred_brief_markdown=brief.get("markdown")
         else:
             self._idle_brief_inflight=False
         # A stale result is never displayed. Its current-Store fallback is
@@ -1746,8 +2092,14 @@ class MainWindow(SituationActions, QMainWindow):
             _idle_snapshot["revision_before"] if _idle_snapshot is not None
             else self.controller.store.content_revision())
         try:
+            # Check only source revisions included in the frozen document.
+            # Unrelated ingestion must not silently replace an opening brief.
+            self._validate_brief_snapshots(
+                None if _idle_snapshot is None else _idle_snapshot.get("brief_manifest_results",{}))
             # Apply a source-revision-consistent brief snapshot in a later
             # hidden workspace warm. A manual refresh never reuses old briefs.
+            self._deferred_brief_generated=None
+            self._deferred_brief_markdown=None
             self._deferred_brief_events=None
             self._deferred_brief_period=None
             self._deferred_brief_revision=None
@@ -1762,6 +2114,9 @@ class MainWindow(SituationActions, QMainWindow):
             self._dirty_pages.update(
                 range(1,6) if _idle_snapshot is None else (1,2,4,5)
             )
+            if (self._has_current_daily_brief(self.brief_period.currentText().lower())
+                    and self._displayed_brief_key==self._daily_brief_snapshot["key"]):
+                self._dirty_pages.discard(5)
             if _idle_snapshot is None:
                 filters=self.events_filters()
                 self._events=self.controller.events(**filters)
@@ -1826,6 +2181,7 @@ class MainWindow(SituationActions, QMainWindow):
                               if _idle_snapshot is None
                               else _idle_snapshot["country_evidence"])
             overview_precomputed=None
+            overview_documents_precomputed=None
             # The selected archive pin may have been prepended to the feed on
             # Qt since the worker snapshot; in that case recompute from the
             # modified visible feed so the older selected source stays linked.
@@ -1839,6 +2195,7 @@ class MainWindow(SituationActions, QMainWindow):
             if feed_unchanged_for_worker:
                 self._overview_events=_idle_snapshot["overview_events"]
                 overview_precomputed=_idle_snapshot["overview_html"]
+                overview_documents_precomputed=_idle_snapshot.get("overview_documents")
             else:
                 from .brief_selection import overview_evidence_candidates
                 self._overview_events=overview_evidence_candidates(
@@ -1871,12 +2228,19 @@ class MainWindow(SituationActions, QMainWindow):
                                              if valid_economy_revision else None)
             point_events=(self.controller.events(**map_filters)
                           if _idle_snapshot is None else _idle_snapshot["map_events"])
+            if _idle_snapshot is None:
+                from .crisis_overlay import load_crisis_context
+                crisis_events=load_crisis_context(self.controller.store,map_filters,
+                    country_evidence,now=datetime.now(timezone.utc))
+            else:
+                crisis_events=_idle_snapshot.get("crisis_events")
             self.world_map.set_events(
                 point_events,
                 country_events=country_evidence,
                 observations=observations,
                 preclassified_country=(_idle_snapshot.get("map_classification")
                                        if _idle_snapshot is not None else None),
+                crisis_events=crisis_events,
             )
             if self.gdelt_panel is not None:
                 if _idle_snapshot is not None:
@@ -1898,7 +2262,8 @@ class MainWindow(SituationActions, QMainWindow):
                         self.sort_combo.currentIndex()==_idle_snapshot["feed_sort_index"])
                     else None),
             )
-            self._update_world_overview(precomputed_html=overview_precomputed)
+            self._update_world_overview(precomputed_html=overview_precomputed,
+                                        documents=overview_documents_precomputed)
             self.last_label.setText("Last collection  "+timestamp(getattr(self.controller,"last_collection","")))
             self._status_update("")
             count=len(self._events);self.feed_count.setText(str(count))
@@ -1907,8 +2272,16 @@ class MainWindow(SituationActions, QMainWindow):
             cap=" · map limit 5,000; narrow filters" if len(self.world_map.events)>=5000 else ""
             self.count_label.setText(f"{count} feed events · "+self.world_map.coverage_summary()+suffix+cap)
             if self._selected_id:
-                selected=(self._selected_event() if _idle_snapshot is None
-                          else _idle_snapshot["selected_event"])
+                if _idle_snapshot is None:
+                    selected=self._selected_event()
+                else:
+                    # The old selection may not belong to the new filter.
+                    # Use the exact worker feed row chosen by _populate_feed;
+                    # never pair the new row with the old selected-event data.
+                    selected=_idle_snapshot["selected_event"]
+                    if not selected or str(selected.get("id",""))!=self._selected_id:
+                        selected=next((e for e in self._events
+                                       if str(e.get("id",""))==self._selected_id),None)
             else:
                 selected=None
             if _idle_snapshot is not None:
@@ -1940,7 +2313,7 @@ class MainWindow(SituationActions, QMainWindow):
                 if _idle_snapshot is None:self._populate_alerts()
                 elif not self._populate_alerts(idle=True):keep_alert_dirty=True
             elif page==5 and _idle_snapshot is None:
-                self._generate_brief()
+                self._generate_brief(preserve_daily=True)
             # A fresh collector snapshot must not synchronously query the
             # Brief Store on Qt. Its separately validated worker result will
             # trigger the next hidden/visible workspace prewarm.
@@ -1978,9 +2351,12 @@ class MainWindow(SituationActions, QMainWindow):
             else:
                 self._idle_country_cache=None
             self._last_full_refresh_at=time.monotonic()
+            self._finish_filter_refresh()
         except Exception as exc:
             self._idle_feed_cache=None
             self._idle_country_cache=None
+            if self._filter_refresh_pending:
+                self.count_label.setText("Filter failed · results not confirmed")
             self.status_label.setText(f"Could not update view: {type(exc).__name__}: {str(exc)[:160]}")
         finally:
             self._refreshing=False
@@ -2013,6 +2389,7 @@ class MainWindow(SituationActions, QMainWindow):
                     combo.clear();combo.addItem(all_title,"")
                     for value in values:combo.addItem(value,value)
                     combo.setCurrentIndex(combo.findData(current))
+                    combo.setToolTip(combo.currentText())
                 finally:
                     combo.blockSignals(blocked)
 
@@ -2136,11 +2513,13 @@ class MainWindow(SituationActions, QMainWindow):
         # validated collector snapshot. Looking up the preference once PER
         # row would reacquire collector-owned SQLite hundreds of times.
         english_enabled=self.english_headlines.isChecked()
+        role=Qt.ItemDataRole.UserRole
+        selected_row=None
         for index in range(self.feed_list.count()):
             item=self.feed_list.item(index)
             if item is None:
                 continue
-            event=item.data(Qt.ItemDataRole.UserRole)
+            event=item.data(role)
             if not isinstance(event,dict):
                 continue
             view=(self.controller.headline_view(event,defer_language=True,
@@ -2153,27 +2532,23 @@ class MainWindow(SituationActions, QMainWindow):
             if title != item.text():
                 item.setText(title)
             if event.get("_display_title") != title or event.get("_translation_label") != view["label"]:
-                item.setData(Qt.ItemDataRole.UserRole,dict(
-                    event,_display_title=title,_translation_label=view["label"]
-                ))
+                event=dict(event,_display_title=title,_translation_label=view["label"])
+                item.setData(role,event)
                 item.setToolTip(
                     "<div style='white-space:pre-wrap'>" +
                     esc(view["label"]+"\nOriginal: "+view["original"]+
                         "\n"+str(event.get("recap",""))) + "</div>"
                 )
+            if selected_row is None and str(event.get("id",""))==self._selected_id:
+                selected_row=event
         if self._selected_id:
             # The selected visible feed row already holds the source evidence
             # and Star state displayed by the last revision-checked update.
             # No-click language callbacks must not re-open the Store for
             # selected event lookup OR its star button. Explicit navigation
             # and historical playback retain their canonical Store paths.
-            role=Qt.ItemDataRole.UserRole
-            selected_row=next((
-                self.feed_list.item(i).data(role)
-                for i in range(self.feed_list.count())
-                if str((self.feed_list.item(i).data(role) or {}).get("id",""))
-                   ==self._selected_id
-            ),None)
+            # Retain the selected row from the same pass; repeated QVariant
+            # conversions can copy hundreds of full source dictionaries.
             use_row=(not self._history_at and isinstance(selected_row,dict)
                      and "_situation_starred" in selected_row)
             event=selected_row if use_row else self._selected_event()
@@ -2186,23 +2561,68 @@ class MainWindow(SituationActions, QMainWindow):
                                       if use_row else None))
                 self.intel_browser.verticalScrollBar().setValue(brief_scroll)
 
-    def _update_world_overview(self, *, precomputed_html=None):
-        """Only the explicit/modified-feed path formats overview HTML on Qt."""
-        if precomputed_html is None:
-            from .brief_selection import overview_html
-            scope=(self.time_range.currentText().lower() +
-                   (", filtered" if self.category.currentData() or
-                    self.region.currentData() or self.search.text().strip()
-                    else ", all categories"))
-            updated=overview_html(
-                self._overview_events,label=scope+" local feed and retained map evidence")
-        else:
-            updated=precomputed_html
-        if updated != self._overview_html_cached:
-            position=self.overview_browser.verticalScrollBar().value()
-            self.overview_browser.setHtml(updated)
+    def _show_overview_page(self,index,*,preserve_scroll=False):
+        if not self._overview_pages:return
+        index=max(0,min(int(index),len(self._overview_pages)-1))
+        self._overview_page_index=index
+        document,identities,caption=self._overview_pages[index]
+        if document!=self._overview_visible_html:
+            position=self.overview_browser.verticalScrollBar().value() if preserve_scroll else 0
+            self.overview_browser.setHtml(document)
             self.overview_browser.verticalScrollBar().setValue(position)
-            self._overview_html_cached=updated
+            self._overview_visible_html=document
+        total=len(self._overview_pages)
+        blocked=self.overview_page_number.blockSignals(True)
+        try:
+            self.overview_page_number.setRange(1,total)
+            self.overview_page_number.setValue(index+1)
+        finally:
+            self.overview_page_number.blockSignals(blocked)
+        self.overview_previous.setEnabled(index>0)
+        self.overview_next.setEnabled(index+1<total)
+        self.overview_assessments.setEnabled(index+1<total)
+        self.overview_page_status.setText(f"{index+1}/{total} · {caption}")
+        self.overview_navigation.setVisible(total>1)
+
+    def _update_world_overview(self, *, precomputed_html=None, documents=None):
+        """Only one bounded page reaches Qt; retain the full exact inventory."""
+        if documents is None:
+            if precomputed_html is None:
+                from .brief_selection import overview_documents
+                scope=(self.time_range.currentText().lower() +
+                       (", filtered" if self.category.currentData() or
+                        self.region.currentData() or self.search.text().strip()
+                        else ", all categories"))
+                documents=overview_documents(
+                    self._overview_events,label=scope+" local feed and retained map evidence")
+            else:
+                # Compatibility for an exact unpaged precomputed caller.
+                documents={"full":precomputed_html,
+                           "pages":((precomputed_html,(),"Overview"),)}
+        scope=self._archive_scope_key()
+        same_scope=scope==self._overview_display_scope
+        old_page=self._overview_page_index if same_scope else 0
+        old_ids=()
+        old_assessment=False
+        if same_scope and self._overview_pages:
+            _,old_ids,old_caption=self._overview_pages[old_page]
+            old_assessment=old_caption=="Further assessments"
+        self._overview_html_cached=documents["full"]
+        self._overview_pages=documents["pages"]
+        self._overview_display_scope=scope
+        if old_assessment and len(self._overview_pages)>1:
+            index=len(self._overview_pages)-1
+        elif old_ids:
+            # Preserve the first retained identity in the page when new
+            # red alerts insert ahead of it. Removed identities cannot stay
+            # actionable, and a new filter resets to the first red page.
+            positions={identity:index for index,(_html,identities,_caption)
+                       in enumerate(self._overview_pages) for identity in identities}
+            index=next((positions[identity] for identity in old_ids
+                        if identity in positions),old_page)
+        else:
+            index=old_page
+        self._show_overview_page(index,preserve_scroll=same_scope and index==old_page)
 
     def _open_overview_event(self, url):
         """Only local event IDs are actionable; never treat links as web URLs."""
@@ -2611,16 +3031,155 @@ class MainWindow(SituationActions, QMainWindow):
         event_id=a.get("event_id") or (a.get("event") or {}).get("id")
         if event_id:self.navigate_event(event_id)
 
-    def _generate_brief(self, *, idle=False):
+    def _has_current_daily_brief(self, period):
+        snapshot=self._daily_brief_snapshot
+        return (period=="daily" and snapshot is not None
+                and snapshot["day"]==datetime.now(timezone.utc).date().isoformat())
+
+    def _clear_brief_presentation(self, message):
+        self._displayed_brief_key=None
+        self._displayed_brief_snapshot=None
+        self.brief_browser.setPlainText(message)
+        self.brief_state_label.setText(message)
+        self.brief_export_button.setEnabled(False)
+
+    def _discard_brief_read(self):
+        self._deferred_brief_events=None
+        self._deferred_brief_revision=None
+        self._deferred_brief_period=None
+        self._deferred_brief_generated=None
+        self._deferred_brief_markdown=None
+
+    def _validate_brief_snapshots(self, results=None):
+        # Worker results are keyed by the actual capture, not by the period
+        # label. A newer explicit Generate cannot be invalidated by an old job.
+        unique={item["key"]:item for item in
+                (self._displayed_brief_snapshot,self._daily_brief_snapshot)
+                if item is not None}
+        invalid=set()
+        for key,item in unique.items():
+            if key[0]=="daily" and item["day"]!=datetime.now(timezone.utc).date().isoformat():
+                invalid.add(key)
+                continue
+            if results is None:
+                valid=self.controller.store.brief_manifest_matches(item["manifest"],nonblocking=True)
+            else:
+                valid=results.get(key)
+            if valid is False:
+                invalid.add(key)
+            elif valid is None and self._displayed_brief_key==key:
+                self.brief_state_label.setText("Checking retained source revisions — export temporarily unavailable")
+                self.brief_export_button.setEnabled(False)
+            elif valid is True and self._displayed_brief_key==key:
+                self._set_brief_state(item)
+        if invalid:
+            if self._daily_brief_snapshot is not None and self._daily_brief_snapshot["key"] in invalid:
+                self._daily_brief_snapshot=None
+            if self._displayed_brief_key in invalid:
+                self._clear_brief_presentation("Brief expired or its source evidence changed. Preparing a new dated brief.")
+            self._discard_brief_read()
+            self._brief_request_epoch+=1
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:
+                self._schedule_evidence_refresh()
+        return not invalid
+
+    def _set_brief_state(self,item):
+        # Keep the as-of timestamp visible even when the user scrolls past
+        # the document heading. It is not a claim of current world state.
+        self.brief_state_label.setText(
+            item["key"][0].title()+" brief as of "+item["key"][1]+
+            " · fixed opening evidence; Monitor is live" if item["key"][0]=="daily"
+            else "Weekly brief as of "+item["key"][1])
+        self.brief_export_button.setEnabled(
+            item["key"][0]==self.brief_period.currentText().lower()
+            and (item["key"][0]!="daily" or item["day"]==datetime.now(timezone.utc).date().isoformat()))
+
+    def _expire_daily_brief(self):
+        snapshot=self._daily_brief_snapshot
+        if snapshot is None or snapshot["day"]==datetime.now(timezone.utc).date().isoformat():
+            return
+        self._daily_brief_snapshot=None
+        if self._displayed_brief_key==snapshot["key"]:
+            self._clear_brief_presentation("UTC reporting day changed. Preparing a new Daily Brief.")
+        self._discard_brief_read()
+        self._brief_request_epoch+=1
+        self._dirty_pages.add(5)
+
+    def _brief_reports_pruned(self):
+        # Actual removal is a retention/privacy boundary. Clear any text
+        # whose evidence cannot be confirmed immediately, including cached
+        # exports. Never keep a hidden opening brief after its source expires.
+        self._validate_brief_snapshots()
+        snapshots=(self._daily_brief_snapshot,self._displayed_brief_snapshot)
+        if any(item is not None and
+               self.controller.store.brief_manifest_matches(item["manifest"],nonblocking=True) is not True
+               for item in snapshots):
+            self._daily_brief_snapshot=None
+            self._clear_brief_presentation("Source retention changed. Preparing current retained evidence.")
+            self._discard_brief_read()
+            self._brief_request_epoch+=1
+            self._dirty_pages.add(5)
+
+    def _brief_clock_tick(self):
+        if self._force_close or getattr(self.controller,"_closed",False):
+            self._brief_clock_timer.stop()
+            return
+        # Midnight and retention checks do not depend on a collector event.
+        # Probe without waiting for the archive lock, and retry on next tick.
+        self._expire_daily_brief()
+        self._validate_brief_snapshots()
+        if (self.brief_period.currentText().lower()=="daily"
+                and not self._has_current_daily_brief("daily")
+                and self._background_warm_enabled):
+            self._dirty_pages.add(5)
+            self._schedule_evidence_refresh()
+
+    def _brief_period_changed(self,*_args):
+        self._brief_request_epoch+=1
+        self._discard_brief_read()
+        self._clear_brief_presentation("Preparing the selected briefing period…")
+        self._dirty_pages.add(5)
+        if self._background_warm_enabled:
+            self._schedule_workspace_warm()
+            self._schedule_evidence_refresh()
+
+    def _request_brief(self,*_args):
+        # The visible Generate button does not run thousands of source reads
+        # on Qt. Keep the internal synchronous route for masked cold startup.
+        if not self._background_warm_enabled:
+            return self._generate_brief()
+        if self.brief_period.currentText().lower()=="daily":
+            self._daily_brief_snapshot=None
+        self._brief_request_epoch+=1
+        self._discard_brief_read()
+        self._clear_brief_presentation("Generating current source-linked briefing…")
+        self._dirty_pages.add(5)
+        self._schedule_evidence_refresh()
+
+    def _generate_brief(self, *, idle=False, preserve_daily=False):
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
-        # The Brief collector already runs on a worker. During hidden/visible
-        # no-click presentation, NEVER execute a fresh Brief SQL query on Qt,
-        # even if the Store lock is acquired after the earlier warm probe.
-        # Explicit period changes and startup/manual refresh preserve the
-        # previous synchronous, current-source semantics.
+        if (idle or preserve_daily) and self._has_current_daily_brief(period):
+            snapshot=self._daily_brief_snapshot
+            valid=self.controller.store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
+            if valid is None:
+                self.brief_export_button.setEnabled(False)
+                return False
+            if valid is False:
+                self._validate_brief_snapshots({snapshot["key"]:False})
+                return False
+            if self._displayed_brief_key!=snapshot["key"]:
+                self.brief_browser.setHtml(snapshot["html"])
+                self._displayed_brief_key=snapshot["key"]
+                self._displayed_brief_snapshot=snapshot
+            self._set_brief_state(snapshot)
+            self._discard_brief_read()
+            return True
         cached=getattr(self,"_deferred_brief_events",None)
         cached_period=getattr(self,"_deferred_brief_period",None)
         cached_revision=getattr(self,"_deferred_brief_revision",None)
+        cached_generated=self._deferred_brief_generated
+        cached_markdown=self._deferred_brief_markdown
         if idle:
             if cached is None or cached_period!=period:
                 if not self._idle_brief_inflight:
@@ -2628,36 +3187,105 @@ class MainWindow(SituationActions, QMainWindow):
                 return False
             revision=self.controller.store.content_revision_if_available()
             if revision is None:
-                # Preserve pending evidence and the dirty Brief workspace;
-                # the next idle turn rechecks the exact source revision.
                 return False
-            if revision!=cached_revision:
-                self._deferred_brief_events=None
-                self._deferred_brief_revision=None
-                self._deferred_brief_period=None
+            if (revision!=cached_revision or
+                    period=="daily" and cached_generated is not None
+                    and cached_generated.date()!=datetime.now(timezone.utc).date()):
+                self._discard_brief_read()
                 if not self._idle_brief_inflight:
                     self._schedule_evidence_refresh()
                 return False
             valid=True
         else:
-            # Direct user request keeps current-source semantics, including
-            # the normal fallback if the cached period/revision is outdated.
             valid=(cached is not None and cached_period==period
-                   and cached_revision==self.controller.store.content_revision())
-        self._deferred_brief_events=None
-        self._deferred_brief_revision=None
-        self._deferred_brief_period=None
+                   and cached_revision==self.controller.store.content_revision()
+                   and (period!="daily" or cached_generated is None or
+                        cached_generated.date()==datetime.now(timezone.utc).date()))
+        self._discard_brief_read()
+        generated=(cached_generated if valid and cached_generated is not None
+                   else datetime.now(timezone.utc))
         events=(cached if valid else self.controller.brief_events(
-            since=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),period=period))
+            since=(generated-timedelta(days=days)).isoformat(),period=period))
+        manifest=tuple(sorted((str(event["id"]),event.get("revision"))
+                               for event in events if event.get("id")))
+        # These are real Store records. If a correction raced an explicit
+        # read, never expose/export its superseded bytes.
+        checked=self.controller.store.brief_manifest_matches(manifest,nonblocking=True)
+        if checked is not True:
+            self._clear_brief_presentation("Source evidence changed or is busy; briefing refresh pending.")
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:self._schedule_evidence_refresh()
+            return False
+        from .core import build_brief
         from .brief_rendering import brief_html
-        self.brief_browser.setHtml(brief_html(events,period))
+        markdown=(cached_markdown if valid and cached_markdown is not None
+                  else build_brief(events,period,generated_at=generated))
+        rendered=brief_html(events,period,markdown=markdown)
+        key=(period,generated.isoformat())
+        snapshot={"day":generated.date().isoformat(),"key":key,
+                  "manifest":manifest,"markdown":markdown,"html":rendered}
+        if (period=="daily" and generated.date()!=datetime.now(timezone.utc).date()
+                or self.controller.store.brief_manifest_matches(manifest,nonblocking=True) is not True):
+            self._clear_brief_presentation("Source evidence changed while preparing the document; refresh pending.")
+            self._dirty_pages.add(5)
+            if self._background_warm_enabled:self._schedule_evidence_refresh()
+            return False
+        self.brief_browser.setHtml(rendered)
+        self._displayed_brief_key=key
+        self._displayed_brief_snapshot=snapshot
+        self._set_brief_state(snapshot)
+        if period=="daily":
+            self._daily_brief_snapshot=snapshot
+            if (not self._background_warm_enabled and not self._history_at
+                    and not self.category.currentData() and not self.region.currentData()
+                    and not self.search.text().strip()):
+                from .brief_selection import overview_evidence_candidates,overview_documents
+                self._overview_events=overview_evidence_candidates(events,())
+                self._update_world_overview(documents=overview_documents(
+                    self._overview_events,label="opening Daily Brief snapshot — last 24 hours and retained critical alerts"))
         return True
 
     def _export_brief(self):
+        snapshot=self._displayed_brief_snapshot
+        period=self.brief_period.currentText().lower()
+        if (snapshot is None or snapshot["key"]!=self._displayed_brief_key
+                or snapshot["key"][0]!=period or
+                period=="daily" and not self._has_current_daily_brief(period)):
+            self.brief_state_label.setText("Export unavailable until the selected dated brief is ready.")
+            return
         path,_=QFileDialog.getSaveFileName(self,"Export intelligence brief","Global-Pulse-brief.html","HTML with severity colors (*.html);;Markdown (*.md);;Text (*.txt)")
         if path:
-            try:self.controller.export_brief(path,self.brief_period.currentText().lower());self.status_label.setText("Intelligence brief exported.")
-            except Exception as exc:QMessageBox.warning(self,"Export failed",str(exc))
+            try:
+                # Modal dialog may have pumped a correction, rollover or a
+                # different Generate. Bind the bytes to the originally visible
+                # document, and do not export if the source is no longer held.
+                if (snapshot is not self._displayed_brief_snapshot
+                        or snapshot["key"]!=self._displayed_brief_key
+                        or snapshot["key"][0]!=self.brief_period.currentText().lower()
+                        or period=="daily" and not self._has_current_daily_brief(period)):
+                    raise ValueError("Displayed brief changed; open export again")
+                store=self.controller.store
+                if not store._lock.acquire(blocking=False):
+                    raise ValueError("Archive busy; export not written")
+                valid=False
+                try:
+                    valid=store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
+                    if valid is not True:
+                        raise ValueError("Source evidence changed; export not written")
+                    from .security import atomic_text
+                    from pathlib import Path
+                    text=(snapshot["html"] if Path(path).suffix.lower() in {".html",".htm"}
+                          else ("# SYNTHETIC TEST DATA — NOT REAL EVENTS\n\n" if self.controller.demo else "")
+                          +snapshot["markdown"])
+                    # Explicit user export only: serialize retention with
+                    # the same source validation and atomic local file write.
+                    atomic_text(path,text)
+                finally:
+                    store._lock.release()
+                    if valid is False:self._validate_brief_snapshots({snapshot["key"]:False})
+                self.status_label.setText("Intelligence brief exported.")
+            except Exception as exc:
+                self.brief_state_label.setText("Export failed: "+str(exc)[:180])
 
     def _export_events(self):
         path,_=QFileDialog.getSaveFileName(self,"Export event archive","Global-Pulse-events.json","JSON (*.json);;CSV (*.csv)")
@@ -2895,6 +3523,44 @@ class MainWindow(SituationActions, QMainWindow):
     def _density_changed(self,checked):
         self.world_map.density=checked;self.world_map.update()
 
+    def _toggle_hazards(self, checked):
+        self._last_navigation_at=time.monotonic()
+        self.world_map.set_hazards_enabled(checked)
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _toggle_hazard_kind(self, kind, checked):
+        self._last_navigation_at=time.monotonic()
+        self.world_map.set_hazard_layer(kind, checked)
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _reset_hazards(self):
+        self._last_navigation_at=time.monotonic()
+        self.world_map.reset_hazard_layers()
+        self._sync_hazard_controls()
+        self._refresh_hazard_coverage()
+
+    def _sync_hazard_controls(self):
+        blocked=self.hazard_master.blockSignals(True)
+        self.hazard_master.setChecked(self.world_map.hazards_enabled)
+        self.hazard_master.blockSignals(blocked)
+        self.hazard_master.sync_control()
+        for kind,action in self.hazard_actions.items():
+            blocked=action.blockSignals(True)
+            action.setChecked(self.world_map.hazard_layers[kind])
+            action.setEnabled(self.world_map.hazards_enabled)
+            action.blockSignals(blocked)
+            action.sync_control()
+
+    def _refresh_hazard_coverage(self):
+        if not hasattr(self,"count_label") or self._filter_refresh_pending:
+            return
+        retained=sum(bool(e.get("retained_on_map")) for e in self.world_map.events)
+        suffix=f" · {retained} significant retained" if retained else ""
+        cap=" · map limit 5,000; narrow filters" if len(self.world_map.events)>=5000 else ""
+        self.count_label.setText(f"{len(self._events)} feed events · "+self.world_map.coverage_summary()+suffix+cap)
+
     def _toggle_crisis_overlay(self,checked):
         self.world_map.set_crisis_overlay_enabled(checked)
         for control in self.crisis_checks.values():control.setEnabled(checked)
@@ -2906,6 +3572,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.map_overlay.setVisible(checked)
 
     def _sync_map_controls(self):
+        self._sync_hazard_controls()
         self.crisis_master_check.blockSignals(True);self.crisis_master_check.setChecked(self.world_map.crisis_overlay_enabled);self.crisis_master_check.blockSignals(False)
         for kind,control in self.crisis_checks.items():
             control.blockSignals(True);control.setChecked(bool(self.world_map.crisis_layers.get(kind,True)));control.setEnabled(self.world_map.crisis_overlay_enabled);control.blockSignals(False)
@@ -3006,74 +3673,3 @@ class MainWindow(SituationActions, QMainWindow):
         super().resizeEvent(event)
         if hasattr(self,"titlebar"):self.titlebar.tagline.setVisible(self.width()>=1200)
         if hasattr(self,"last_label"):self.last_label.setVisible(self.width()>=1100)
-
-    def showEvent(self,event):
-        super().showEvent(event)
-        if sys.platform=="win32" and not getattr(self,"_native_configured",False):
-            self._configure_windows_frame()
-
-    def _configure_windows_frame(self):
-        """Retain native window management while drawing our own title bar."""
-        try:
-            import ctypes
-            from ctypes import wintypes
-            user32=ctypes.windll.user32
-            get_long=user32.GetWindowLongPtrW;get_long.argtypes=[wintypes.HWND,ctypes.c_int];get_long.restype=ctypes.c_ssize_t
-            set_long=user32.SetWindowLongPtrW;set_long.argtypes=[wintypes.HWND,ctypes.c_int,ctypes.c_ssize_t];set_long.restype=ctypes.c_ssize_t
-            hwnd=int(self.winId());style=get_long(hwnd,-16)
-            set_long(hwnd,-16,style | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000)
-            user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_uint]
-            user32.SetWindowPos.restype=wintypes.BOOL
-            user32.SetWindowPos(hwnd,None,0,0,0,0,0x0020|0x0001|0x0002|0x0004)
-            self._native_configured=True
-        except (AttributeError,OSError):
-            self._native_configured=False
-
-    def nativeEvent(self,event_type,message):
-        if sys.platform!="win32":return False,0
-        try:
-            import ctypes
-            from ctypes import wintypes
-            msg=wintypes.MSG.from_address(int(message))
-            if msg.message==0x0083 and msg.wParam: # WM_NCCALCSIZE
-                return True,0
-            if msg.message==0x0024: # WM_GETMINMAXINFO: keep taskbar work area.
-                class MinMaxInfo(ctypes.Structure):
-                    _fields_=[("reserved",wintypes.POINT),("max_size",wintypes.POINT),("max_position",wintypes.POINT),("min_track",wintypes.POINT),("max_track",wintypes.POINT)]
-                class MonitorInfo(ctypes.Structure):
-                    _fields_=[("size",wintypes.DWORD),("monitor",wintypes.RECT),("work",wintypes.RECT),("flags",wintypes.DWORD)]
-                user32=ctypes.windll.user32
-                user32.MonitorFromWindow.argtypes=[wintypes.HWND,wintypes.DWORD];user32.MonitorFromWindow.restype=wintypes.HANDLE
-                monitor=user32.MonitorFromWindow(msg.hwnd,2)
-                info=MonitorInfo();info.size=ctypes.sizeof(info)
-                user32.GetMonitorInfoW.argtypes=[wintypes.HANDLE,ctypes.POINTER(MonitorInfo)];user32.GetMonitorInfoW.restype=wintypes.BOOL
-                if user32.GetMonitorInfoW(monitor,ctypes.byref(info)):
-                    mmi=ctypes.cast(msg.lParam,ctypes.POINTER(MinMaxInfo)).contents
-                    mmi.max_position.x=info.work.left-info.monitor.left;mmi.max_position.y=info.work.top-info.monitor.top
-                    mmi.max_size.x=info.work.right-info.work.left;mmi.max_size.y=info.work.bottom-info.work.top
-                    mmi.min_track.x=int(self.minimumWidth()*self.devicePixelRatioF());mmi.min_track.y=int(self.minimumHeight()*self.devicePixelRatioF())
-                    return True,0
-            if msg.message==0x0084: # WM_NCHITTEST
-                # Message coordinates are physical pixels; map Qt caption button
-                # geometry through devicePixelRatio to support mixed DPI screens.
-                rect=wintypes.RECT();ctypes.windll.user32.GetWindowRect(msg.hwnd,ctypes.byref(rect))
-                x=ctypes.c_short(msg.lParam&0xffff).value-rect.left;y=ctypes.c_short((msg.lParam>>16)&0xffff).value-rect.top
-                ratio=self.devicePixelRatioF();qx,qy=x/ratio,y/ratio
-                if not self.isMaximized():
-                    margin=7;left=qx<margin;right=qx>self.width()-margin;top=qy<margin;bottom=qy>self.height()-margin
-                    if top and left:return True,13
-                    if top and right:return True,14
-                    if bottom and left:return True,16
-                    if bottom and right:return True,17
-                    if left:return True,10
-                    if right:return True,11
-                    if top:return True,12
-                    if bottom:return True,15
-                max_button=self.titlebar.maximize_button;position=max_button.mapTo(self,QPoint(0,0))
-                if QRectF(position.x(),position.y(),max_button.width(),max_button.height()).contains(QPointF(qx,qy)):return True,9 # HTMAXBUTTON / Windows 11 Snap menu
-            if msg.message==0x00A1 and msg.wParam==9:return True,0 # WM_NCLBUTTONDOWN
-            if msg.message==0x00A2 and msg.wParam==9: # WM_NCLBUTTONUP
-                self.titlebar.toggle_maximized();return True,0
-        except (ValueError,TypeError,AttributeError,OSError):pass
-        return super().nativeEvent(event_type,message)
-

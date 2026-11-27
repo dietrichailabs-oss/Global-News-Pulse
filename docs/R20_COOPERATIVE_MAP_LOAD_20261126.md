@@ -1,0 +1,9 @@
+# Measured map-load correction
+
+Parent a055b226 hosted profiles: Windows 1.19s worst heartbeat overlapping worker Store.list_events; a 522ms gap included 235ms area rebuilding and 211ms overview setHtml. Linux similar worker contention. No physical desktop acceptance.
+
+Warmed current map and crisis reads capture ordered candidate IDs under a short Store lock, hydrate 32-row batches against exact revision, release between batches, and yield outside lock on larger inventories. The compact point path decodes JSON outside the lock. Retained annotations share one normalized cutoff. Any change cancels the entire read; GUI retries latest scope. Default atomic/historical projection remains unchanged; brief retries cooperative conflicts then preserves prior atomic fallback. No eligibility, cap or source detail change. Independent crisis context retains same topical screen.
+
+Prepare warning wrapping/normalization on the source worker using plain immutable coordinates. GUI receives exact object identity token, constructs paths in bulk and reuses only exact equal geometry; current source/area references always replaced. Direct fallback retains same admission and caps. Tests compare atomic/cooperative rows and historical/filter paths, induce actual competing writer between released pages, compare topical read, dateline/hole hit equivalence and prepared path reuse/stale rejection.
+
+Matched probe compares this candidate against exact a055b226, same 5500 mixed rows/5000 red/180 polygons/3200 observations, same instrumentation. Large HTML/Qt document materialization remains a known separate bottleneck; evaluate measurements before further presentation changes. No claim of improved timing before tests or native acceptance.

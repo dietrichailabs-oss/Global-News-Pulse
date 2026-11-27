@@ -69,7 +69,11 @@ def test_priority_brief_includes_nonweather_in_weather_flood():
 
 def test_world_overview_writes_source_coverage_not_verified_global_claims():
     page=overview_html(many_weather(),label="7-day local feed")
-    assert page.count("SYNTHETIC Disaster report")<=2
+    # Owner requirement: all active red records, not only two weather cards.
+    assert page.count("SYNTHETIC Disaster report")==140
+    for index in range(140):
+        assert f"pulse-event://open/brief-fixture-{index}'" in page
+    assert page.index("Critical alerts — immediate attention") < page.index("contested security statement")
     for keyword in ("contested security statement","civic protest",
                     "disease health advisory","policy announcement",
                     "economic report","relief operations",
@@ -107,7 +111,13 @@ def test_daily_and_weekly_export_briefs_are_category_balanced():
         assert "## Weather & disasters" in markdown
         assert "SYNTHETIC disease health advisory" in markdown
         assert "SYNTHETIC contested security statement" in markdown
-        assert markdown.count("SYNTHETIC Disaster report")<=6
+        # Every active red headline appears in the executive index, while
+        # the detailed weather assessments retain their original cap.
+        red_index=markdown.split("## Critical alerts — immediate attention",1)[1].split("## At a glance",1)[0]
+        assert red_index.count("SYNTHETIC Disaster report")==140
+        details=[line for line in markdown.splitlines()
+                 if line.startswith("### ") and "SYNTHETIC Disaster report" in line]
+        assert len(details)==(3 if period=="daily" else 6)
         assert "Not represented in supplied local records" not in markdown
 
 

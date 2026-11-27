@@ -7,6 +7,7 @@ A government attribution is never promoted into proof of its underlying claim.
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from html import unescape
@@ -18,11 +19,13 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+import time
 from typing import Any, Iterable
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from uuid import UUID, uuid4, uuid5
 
 from .map_evidence import normalize_map_fields, event_areas
+from .hazards import canonical_hazard_types, report_hazard_types
 
 from .lifecycle import (normalize_lifecycle, apply_lifecycle, is_expired, select_warning_event,
                         register_warning, canonical_event, SCHEMA as LIFECYCLE_SCHEMA)
@@ -34,6 +37,10 @@ IGNORED_WORDS = frozenset("a an the and or in on at to of for from with by as is
 MAX_BATCH = 2000
 MAX_REPORTS = 250_000
 MAX_EVENTS = 50_000
+
+
+class MapSnapshotChanged(RuntimeError):
+    """A cooperative current-map read lost its exact source revision."""
 
 
 def utcnow() -> str:
@@ -237,6 +244,8 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     result["official"] = raw.get("official") is True
     result["metadata_only"] = raw.get("metadata_only") is True
     result["claims"] = _normalise_claims(raw.get("claims"))
+    if "hazard_types" in raw:
+        result["hazard_types"] = list(canonical_hazard_types(raw["hazard_types"]))
     result["latitude"] = result["longitude"] = None
     lat, lon = raw.get("latitude"), raw.get("longitude")
     if lat is not None and lon is not None:
@@ -600,6 +609,10 @@ def _build_event(event_id: str, reports: list[dict], *, previous: dict | None, s
                             "historical_abnormality": "Insufficient local baseline for an abnormality claim.",
                             "coverage_volume": len(reports), "reporting_changes": len(changes),
                             "contradictory_information": len(conflicts)}}
+    hazard_types = canonical_hazard_types(
+        [kind for report in active for kind in report_hazard_types(report)])
+    if hazard_types or any("hazard_types" in report for report in active):
+        event["hazard_types"] = list(hazard_types)
     event["map_areas"] = event_areas(active)
     seen_media = set()
     for report in eligible:
@@ -1331,17 +1344,124 @@ class Store:
                 results.append(event)
         return results
 
+    def _cooperative_map_candidates(self, sql, params, limit, *, evidence):
+        """One ordered inventory read; no live cursor crosses the Store lock."""
+        with self._lock:
+            token=self.content_revision()
+            if evidence:
+                # Body size is a conservative work hint, not an eligibility
+                # test. Large geometry records receive smaller pages.
+                identity_sql=("SELECT id,length(CAST(body AS BLOB)) AS bytes"+
+                              sql[sql.index(" FROM events"):])
+                rows=[(row["id"],int(row["bytes"] or 0))
+                      for row in self._conn.execute(identity_sql,params)]
+                if len(rows)>MAX_EVENTS:
+                    raise ValueError("Map inventory exceeds archive event bound")
+            else:
+                # The compact point page is already bounded and ordered by
+                # the original SQL. Do not perform 157 ID re-queries just
+                # to retrieve those same 5,000 rows.
+                rows=self._conn.execute(sql+" LIMIT ?",[*params,limit]).fetchall()
+        return token,rows
+
+    def _cooperative_map_page(self, token, chunk):
+        """Hydrate one byte-/row-bounded page at the frozen revision."""
+        with self._lock:
+            if self.content_revision()!=token:
+                raise MapSnapshotChanged("Archive changed between map pages")
+            rows={row["id"]:row for row in self._conn.execute(
+                "SELECT id,body FROM events WHERE id IN ("+
+                ",".join("?" for _ in chunk)+")",chunk)}
+            if len(rows)!=len(chunk):
+                raise MapSnapshotChanged("Map candidate disappeared")
+            return self._map_evidence_page_unlocked([rows[identity] for identity in chunk])
+
+    @staticmethod
+    def _cooperative_map_yield():
+        # Yield to a runnable thread, not a fixed sleep per page. Windows
+        # timer granularity and scheduler contention can amplify even a
+        # nominal 1ms delay hundreds of times during a full map refresh.
+        time.sleep(0)
+
+    def _cooperative_map_projection(self, sql, params, limit, *, evidence, candidate=None):
+        """Bound lock ownership AND completion latency with exact revision checks.
+
+        Capture compact rows once, decode outside the lock. Canonical map
+        evidence retains accepted-only paging: adapt the page size from body
+        bytes and measured hydration time, never from severity or source
+        eligibility. Any mutation rejects the whole result.
+        """
+        token,inventory=self._cooperative_map_candidates(sql,params,limit,evidence=evidence)
+        output=[]
+        offset=0
+        page_limit=128
+        last_yield=time.perf_counter()
+        while offset<len(inventory):
+            if evidence:
+                # At most 128 ordinary rows and 256 KiB of body bytes per
+                # page. An individually larger record still has a slot;
+                # existing geometry, report and archive bounds are unchanged.
+                end=offset
+                size=0
+                while end<len(inventory) and end-offset<page_limit:
+                    next_size=inventory[end][1]
+                    if end>offset and size+next_size>256*1024:
+                        break
+                    size+=next_size
+                    end+=1
+                chunk=[identity for identity,_bytes in inventory[offset:end]]
+                started=time.perf_counter()
+                hydrated=self._cooperative_map_page(token,chunk)
+                elapsed=time.perf_counter()-started
+                # Adaptive target keeps expensive mixed/legacy pages short,
+                # while ordinary compact records avoid needless lock traffic.
+                if elapsed>.035:
+                    page_limit=max(8,page_limit//2)
+                elif elapsed<.012:
+                    page_limit=min(128,page_limit*2)
+            else:
+                end=min(offset+128,len(inventory))
+                hydrated=[json.loads(row["body"]) for row in inventory[offset:end]]
+            offset=end
+            for event in hydrated:
+                if evidence and (not event or not (
+                        event.get("status")=="active" or event.get("map_history_incomplete") is True)):
+                    continue
+                if candidate is not None and not candidate(event):
+                    continue
+                output.append(event)
+                if len(output)>=limit:break
+            if len(output)>=limit:break
+            if offset<len(inventory) and len(inventory)>256:
+                now=time.perf_counter()
+                if now-last_yield>=.025:
+                    self._cooperative_map_yield()
+                    last_yield=time.perf_counter()
+        if self.content_revision()!=token:
+            raise MapSnapshotChanged("Archive changed during map projection")
+        return output
+
+
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
-                    map_evidence: bool = False) -> list[dict]:
+                    map_evidence: bool = False, *,
+                    _crisis_candidates: bool = False,
+                    _crisis_now: datetime | None = None,
+                    _cooperative_map: bool = False) -> list[dict]:
+        if _crisis_candidates:
+            if not map_evidence or before or category:
+                raise ValueError("Crisis context requires current all-category map evidence")
+            from .crisis_overlay import is_crisis_context_candidate
+            crisis_now = (_crisis_now or datetime.now(UTC)).astimezone(UTC)
         map_view = bool(map_view or map_evidence)
         # map_evidence retains country/area/unlocated records without inventing points.
         # Map membership is independent of the bounded text-feed page. Explicit
         # search/category/region filters still apply; historical views stay strict.
         limit = max(1, min(int(limit), 5000 if map_view else 2000))
         query = plain_text(query, 500)
-        with self._lock:
+        cooperative=bool(_cooperative_map and map_view and not before)
+        with (nullcontext() if cooperative else self._lock):
             if before:
                 # Historical playback reconstructs what was stored at that time;
                 # a later correction or headline never leaks into an old frame.
@@ -1358,6 +1478,8 @@ class Store:
                                 (map_evidence or (e.get("latitude") is not None and e.get("longitude") is not None))]
                 return sorted(filtered, key=lambda e: e["updated_at"], reverse=True)[:limit]
             where, params = ["id NOT IN (SELECT alias_id FROM event_aliases)"], []
+            if _crisis_candidates:
+                where.append("synthetic=0")
             if category:
                 where.append("lower(category)=lower(?)")
                 params.append(category)
@@ -1392,7 +1514,11 @@ class Store:
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
             sql = ("SELECT body FROM events" if map_view and not map_evidence else
                    "SELECT id,body FROM events" if map_evidence else "SELECT id,body,revision FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
-            if map_evidence:
+            if cooperative:
+                candidate=(lambda event:is_crisis_context_candidate(event,now=crisis_now)) if _crisis_candidates else None
+                result=self._cooperative_map_projection(
+                    sql,params,limit,evidence=map_evidence,candidate=candidate)
+            elif map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
                 # NWS bulletins must be checked at read time. Applying the user's
@@ -1410,18 +1536,29 @@ class Store:
                 # bounded fetchmany keeps materialized rows capped at 256 while
                 # the original accepted-only limit and warning checks remain.
                 cursor = self._conn.execute(sql, params)
+                scanned = 0
                 try:
                     while len(result) < limit:
-                        page = cursor.fetchmany(page_size)
+                        # The independent topical read uses the archive's
+                        # bounded event budget, not the display page size.
+                        # Screen AFTER canonical source projection so stale,
+                        # withdrawn, future or ordinary records do not count.
+                        size = min(page_size, MAX_EVENTS-scanned) if _crisis_candidates else page_size
+                        if size <= 0:
+                            break
+                        page = cursor.fetchmany(size)
                         if not page:
                             break
+                        scanned += len(page)
                         for event in self._map_evidence_page_unlocked(page):
                             if event and (event.get("status") == "active" or
                                           event.get("map_history_incomplete") is True):
+                                if _crisis_candidates and not is_crisis_context_candidate(event, now=crisis_now):
+                                    continue
                                 result.append(event)
                                 if len(result) >= limit:
                                     break
-                        if len(page) < page_size:
+                        if len(page) < size:
                             break
                 finally:
                     cursor.close()
@@ -1430,15 +1567,32 @@ class Store:
                 result = ([json.loads(row[0]) for row in page] if map_view
                           else self._current_feed_page_unlocked(page))
             if map_view:
+                cutoff=_iso(since) if since else None
                 for item in result:
-                    item["retained_on_map"] = bool(keep_significant and since and item["updated_at"] < _iso(since))
+                    item["retained_on_map"] = bool(keep_significant and cutoff and item["updated_at"] < cutoff)
                     # This is a display annotation, never a new source assertion.
                     item["map_retention_note"] = ("Retained significant event; no newer status received. Last update "
                                                   + item["updated_at"]) if item["retained_on_map"] else ""
             return result
 
 
-    def list_brief_events(self, *, since: str, per_domain: int = 9) -> list[dict]:
+    def list_crisis_context(self, *, query="", region="", since=None,
+                            keep_significant=False, now=None, limit=5000,
+                            cooperative=False):
+        """Current source candidates; independent of ordinary map display rows.
+
+        Reuse canonical history/withdrawal-aware projection and scope. Neither
+        the bounded topic screen nor a candidate alone establishes geography
+        or corroboration. No archive writes, collection, or historical replay.
+        """
+        return self.list_events(query=query, region=region, since=since,
+                                keep_significant=keep_significant,
+                                map_evidence=True, limit=limit,
+                                _crisis_candidates=True, _crisis_now=now,
+                                _cooperative_map=cooperative)
+
+    def list_brief_events(self, *, since: str, per_domain: int = 9,
+                          map_since: str | None = None) -> list[dict]:
         """Bounded, category-balanced Brief read without a multi-second Store lock.
 
         Each event still goes through the canonical history/evidence projection.
@@ -1448,7 +1602,7 @@ class Store:
         changes while reading, retry; on repeated contention use the original
         atomic path rather than return mixed or fabricated evidence.
         """
-        from .brief_selection import _DOMAIN_ALIASES
+        from .brief_selection import _DOMAIN_ALIASES, MAX_CRITICAL_ALERTS, is_active_critical
         count = max(1, min(int(per_domain), 9))
         aliases = sorted(_DOMAIN_ALIASES.items())
         categories = "CASE lower(trim(category)) " + " ".join(
@@ -1470,6 +1624,50 @@ class Store:
             "AND updated_at>=?) WHERE brief_rank<=?"
         )
         values = (*params, _iso(since), count)
+        # Use the same canonical projection, accepted-only page ceiling,
+        # ordering and tie-break as the map. An unfiltered Daily/Weekly brief
+        # uses the standard seven-day Monitor scope (plus retained significant
+        # records). Explicit interactive map filters do not change that brief.
+        # Critical rows use the bounded map projection; only the detailed
+        # topic candidates require full history hydration.
+        def map_red(cooperative=False):
+            # With no stored red or legacy projection candidate, the map
+            # cannot produce an active critical record. Avoid rehydrating
+            # thousands of ordinary records during ordinary startup.
+            with self._lock:
+                possible=self._conn.execute(
+                    "SELECT 1 FROM events WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+                    "AND (json_extract(body,'$.severity')='critical' OR "
+                    "COALESCE(json_extract(body,'$.evidence_policy_version'),0)<2) LIMIT 1").fetchone()
+            if possible is None:
+                return []
+            return [event for event in self.list_events(
+                map_evidence=True, limit=MAX_CRITICAL_ALERTS,
+                since=map_since or since, keep_significant=True,
+                _cooperative_map=cooperative)
+                if is_active_critical(event)]
+
+        def combine(ordinary, critical):
+            by_id={str(event["id"]):event for event in critical}
+            result=[]
+            seen=set()
+            for event in ordinary:
+                if event is None:
+                    continue
+                identity=str(event["id"])
+                if identity in by_id:
+                    # Preserve complete evidence timeline for bounded detail
+                    # candidates, but canonical current map facts own priority.
+                    event=dict(event, **by_id[identity])
+                elif is_active_critical(event):
+                    # A detail candidate outside the accepted map inventory
+                    # cannot displace a red map record at the cap.
+                    continue
+                if identity not in seen:
+                    result.append(event)
+                    seen.add(identity)
+            result.extend(event for event in critical if str(event["id"]) not in seen)
+            return result
 
         def revision_unlocked():
             # Catch this Store's own writes and other SQLite connections'
@@ -1480,23 +1678,53 @@ class Store:
         for _attempt in range(2):
             with self._lock:
                 source_revision = revision_unlocked()
-                ids = [row[0] for row in self._conn.execute(sql, values)]
+                ids=[row[0] for row in self._conn.execute(sql,values)]
             events = []
             for identity in ids:
                 with self._lock:
                     event = self._get_event_unlocked(identity)
                 if event is not None:
                     events.append(event)
+            try:
+                critical=map_red(cooperative=True)
+            except MapSnapshotChanged:
+                continue
             with self._lock:
                 if revision_unlocked() == source_revision:
-                    return events
+                    return combine(events,critical)
 
         # With continuous source mutations, preserve the old atomic read.
         # Never return partially mixed revisions just to pass a heartbeat test.
         with self._lock:
-            ids = self._conn.execute(sql, values).fetchall()
-            return [event for row in ids
-                    if (event := self._get_event_unlocked(row[0])) is not None]
+            ids=[row[0] for row in self._conn.execute(sql,values)]
+            return combine([self._get_event_unlocked(identity) for identity in ids],map_red())
+
+    def brief_manifest_matches(self, manifest, *, nonblocking=False):
+        """Validate source-derived session text against exact retained event revisions.
+
+        Every admitted input is tracked, not just the displayed headline.
+        Ingest, withdrawal, merges and retention rebuilds increment/remove the
+        event revision. Aliased or missing records never validate. Unrelated
+        source/setting writes do not replace an opening Daily Brief.
+        None means busy, not unchanged; no waiting on the GUI export path.
+        """
+        if not self._lock.acquire(blocking=not nonblocking):
+            return None
+        try:
+            expected=dict(manifest)
+            identities=list(expected)
+            for offset in range(0,len(identities),256):
+                chunk=identities[offset:offset+256]
+                marks=",".join("?" for _ in chunk)
+                actual={row["id"]:row["revision"] for row in self._conn.execute(
+                    "SELECT id,revision FROM events WHERE id IN ("+marks+
+                    ") AND id NOT IN (SELECT alias_id FROM event_aliases)",chunk)}
+                if any(actual.get(identity)!=expected[identity] or identity not in actual
+                       for identity in chunk):
+                    return False
+            return True
+        finally:
+            self._lock.release()
 
     def event_filter_options(self) -> dict[str, list[str]]:
         """Archive-wide selector metadata, independent of any rendered page.
@@ -2050,16 +2278,19 @@ def _markdown_text(value: Any) -> str:
     return plain_text(value, 8000).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("*", "\\*").replace("_", "\\_").replace("#", "\\#").replace("`", "\\`")
 
 
-def build_brief(events: list[dict], period: str = "daily") -> str:
+def build_brief(events: list[dict], period: str = "daily", *, generated_at=None) -> str:
     if period not in {"daily", "weekly"}:
         raise ValueError("Brief period must be daily or weekly")
     limit = 80 if period == "weekly" else 60
     title = "Weekly" if period == "weekly" else "Daily"
-    generated = utcnow()
+    generated = utcnow() if generated_at is None else _iso(generated_at)
     moment = _dt(generated)
     since = moment - timedelta(days=7 if period == "weekly" else 1)
     window = "last 7 days" if period == "weekly" else "last 24 hours"
-    supplied = [e for e in events[:1500] if isinstance(e, dict)]
+    from .brief_selection import (balanced_brief_sections, BRIEF_DOMAINS,
+                                  MAX_PRIORITY_RECORDS, critical_alerts,
+                                  priority_rank, priority_heading)
+    supplied = [e for e in events[:MAX_PRIORITY_RECORDS] if isinstance(e, dict)]
     synthetic = any(e.get("synthetic") for e in supplied)
 
     def text(value, length=300):
@@ -2112,15 +2343,44 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
              "it does not mean a story is false or that verification was completed. "
              "Evidence status describes source attribution and documented independent reporting. "
              "An official statement confirms its publication, not every underlying claim.", ""]
-    # A single high-volume weather adapter can otherwise consume every slot
-    # before one disease, conflict, infrastructure or government record appears.
-    # These are source CATEGORY groupings, never invented news/crisis claims.
-    from .brief_selection import balanced_brief_sections, BRIEF_DOMAINS
+    # Executive priority index includes every admitted active red record,
+    # independent of the detailed topic caps. The source evidence below
+    # remains a bounded, balanced sample; red does not imply verification.
+    red=critical_alerts(supplied)
+    lines.extend(["## Critical alerts — immediate attention", "",
+                  f"{len(red)} active critical record(s) in the supplied local inventory. "
+                  "Severity is recorded importance, not confirmation of underlying claims.", ""])
+    if not red:
+        lines.extend(["No active critical alerts in the supplied scope. This is not a worldwide all-clear.", ""])
+    for event in red:
+        updated=date(event.get("updated_at"))
+        state=" · retained from before reporting window" if updated and updated<since else ""
+        sources=[]
+        for report in event.get("reports",[])[:100]:
+            if not isinstance(report,dict) or report.get("future_dated") or report.get("evidence_status","active")!="active":
+                continue
+            try:
+                url=safe_public_url(report.get("url","")).replace("(","%28").replace(")","%29").replace(" ","%20").replace("<","%3C").replace(">","%3E").replace('"',"%22")
+            except (TypeError,ValueError):
+                continue
+            sources.append(f"[{text(report.get('publisher') or report.get('source_id') or 'Original source',100)}]({url})")
+            break
+        lines.extend([
+            f"- Severity: **CRITICAL** · **{text(event.get('title') or 'Untitled source record',260)}** · "
+            f"{text(event.get('country') or event.get('region') or 'Unspecified location',100)} · "
+            f"Evidence: {text(event.get('verification') or 'unverified',30)} · "
+            f"Record update {text(event.get('updated_at') or 'unknown',60)}{state}"+
+            (" · "+sources[0] if sources else " · inspect local event "+text(event.get("id"),100)),
+            ""
+        ])
+    # A single high-volume weather adapter must not consume every detailed
+    # assessment slot. Select topic coverage first, then sort by importance.
     grouped = balanced_brief_sections(
         supplied, per_domain=8 if period == "daily" else 9,
         max_total=limit, disaster_limit=3 if period == "daily" else 6
     )
-    ranked = [(domain, event) for domain, items in grouped for event in items]
+    ranked = sorted(((domain, event) for domain, items in grouped for event in items),
+                    key=lambda row:priority_rank(row[1]), reverse=True)
     selected = [event for _, event in ranked]
     supplied_count = len({str(e.get("id")) for e in supplied if e.get("id")})
     if not grouped:
@@ -2145,11 +2405,12 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
         ])
         if supplied_count > len(selected):
             lines.extend([f"{supplied_count - len(selected)} additional supplied records are outside the displayed topic limits. "
+                          "The critical-alert index above remains independent of those detail limits. "
                           "Use the feed or event archive for their complete evidence.", ""])
         lines.extend([
             "## Topic coverage", "",
-            "Items are grouped by source category, then by importance and last recorded update. "
-            "These sections do not establish worldwide coverage or verify a crisis.", ""
+            "Detailed assessments are ordered by current importance and then last recorded update, "
+            "with topic-balanced coverage. These sections do not establish worldwide coverage or verify a crisis.", ""
         ])
         present = {domain for domain, _ in grouped}
         absent = [domain for domain in BRIEF_DOMAINS if domain not in present]
@@ -2171,7 +2432,13 @@ def build_brief(events: list[dict], period: str = "daily") -> str:
                              ", ".join(domain for domain in BRIEF_DOMAINS if domain in domains) + ".")
             lines.append("")
     current_domain = None
+    current_priority = None
     for index, (domain, event) in enumerate(ranked, 1):
+        priority=priority_heading(event)
+        if priority!=current_priority:
+            current_priority=priority
+            current_domain=None
+            lines.extend([f"# {priority} — detailed assessments", ""])
         if domain != current_domain:
             current_domain = domain
             lines.extend([f"## {domain}", ""])

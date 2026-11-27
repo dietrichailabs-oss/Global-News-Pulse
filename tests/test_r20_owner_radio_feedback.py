@@ -395,7 +395,13 @@ def test_all_curated_receivers_are_offline_searchable_with_ranges_and_no_autocon
         assert panel.receiver_picker.lineEdit().cursorPosition()==0
         assert item["ranges_khz"]==source["ranges_khz"]
         assert panel.receiver_url.text()==source["url"]
-        assert panel.receiver_connect.isEnabled()
+        if source.get("link_only_review"):
+            assert not panel.receiver_connect.isEnabled()
+            assert panel.receiver_external.isEnabled()
+            assert panel.receiver_connect.isHidden()
+            assert not panel.receiver_browser_quick.isHidden()
+        else:
+            assert panel.receiver_connect.isEnabled()
         assert not panel.receiver_connected and panel.sdr_state=="OFF"
         assert panel.ham_band.isEnabled()==bool(source["ranges_khz"])
         if source["ranges_khz"]:
@@ -431,10 +437,13 @@ def test_curated_names_ranges_and_core_controls_fit_small_window(panel,app,large
         assert panel.width()<=600 and panel.height()<=480,source["id"]
         assert panel.minimumSizeHint().height()<=470
         assert panel.ham_details_scroll.viewport().height()>=24
+        connect_control=(panel.receiver_browser_quick if source.get("link_only_review")
+                         else panel.receiver_connect)
+        assert connect_control.isEnabled(),source["id"]
         for control in (panel.ham_receiver_name,panel.ham_frequency_display,
                         panel.ham_back,panel.ham_step,panel.ham_band,panel.ham_forward,
                         panel.frequency,panel.tune_button,panel.receiver_list,panel.receiver_search,
-                        panel.receiver_connect,panel.receiver_off):
+                        connect_control,panel.receiver_off):
             assert control.isVisible(),source["id"]
             surface=panel.radio_tabs.widget(1)
             assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
@@ -452,9 +461,15 @@ def test_every_curated_http_origin_requires_specific_consent_before_a_request(pa
         return QMessageBox.StandardButton.No
     monkeypatch.setattr(QMessageBox,"question",refuse)
     assert not panel.connect_receiver()
-    assert len(prompts)==1
-    assert source["host"] in prompts[0]
-    assert "unencrypted HTTP" in prompts[0] and "manually" in prompts[0]
+    if source.get("link_only_review"):
+        assert not prompts, "Browser-only HTTP must not reach embedded consent"
+        assert not panel.receiver_connect.isEnabled()
+        assert not panel.receiver_browser_quick.isHidden()
+        assert not _owner_legacy_websdr(public_receiver_url(source["url"]),"websdr")
+    else:
+        assert len(prompts)==1
+        assert source["host"] in prompts[0]
+        assert "unencrypted HTTP" in prompts[0] and "manually" in prompts[0]
     assert not attempted and not panel.receiver_connected
 
 
@@ -564,3 +579,30 @@ def test_range_selector_tracks_tuning_without_losing_explicit_overlap_choice(pan
     panel.frequency.setText("30000")
     assert panel.ham_band.currentIndex()==-1,"Out-of-range request must not show a valid selected window"
     assert len(requested)==1,"Editing a requested frequency must not connect"
+
+
+@pytest.mark.parametrize("larger_font",[False,True])
+def test_compact_tuner_reflow_keeps_actual_step_and_band_size_hints(panel,app,larger_font):
+    panel.setStyleSheet(STYLE.replace("font-size: 12px;","font-size: 13px;") if larger_font else STYLE)
+    panel.radio_tabs.setCurrentIndex(1)
+    panel.resize(600,480)
+    panel.show()
+    panel.ham_details_toggle.setChecked(True)
+    panel.advanced_scan.setChecked(True)
+    surface=panel.radio_tabs.widget(1)
+    for source in curated_websdr_receivers():
+        _select_curated(panel,source["id"])
+        for _ in range(3):
+            app.processEvents()
+        assert panel.width()<=600 and panel.height()<=480,source["id"]
+        step_y=panel.ham_step.mapTo(surface,QPoint(0,0)).y()
+        band_y=panel.ham_band.mapTo(surface,QPoint(0,0)).y()
+        assert band_y>=step_y+panel.ham_step.height(),source["id"]
+        for control in (panel.ham_back,panel.ham_step,panel.ham_forward,panel.ham_band):
+            assert control.isVisible(),source["id"]
+            assert control.width()>=control.minimumSizeHint().width(),(source["id"],control.accessibleName(),control.width(),control.minimumSizeHint().width())
+            assert control.height()>0
+            assert surface.rect().contains(QRect(control.mapTo(surface,QPoint(0,0)),control.size()))
+        assert panel.ham_details_scroll.viewport().height()>=24
+        assert "Requested" in panel.ham_frequency_detail.text()
+        assert "not verified" in panel.ham_frequency_detail.toolTip()

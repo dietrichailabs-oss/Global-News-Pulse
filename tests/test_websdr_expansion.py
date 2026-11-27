@@ -34,7 +34,7 @@ def test_expansion_is_explicit_unique_operator_links_not_feed_import(monkeypatch
     monkeypatch.setattr("socket.create_connection", unexpected_network)
     rows = curated_websdr_receivers()
     ids = [row["id"] for row in rows]
-    assert len(rows) == 37
+    assert len(rows) == 44
     assert len(set(ids)) == len(ids)
     assert NEW_IDS <= set(ids)
     assert len({row["url"] for row in rows}) == len(rows)
@@ -144,3 +144,23 @@ def test_retired_provider_and_proxy_candidates_cannot_return():
 def test_expansion_preserves_private_url_and_credential_rejection(url):
     with pytest.raises(ValueError):
         public_receiver_url(url)
+
+
+LINK_ONLY_IDS = {"lu6flz", "lu3dj_40", "lu3dj_20", "lu8fcj", "f8kcf_romagny", "f8kcf_saleve"}
+
+
+def test_nov23_individual_operator_links_keep_transport_and_live_claims_bounded():
+    rows = {row["id"]: row for row in curated_websdr_receivers()}
+    candidate = rows["bordeaux_ham"]
+    assert candidate["embedded_candidate"] and candidate["url"] == "https://ham2.websdrbordeaux.fr/"
+    assert "audio and availability unverified" in candidate["reason"]
+    for identifier in LINK_ONLY_IDS:
+        row = rows[identifier]
+        parsed = urlsplit(row["url"])
+        assert row["checked_date"] == "2026-11-23"
+        assert row["link_only_review"] and not row["embedded_candidate"]
+        assert parsed.scheme == "http"
+        assert (parsed.hostname, parsed.port or 80) not in CURATED_WEBDR_HTTP_ORIGINS
+        assert row["ranges_khz"] == ()
+        assert "direct endpoint and live audio unverified" in row["reason"]
+        assert public_receiver_url(row["documentation"])

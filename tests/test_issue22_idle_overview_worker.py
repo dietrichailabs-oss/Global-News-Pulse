@@ -57,10 +57,13 @@ def test_no_click_qt_paint_uses_worker_html_without_reranking_5000_rows(tmp_path
         with (patch("global_pulse.brief_selection.overview_evidence_candidates",
                     side_effect=AssertionError("overview classification on Qt")) as shortlist,
               patch("global_pulse.brief_selection.overview_html",
-                    side_effect=AssertionError("overview HTML on Qt")) as renderer):
+                    side_effect=AssertionError("overview HTML on Qt")) as renderer,
+              patch("global_pulse.brief_selection.overview_documents",
+                    side_effect=AssertionError("overview page construction on Qt")) as pages):
             window.refresh_data(_idle_snapshot=snapshot)
             assert shortlist.call_count == 0
             assert renderer.call_count == 0
+            assert pages.call_count == 0
         assert window._overview_events == snapshot["overview_events"]
         assert window._overview_html_cached == snapshot["overview_html"]
     finally:

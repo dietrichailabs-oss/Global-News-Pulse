@@ -13,7 +13,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, QUrl, Qt
 from PySide6.QtWidgets import QApplication
 
 from global_pulse.brief_selection import (
-    brief_domain, overview_evidence_candidates, overview_html,
+    brief_domain, critical_alerts, overview_evidence_candidates, overview_html,
 )
 from global_pulse.controller import Controller
 from global_pulse.ui import MainWindow
@@ -40,13 +40,23 @@ def test_501_weather_rows_do_not_hide_older_sourced_nonweather_inventory():
     assert all(brief_domain(e)!="Health & disease" for e in weather[:500])
     selected=overview_evidence_candidates(weather[:500],weather+[health])
     assert any(e["id"]==health["id"] for e in selected)
-    assert len(selected)<=18
+    # Critical alerts now have an independent compact index. The original
+    # bounded cross-domain ordinary overview still cannot be weather-starved.
+    red=critical_alerts(selected)
+    assert {e["id"] for e in red}=={e["id"] for e in weather}
+    assert len(red)==501
+    ordinary=[e for e in selected if e["severity"]!="critical"]
+    assert len(ordinary)<=18
+    assert len(selected)==502 and ordinary==[health]
     page=overview_html(selected,label="synthetic filtered feed and map evidence")
     assert "SYNTHETIC Health archive source 700" in page
     assert "retained; no newer status" in page
     assert "QA Synthetic Publication" in page
     assert "pulse-event://open/archive-boundary-700" in page
-    assert page.count("SYNTHETIC Disaster archive source")<=2
+    assert page.count("SYNTHETIC Disaster archive source")==501
+    assert page.index("Critical alerts — immediate attention")<page.index("SYNTHETIC Health archive source 700")
+    for event in weather:
+        assert "pulse-event://open/"+event["id"]+"'" in page
     assert "independently confirmed" in page
     assert "SYNTHETIC" in page
 

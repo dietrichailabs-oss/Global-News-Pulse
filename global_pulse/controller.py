@@ -42,6 +42,7 @@ class Controller(QObject):
     # Real collector evidence is batched on the GUI event loop. Explicit user
     # settings/filters keep the existing immediate data_changed semantics.
     evidence_changed = Signal()
+    archive_reports_pruned = Signal()
     # Source health/status-only callbacks never re-query the entire map for
     # each provider ping. MainWindow coalesces this GUI-thread update.
     source_status_changed = Signal()
@@ -115,7 +116,9 @@ class Controller(QObject):
 
     def _prune_archive(self):
         if not self._closed:
-            self.store.prune(self.get_setting("retention_days", 365))
+            result=self.store.prune(self.get_setting("retention_days", 365))
+            if isinstance(result,dict) and result.get("reports"):
+                self.archive_reports_pruned.emit()
             self.data_changed.emit()
 
     def _apply_sources(self):
@@ -244,7 +247,9 @@ class Controller(QObject):
             self.source_status_changed.emit()
             return
         elif key == "retention_days":
-            self.store.prune(int(value))
+            result=self.store.prune(int(value))
+            if isinstance(result,dict) and result.get("reports"):
+                self.archive_reports_pruned.emit()
         self.data_changed.emit()
 
     def persist_layout_snapshot(self, settings):
@@ -331,6 +336,10 @@ class Controller(QObject):
 
     def gdelt_review_retry(self):
         self._gdelt.review_retry()
+
+    def set_headline_deferred_pause(self, reason, paused):
+        if not self._closed:
+            self._headlines.set_deferred_pause(reason, paused)
 
     def headline_view(self, event, *, defer_language=False, enabled_override=None):
         # Feed previews may route unknown languages after first GUI paint.
@@ -715,8 +724,13 @@ class Controller(QObject):
     def brief_events(self, *, since: str, period: str = "daily"):
         if period not in {"daily", "weekly"}:
             raise ValueError("Brief period must be daily or weekly")
+        # The executive red index follows the unfiltered default Monitor
+        # inventory, not the Daily/Weekly detail cutoff or a selected category.
+        map_since=(datetime.fromisoformat(since.replace("Z","+00:00"))-
+                   timedelta(days=6 if period=="daily" else 0)).isoformat()
         return self.store.list_brief_events(
-            since=since, per_domain=9 if period == "weekly" else 8
+            since=since, per_domain=9 if period == "weekly" else 8,
+            map_since=map_since
         )
 
     def export_brief(self, path, period="daily"):
