@@ -116,7 +116,7 @@ class TranslationProcess(QObject):
             self.process.kill()
 
     def _error(self, error):
-        if error == QProcess.ProcessError.FailedToStart and self.current:
+        if error == QProcess.ProcessError.FailedToStart and self.current and not self._closed:
             self._complete("", "Translation worker could not start")
 
     def _finished(self, exit_code, exit_status):
@@ -190,4 +190,30 @@ class TranslationProcess(QObject):
         self.process = None
         if process:
             process.deleteLater()
+        self._cleanup()
+
+    def begin_close(self):
+        """Request permanent cancellation; Qt observes the actual exit later."""
+        self._closed = True
+        self._timer.stop()
+        self._progress_timer.stop()
+        self.queue.clear()
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.kill()
+
+    def close_ready(self):
+        """Release QProcess on its owning thread, never waitForFinished here."""
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            return False
+        self.current = None
+        self.process = None
+        if process:
+            process.deleteLater()
+        return True
+
+    def finish_close(self):
+        """Disk-only cleanup after close_ready; safe on the archive finalizer."""
+        if self.process is not None:
+            raise RuntimeError("Translation worker termination was not confirmed")
         self._cleanup()

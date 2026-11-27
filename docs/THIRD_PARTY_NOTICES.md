@@ -1,4 +1,35 @@
-# Current freeware compliance candidate — 2026-11-10
+# Reconstructed camera-only Windows helper — 2026-11-22
+
+This successor introduces a separate native helper for exactly three reviewed
+public camera pages. It does not restore the removed YouTube/TV helper or KiwiSDR
+integration. The existing 14 snapshots and 37 curated WebSDR entries retain
+their distinct access and attribution requirements.
+
+The camera helper uses Microsoft WebView2 SDK components and a self-contained
+.NET Windows runtime. Its project/lock inputs and the resulting Windows package
+inventories identify the exact selected versions. The normal installed Microsoft
+Edge WebView2 Runtime is a prerequisite; this package does not bundle or install
+that runtime. Preserve the applicable Microsoft WebView2 terms and the exact
+.NET component notices alongside the helper. A generated inventory or successful
+build is not by itself a redistribution-rights clearance.
+
+GPC Tannum Sands and 1770 retain Gladstone Ports Corporation/CoastalCOMS
+attribution and original provider pages. BSYC Seacliff retains Brighton & Seacliff
+Yacht Club/IPCamLive attribution and the original public IPCamLive player. The
+canonical catalog includes their Source and terms links; see
+`SOURCE_ACCESS_MATRIX.md` for the exact pages. The application adds no recording,
+mirroring, token extraction or redistribution function, and no media license is
+inferred from public player availability. Live-session private profiles may
+create temporary files; cleanup is attempted rather than guaranteed after a
+crash or file lock.
+
+This reconstruction starts from `74c8de9` and retained task records. The missing
+`a4e4c96` candidate's tests and earlier packages do not establish the identity,
+notices or rights of these new bytes. Fresh exact-package evidence and independent
+review remain required. Historical dependency and notice records below preserve
+their original scope and dates.
+
+# Historical freeware compliance candidate — 2026-11-10
 
 Global Pulse is provided free of charge. This does not change the application's
 source-code licensing or remove third-party obligations.
@@ -168,7 +199,7 @@ Only approved CTranslate2 model assets, SentencePiece or BPE tokenizers, and bou
 
 Software licenses do not grant redistribution rights for collected reporting, statistics, or external media. [SOURCE_ACCESS_MATRIX.md](SOURCE_ACCESS_MATRIX.md) and [sources.json](../global_pulse/resources/sources.json) record each provider's access, attribution, retention, redistribution limitations, and review status. Public availability does not by itself establish an unrestricted license. The eligible built-in sources use `access_status=reviewed_public`; uncertain or restricted providers remain manual/disabled. User-added feeds carry a separate user-supplied status, headline/link-only defaults, and no general redistribution clearance.
 
-Attributions, original links, authors when supplied, and available source-license metadata accompany stored reports. Follow each source's terms when sharing exports. The catalog's public radio, webcam, social, and video entries are links, not copies or recording permissions. YouTube uses its official player only after consent; X and Facebook entries open original public pages. Global Pulse does not grant rights to download or rebroadcast those streams.
+Attributions, original links, authors when supplied, and available source-license metadata accompany stored reports. Follow each source's terms when sharing exports. Public radio, webcam, social and external provider links do not grant copying or recording permissions. YouTube playback and its dedicated manual catalog entries have been removed; X and Facebook entries open original public pages. Global Pulse does not grant rights to download or rebroadcast external streams. The historical resolved dependency graph above is not a statement that retired TV/WebView2 playback files are included in this package; the exact manifest and SBOM identify shipped files.
 
 ## Required work before binary publication
 

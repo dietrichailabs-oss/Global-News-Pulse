@@ -136,6 +136,8 @@ def test_correction_delivery_preferences_in_isolated_controller(tmp_path, app, s
     c.native_alert.connect(lambda *args: emitted.append(args))
     c.monitoring = True
     try:
+        # Delivery tests opt in before the initial native signal.
+        c.set_setting("notifications_enabled", True)
         c._on_reports([report(synthetic=False)])
         assert len(c.store.list_alerts()) == 1
         for key, value in settings.items():

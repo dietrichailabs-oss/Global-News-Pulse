@@ -20,6 +20,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -29,6 +30,7 @@ from defusedxml import ElementTree as SafeET
 
 from .lifecycle import provider_id, scope_identifier
 from .map_evidence import nws_map_fields
+from .hazards import GDACS_TYPES, EONET_TYPES, canonical_hazard_types, text_hazard_types
 from .capacity_limits import MAX_TOTAL_SOURCES
 
 LOG = logging.getLogger(__name__)
@@ -38,7 +40,7 @@ MAX_ITEMS = 600
 MAX_SUMMARY = 1000
 USER_AGENT = "GlobalPulse/0.1 (Dietrich AI Labs; https://www.dietrichailabs.com)"
 RESOURCE_DIR = Path(__file__).with_name("resources")
-SUPPORTED_ADAPTERS = {"rss", "atom", "gdacs", "usgs", "eonet", "nws", "cap", "worldbank", "swpc", "gdelt_doc", "manual"}
+SUPPORTED_ADAPTERS = {"rss", "atom", "gdacs", "usgs", "eonet", "nws", "cap", "worldbank", "swpc", "gdelt_doc", "who_don", "manual"}
 
 
 def utcnow() -> datetime:
@@ -294,12 +296,25 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
     result = []
     for node in items:
         title = _child(node, "title")
+        # A small set of reviewed feeds (currently Statistics Canada) wrap
+        # human-readable title text in harmless inline markup. Do not broaden
+        # generic XML interpretation: opt in per source and still sanitize the
+        # bounded itertext result through plain().
+        if not title and source.get("nested_feed_text"):
+            title_node = next((n for n in node if _local(n.tag) == "title"), None)
+            if title_node is not None:
+                title = plain(" ".join(title_node.itertext()), 300)
         link = _child(node, "link")
         if not link:
             link = next((n.get("href", "") for n in node if _local(n.tag) == "link" and n.get("rel", "alternate") == "alternate"), "")
         rid = _child(node, "guid", "id") or link
         published = _child(node, "pubdate", "published", "date")
         updated = _child(node, "updated")
+        # Atom's "updated" is not normally equivalent to publication time.
+        # Use it as publication evidence only for specifically reviewed feeds
+        # whose publisher documents/uses it as the release timestamp.
+        if not published and source.get("updated_is_publication_time"):
+            published = updated
         report = _base(source, rid, title, link, published, retrieved)
         if not report["title"] or not report["url"]:
             continue
@@ -320,18 +335,18 @@ def parse_feed(data: bytes, source: dict, retrieved: str) -> list[dict]:
             report["country"] = plain(_child(node, "country"), 100)
             report["country_basis"] = "provider_incident"
             event_id = _child(node, "eventid")
+            event_type = _child(node, "eventtype")
             if event_id:
-                report["event_key"] = "gdacs:" + _child(node, "eventtype") + ":" + event_id
+                report["event_key"] = "gdacs:" + event_type + ":" + event_id
+            kind = GDACS_TYPES.get(event_type.upper())
+            if kind:
+                report["hazard_types"] = [kind]
             report["official_scope"] = "statement"
             report["independence"] = "unknown"  # GDACS can reuse agency inputs.
             report["origin_id"] = ""
         for n in node:
             if _local(n.tag) in {"source", "creator", "author"}:
                 report["byline"] = plain(" ".join(n.itertext()), 160)
-            if _local(n.tag) == "videoid" and re.fullmatch(r"[A-Za-z0-9_-]{11}", n.text or ""):
-                report["media"].append({"type": "youtube", "video_id": n.text,
-                                         "url": "https://www.youtube.com/watch?v=" + n.text,
-                                         "title": report["title"], "provider": "YouTube", "live_status": "unknown"})
         result.append(report)
     return result
 
@@ -356,6 +371,9 @@ def parse_cap(root, source: dict, retrieved: str) -> list[dict]:
              provider_identifier=identifier, identity_aliases=[r["id"]], lifecycle_references=[],
              source_references=[], reference_errors=False, event_key="cap:" + r["id"],
              expires_at=value("expires"))
+    hazard_types = text_hazard_types(value("event"))
+    if hazard_types:
+        r["hazard_types"] = list(hazard_types)
     r["language"] = value("language").split("-")[0] or r["language"]
     r["cap_references"] = _child(root, "references")
     entries = r["cap_references"].split()
@@ -383,6 +401,13 @@ def parse_usgs(payload: dict, source: dict, retrieved: str) -> list[dict]:
         if not r["url"]:
             continue
         r.update(event_key="usgs:" + str(f.get("id")), official=True, official_scope="measurement", kind="measurement")
+        event_type = str(p.get("type") or "").strip().lower()
+        if event_type:
+            r["hazard_types"] = ["earthquake"] if event_type == "earthquake" else ["other"]
+        elif re.search(r"\b(?:explosion|blast|quarry|mine collapse)\b", r["title"], re.I):
+            r["hazard_types"] = ["other"]
+        else:
+            r["hazard_types"] = ["earthquake"]
         r["source_updated_at"] = iso(p.get("updated"))
         r["region"] = plain(p.get("place"), 160) or "Global"
         r["summary"] = f"USGS reports {plain(p.get('title') or p.get('place'), 250)}. "
@@ -415,7 +440,13 @@ def parse_eonet(payload: dict, source: dict, retrieved: str) -> list[dict]:
         r["closed_at"] = iso(e.get("closed"))
         r["source_updated_at"] = iso(latest.get("date"))
         r["source_references"] = [{"source": plain(s.get("id"), 100), "url": safe_link(s.get("url"))} for s in (e.get("sources") or [])[:30]]
-        r["subcategories"] = [plain(c.get("title"), 60) for c in (e.get("categories") or [])]
+        categories = [c for c in (e.get("categories") or []) if isinstance(c, dict)]
+        r["subcategories"] = [plain(c.get("title"), 60) for c in categories]
+        typed = [EONET_TYPES.get(c.get("id")) for c in categories]
+        title_types = text_hazard_types(r["title"])
+        if "cyclone" in title_types:
+            typed = ["cyclone" if kind == "storm" else kind for kind in typed]
+        r["hazard_types"] = list(canonical_hazard_types(typed + list(title_types)) or ("other",))
         r["severity"] = "unassessed"  # Catalog presence is not an impact measure.
         coords = latest.get("coordinates") or []
         if latest.get("type") == "Point" and len(coords) >= 2:
@@ -450,6 +481,7 @@ def parse_nws(payload: dict, source: dict, retrieved: str) -> list[dict]:
                  provider_identifier=str(rid), lifecycle_references=[], reference_errors=False,
                  identity_aliases=list(dict.fromkeys(provider_id(source["id"], value) for value in
                      [rid, p.get("@id"), f.get("id"), p.get("identifier")] if value)))
+        r["hazard_types"] = list(text_hazard_types(p.get("event")) or text_hazard_types(r["title"]) or ("other",))
         r["region"] = plain(p.get("areaDesc"), 180) or "United States"
         r["severity"] = {"Extreme": "critical", "Severe": "high", "Moderate": "moderate", "Minor": "informational"}.get(p.get("severity"), "unassessed")
         r["expires_at"] = p.get("expires") or ""
@@ -480,6 +512,58 @@ def parse_nws(payload: dict, source: dict, retrieved: str) -> list[dict]:
     return result
 
 
+def parse_who_don(payload: dict, source: dict, retrieved: str) -> list[dict]:
+    """Parse WHO Disease Outbreak News API metadata without copying article bodies."""
+    rows = payload.get("value", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        raise ValueError("Invalid WHO Disease Outbreak News contract")
+    result = []
+    for item in rows[:MAX_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        title = plain(item.get("OverrideTitle") or item.get("Title"), 300)
+        published = item.get("PublicationDateAndTime") or item.get("PublicationDate")
+        identity = item.get("DonId") or item.get("Id") or item.get("UrlName")
+        item_url = item.get("ItemDefaultUrl") or (
+            "/emergencies/disease-outbreak-news/item/" + str(item.get("UrlName") or "")
+        )
+        report = _base(source, identity, title, item_url, published, retrieved)
+        if not report["title"] or not report["url"] or not report["published_at"]:
+            continue
+        # WHO's API exposes large narrative fields. Keep only bounded title /
+        # summary metadata for discovery and attribution; open the WHO page for
+        # the full text.
+        summary = plain(item.get("Summary"), 600)
+        if not summary:
+            summary = plain(item.get("Overview"), 600)
+        report.update(
+            summary=summary,
+            metadata_only=True,
+            kind="announcement",
+            official=True,
+            official_scope="statement",
+            independence="original",
+            origin_id=source.get("publisher_origin_id") or source["id"],
+            severity="unassessed",
+            source_updated_at=iso(item.get("LastModified")),
+        )
+        result.append(report)
+    return result
+
+
+@lru_cache(maxsize=1)
+def _map_iso3_codes() -> set[str]:
+    try:
+        doc = json.loads((RESOURCE_DIR / "world_countries.geojson").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    return {
+        str((feature.get("properties") or {}).get("code") or "").upper()
+        for feature in doc.get("features", [])
+        if re.fullmatch(r"[A-Z]{3}", str((feature.get("properties") or {}).get("code") or "").upper())
+    }
+
+
 def parse_worldbank(payload: list, source: dict, retrieved: str) -> list[dict]:
     if not isinstance(payload, list) or len(payload) < 2 or not isinstance(payload[0], dict) or not isinstance(payload[1], list):
         raise ValueError("Invalid World Bank indicator contract")
@@ -495,7 +579,11 @@ def parse_worldbank(payload: list, source: dict, retrieved: str) -> list[dict]:
         if not re.fullmatch(r"\d{4}", year):
             continue
         indicator_id = str(indicator.get("id") or source.get("indicator", ""))
-        country_code = str(row.get("countryiso3code") or country.get("id", ""))
+        country_code = str(row.get("countryiso3code") or "").upper()
+        # country/all also returns World Bank aggregates and regions. Admit only
+        # ISO3 identities represented by the bundled offline country map.
+        if country_code not in _map_iso3_codes():
+            continue
         result.append({"id": f"wb:{country_code}:{indicator_id}:{year}", "source_id": source["id"],
                        "indicator": indicator_id, "indicator_name": plain(indicator.get("value"), 200),
                        "country": plain(country.get("value"), 100), "country_code": country_code,
@@ -771,7 +859,9 @@ class Collector:
                 if adapter == "worldbank":
                     result["observations"] = parse_worldbank(payload, self.source, current_iso)
                 else:
-                    if adapter == "gdelt_doc":
+                    if adapter == "who_don":
+                        result["reports"] = parse_who_don(payload, self.source, current_iso)
+                    elif adapter == "gdelt_doc":
                         result["reports"] = parse_gdelt_doc(payload, self.source, current_iso)
                         state["country_cursor"] = gdelt_next_cursor
                         state["country_batch"] = gdelt_batch
@@ -909,15 +999,39 @@ class Scheduler:
         self._wake.set()
 
     def stop(self, timeout=2.0):
+        self.request_stop()
         with self._lock:
-            self._stop.set()
-            self._wake.set()
             self._generation += 1
             threads = ([self._thread] if self._thread else []) + list(self._workers.values())
         end = time.monotonic() + max(0, timeout)
         for thread in threads:
             if thread and thread is not threading.current_thread():
                 thread.join(max(0, end - time.monotonic()))
+
+    def request_stop(self):
+        """Invalidate collectors immediately, even during a locked callback.
+
+        Setting these events needs no scheduler/Store lock. The GUI must not
+        wait for a callback's SQLite transaction merely to request exit.
+        """
+        self._stop.set()
+        self._wake.set()
+
+    def settle_callbacks(self, timeout=1.0):
+        """Off-GUI barrier for a callback admitted before request_stop.
+
+        Network requests outside this lock may finish later, but see _stop
+        before any persistence or callback. We do not join their socket waits.
+        """
+        if not self._stop.is_set():
+            raise RuntimeError("Collector stop must be requested before shutdown")
+        if not self._lock.acquire(timeout=max(0.0, timeout)):
+            return False
+        try:
+            self._generation += 1
+            return True
+        finally:
+            self._lock.release()
 
     def _run(self):
         while not self._stop.is_set():
@@ -1007,6 +1121,10 @@ class Scheduler:
                 host = urlsplit(source["url"]).hostname or ""
                 if time.monotonic() < self._host_next.get(host, 0):
                     continue
+                # request_stop deliberately does not wait for this lock. A
+                # stop during the Store reads above must cancel admission too.
+                if self._stop.is_set():
+                    return
                 state["configured_interval"] = self.interval
                 generation = self._generation
                 worker = threading.Thread(target=self._collect, args=(copy.deepcopy(source), state, generation), name="GPCollect-" + sid, daemon=True)
@@ -1019,6 +1137,9 @@ class Scheduler:
 
     def _collect(self, source, state, generation):
         try:
+            # Also cover a stop between Thread.start and its first timeslice.
+            if self._stop.is_set():
+                return
             result = self.collector_factory(source).collect(state)
             with self._lock:
                 if self._stop.is_set():

@@ -1,0 +1,103 @@
+name: Source Expansion - UK Legislation and OBR Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-uk-legislation-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  first-party-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Verify publisher feed links in official legislation new-page metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from urllib.request import Request,urlopen
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin,urlsplit
+          class Extract(HTMLParser):
+              def __init__(self): super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  if tag in {"a","link"}:
+                      d=dict(attrs)
+                      if (d.get("href") and (d.get("type","").lower().find("atom")>=0 or d.get("type","").lower().find("rss")>=0 or "feed" in d.get("href","").lower())):
+                          self.links.append((tag,d.get("type",""),d["href"]))
+          url="https://www.legislation.gov.uk/new"
+          try:
+              with urlopen(Request(url,headers={"User-Agent":"GlobalPulse-SourceAdmission/1.0"}),timeout=12) as r:
+                  page=r.read(500000).decode("utf-8","replace")
+              p=Extract();p.feed(page)
+              for tag,ty,link in p.links[:40]:
+                  absolute=urljoin(url,link)
+                  if urlsplit(absolute).hostname in {"www.legislation.gov.uk","legislation.gov.uk"}:
+                      print("LEGISLATION_PUBLISHER_DECLARED_FEED",repr((tag,ty,absolute)),flush=True)
+          except Exception as exc:
+              print("LEGISLATION_DISCOVERY_UNAVAILABLE",type(exc).__name__,str(exc)[:160],flush=True)
+          PY
+      - name: Direct publisher Collector feeds only, no catalog admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          candidates=[
+              ("uk_legislation_all","Legislation.gov.uk - New legislation","https://www.legislation.gov.uk/new/data.feed","uk_legislation","Government",["www.legislation.gov.uk","legislation.gov.uk"]),
+              ("uk_legislation_uksi","Legislation.gov.uk - UK Statutory Instruments","https://www.legislation.gov.uk/new/uksi/data.feed","uk_legislation","Government",["www.legislation.gov.uk","legislation.gov.uk"]),
+              ("uk_legislation_ukpga","Legislation.gov.uk - UK Public General Acts","https://www.legislation.gov.uk/new/ukpga/data.feed","uk_legislation","Government",["www.legislation.gov.uk","legislation.gov.uk"]),
+              ("uk_obr_news","Office for Budget Responsibility - site updates","https://obr.uk/feed/","uk_obr","Economy",["obr.uk","www.obr.uk"]),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for i,(sid,name,url,origin,category,hosts) in enumerate(candidates):
+              if i: time.sleep(3)
+              s=dict(id=sid,name=name,url=url,adapter="rss",enabled=True,metadata_only=True,
+                access_status="reviewed_public",region="Europe",country="United Kingdom",
+                language="en",publisher_origin_id=origin,independence="original",official=True,
+                official_scope="statement",category=category,min_interval=3600,retention_days=180,
+                stale_after_days=30,allowed_domains=[urlsplit(url).hostname],
+                article_domains=hosts,attribution=name+"; original direct link, publication date, Open Government Licence; no endorsement")
+              try:
+                  r=Collector(s).collect();st=r["state"]; reports=r.get("reports",[])
+                  fresh=[v for v in reports if v.get("published_at") and 0<=now-timestamp(v["published_at"])<=30*86400]
+                  bad=[v for v in reports if not v.get("title") or not v.get("published_at")
+                    or not v.get("attribution") or v.get("summary") or v.get("media")
+                    or v.get("origin_id")!=origin or v.get("original_url")!=v.get("url")
+                    or v.get("country_basis")!="publisher_coverage"
+                    or v.get("latitude") is not None or v.get("longitude") is not None
+                    or urlsplit(v.get("url","")).scheme!="https"
+                    or urlsplit(v.get("url","")).hostname not in hosts]
+                  record=dict(id=sid,eligible=bool(st.get("status")=="available" and st.get("http_status")==200 and reports and fresh and not bad),
+                    status=st.get("status"),http_status=st.get("http_status"),reports=len(reports),
+                    recent_30d=len(fresh),violations=len(bad),latest=st.get("latest_publication"),
+                    error=st.get("error",""),sample_urls=[v.get("original_url") for v in reports[:3]],
+                    publisher_origin_id=origin)
+              except Exception as exc:
+                  record=dict(id=sid,eligible=False,error=type(exc).__name__+": "+str(exc)[:160])
+              print("UK_OFFICIAL_PRE_ADMISSION",json.dumps(record,sort_keys=True),flush=True)
+          print("UK_PROBE_ONLY no catalog mutation or source admission",flush=True)
+          PY

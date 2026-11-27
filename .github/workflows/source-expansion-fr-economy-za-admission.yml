@@ -1,0 +1,101 @@
+name: Source Expansion - France Economy and South Africa Post-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-fr-economy-za-admission.yml
+      - tests/test_source_expansion_fr_economy_za.py
+      - global_pulse/resources/sources.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Strict offline parser, rights, no-scraping and origin regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_source_expansion_fr_economy_za.py
+      - name: Validate checked-out catalog and collect live origin-safe metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector, load_catalog, timestamp
+
+          expectations = {
+              "fr_economie_portal": ("https://www.economie.gouv.fr/rss/toutesactualites",
+                                    "fr_economie", "France", "Economy"),
+              "fr_economie_daj": ("https://www.economie.gouv.fr/daj/rss",
+                                 "fr_economie", "France", "Government"),
+              "za_statssa_news": ("https://www.statssa.gov.za/?feed=rss2",
+                                  "statssa", "South Africa", "Economy"),
+          }
+          catalog = {row["id"]: row for row in load_catalog()}
+          assert len(set(row["publisher_origin_id"] for key, row in catalog.items()
+                         if key in ("fr_economie_portal", "fr_economie_daj"))) == 1
+          now = datetime.now(timezone.utc).timestamp()
+          failed = []
+          for identity, (url, origin, country, category) in expectations.items():
+              row = catalog[identity]
+              assert row["url"] == url and row["publisher_origin_id"] == origin
+              assert row["country"] == country and row["category"] == category
+              assert row["enabled"] is True and row["access_status"] == "reviewed_public"
+              assert row["metadata_only"] is True and row["min_interval"] >= 1800
+              assert row["license_url"].startswith("https://") and row["attribution"]
+              found = Collector(row).collect()
+              state = found["state"]
+              reports = found["reports"]
+              recent = [
+                  r for r in reports if r.get("published_at")
+                  and 0 <= now - timestamp(r["published_at"]) <= 30*86400
+              ]
+              invalid = [
+                  r for r in reports if not r.get("published_at")
+                  or not r.get("title") or not r.get("attribution")
+                  or r.get("summary") or r.get("media")
+                  or r.get("origin_id") != origin
+                  or r.get("country_basis") != "publisher_coverage"
+                  or urlsplit(r.get("url", "")).scheme != "https"
+                  or urlsplit(r.get("url", "")).hostname not in row["article_domains"]
+              ]
+              ok = (state.get("status") == "available" and state.get("http_status") == 200
+                    and len(reports) > 0 and len(recent) > 0 and not invalid)
+              print("CATALOG_LIVE_ADMISSION", json.dumps({
+                  "source_id": identity, "origin_id": origin, "pass": ok,
+                  "http_status": state.get("http_status"),
+                  "status": state.get("status"), "reports": len(reports),
+                  "recent_30d": len(recent), "latest": state.get("latest_publication") or "",
+                  "invalid_metadata_or_origin": len(invalid),
+                  "error": state.get("error") or ""
+              }, sort_keys=True), flush=True)
+              if not ok:
+                  failed.append(identity)
+          if failed:
+              raise SystemExit("ADMISSION_FAILED: " + ", ".join(failed))
+          print("THREE_FEEDS_POST_ADMISSION_PASS")
+          PY

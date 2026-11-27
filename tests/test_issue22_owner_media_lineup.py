@@ -1,6 +1,6 @@
 """Owner-observed media lineup regressions for the physical Windows candidate.
 
-Offline only: no stream, YouTube, camera, WebSDR or KiwiSDR connection occurs.
+Offline only: no stream, camera or WebSDR connection occurs.
 """
 import os
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
@@ -10,7 +10,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication,QMessageBox
 
 from global_pulse.internet_radio import STATIONS,HAM_DIRECTORIES,RadioPanel
-from global_pulse.single_media import Television,MediaPanel
+from global_pulse.single_media import MediaPanel
 from global_pulse.sources import load_media_catalog
 from global_pulse.camera_context import camera_catalog
 
@@ -20,22 +20,27 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_direct_radio_lineup_is_expanded_and_documented():
-    assert len(STATIONS) >= 9
+def test_direct_radio_lineup_is_genre_sorted_and_documented():
     ids={item["id"] for item in STATIONS}
-    assert {"wnyc_fm","wnyc_am","wqxr","new_sounds","operavore",
-            "deutschlandfunk","deutschlandfunk_kultur",
+    assert {"wnyc_fm","wnyc_am","deutschlandfunk",
             "deutschlandfunk_nova","deutschlandfunk_debatten"} <= ids
+    assert {"wqxr","new_sounds","operavore","deutschlandfunk_kultur"} <= ids
+    assert len(ids) >= 18
+    assert {item["category"] for item in STATIONS} == {
+        "News & Talk", "Music", "Classical", "Culture"
+    }
     for item in STATIONS:
         assert item["url"].startswith("https://")
         assert item["documentation"].startswith("https://")
+        assert item["language"] in {"English", "German", "French"}
+        assert item["dial"] == "INTERNET STREAM" or item["dial"].startswith(("AM · ", "FM · "))
 
 
 def test_ham_sdr_receiver_directories_are_visible_without_starting_audio(app):
     panel=RadioPanel(confirm=lambda:False)
     try:
-        assert panel.ham_selector.count()==len(HAM_DIRECTORIES)==2
-        assert {panel.ham_selector.itemData(i)["id"] for i in range(panel.ham_selector.count())}=={"websdr","kiwisdr"}
+        assert panel.ham_selector.count()==len(HAM_DIRECTORIES)==1
+        assert {panel.ham_selector.itemData(i)["id"] for i in range(panel.ham_selector.count())}=={"websdr"}
         assert panel.status.text()=="OFF"
         assert panel._session is None
     finally:
@@ -73,7 +78,7 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
         panel.receiver_url.setText("https://receiver.example.org/")
         assert panel.connect_receiver()
         assert panel.receiver_connected
-        assert fake.loaded==["https://receiver.example.org/"]
+        assert fake.loaded==["https://receiver.example.org/?tune=7100usb"]
         assert fake.shown
 
         panel.disconnect_receiver()
@@ -83,6 +88,61 @@ def test_in_app_sdr_accepts_only_specific_public_https_receiver(app,monkeypatch)
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
 
+
+def test_sdr_tuner_generates_receiver_native_frequency_parameters(app,monkeypatch):
+    panel=RadioPanel(confirm=lambda:False)
+    try:
+        panel.receiver_url.setText("https://receiver.example.org/rx")
+        panel.frequency.setText("14200.5")
+        panel.mode.setCurrentIndex(panel.mode.findData("usb"))
+        websdr,host=panel._tuned_receiver_url()
+        assert host=="receiver.example.org"
+        assert websdr=="https://receiver.example.org/rx?tune=14200.5usb"
+
+        panel.receiver_type.setCurrentIndex(panel.receiver_type.findData("websdr"))
+        panel.mode.setCurrentIndex(panel.mode.findData("lsb"))
+        websdr,_=panel._tuned_receiver_url("7200")
+        assert websdr=="https://receiver.example.org/rx?tune=7200lsb"
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
+
+
+def test_sdr_scan_steps_bounded_range_and_stops(app,monkeypatch):
+    """Advance only on page completion; never cancel a pending WebSDR load.
+
+    This remains a bounded *offline* scan test: synthetic load completion is
+    not evidence of provider connectivity or any audio/video playback.
+    """
+    panel=RadioPanel(confirm=lambda:False)
+    tuned=[]
+    try:
+        def fake_tune(frequency=None):
+            tuned.append(float(frequency))
+            panel.receiver_connected=True
+            panel._sdr_state_change("CONNECTING", "Synthetic receiver page pending")
+            return True
+        monkeypatch.setattr(panel,"tune_receiver",fake_tune)
+        panel.scan_start.setText("7000")
+        panel.scan_end_edit.setText("7010")
+        panel.scan_step_edit.setText("5")
+        panel.scan_dwell.setText("1")
+        assert panel.start_scan()
+        assert tuned==[7000.0]
+        panel._scan_next()  # A slow page must not be interrupted by dwell.
+        assert tuned==[7000.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0]
+        panel._sdr_state_change("ON","Synthetic page load completed; audio unverified")
+        panel._scan_next()
+        assert tuned==[7000.0,7005.0,7010.0]
+        panel._sdr_state_change("ON","Synthetic final page completed; audio unverified")
+        panel._scan_next()
+        assert not panel.scan_timer.isActive()
+    finally:
+        panel.shutdown();panel.deleteLater();app.processEvents()
 
 @pytest.mark.parametrize("bad",[
     "http://receiver.example.org/",
@@ -124,23 +184,6 @@ def test_radio_off_also_destroys_sdr_session(app):
         panel.shutdown();panel.deleteLater();app.processEvents()
 
 
-def test_tv_exposes_exact_video_owner_test_candidates_without_promoting_verified_builtins(app):
-    tv=Television()
-    try:
-        tv.set_catalog(load_media_catalog())
-        assert tv._builtins==[]
-        assert tv._test_candidates
-        assert all(item.get("owner_test_candidate") is True for item in tv._test_candidates)
-        assert all(item["title"].startswith("TEST · ") for item in tv._test_candidates)
-        # Only exact video identities are admitted. Channel/live directory pages remain absent.
-        assert all("watch?v=" in item["url"] or "youtu.be/" in item["url"] or "/live/" in item["url"]
-                   for item in tv._test_candidates)
-        assert tv.selector.count() >= len(tv._test_candidates)
-        assert any("TEST · " in str(tv.selector.itemText(i)) for i in range(tv.selector.count()))
-    finally:
-        tv.stop();tv.deleteLater();app.processEvents()
-
-
 def test_camera_bank_is_available_manually_without_event_match(app):
     panel=MediaPanel()
     try:
@@ -151,22 +194,21 @@ def test_camera_bank_is_available_manually_without_event_match(app):
         ids={panel.camera.selector.itemData(i).get("id") for i in range(panel.camera.selector.count())
              if isinstance(panel.camera.selector.itemData(i),dict)}
         assert {item["id"] for item in reviewed} <= ids
-        assert "available manually" in panel.camera_status.text()
+        assert panel.camera_status.text() == "17 / 17 cameras · 3 live · 14 snapshots"
+        assert "available manually" in panel.camera_status.toolTip()
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
 
-
-def test_news_refresh_does_not_start_radio_tv_or_camera(app):
+def test_news_refresh_does_not_start_radio_or_camera(app):
     panel=MediaPanel()
     try:
-        panel.set_catalog(load_media_catalog())
         panel.set_event({"id":"owner-observed-fixture","status":"active","title":"Routine update",
                          "country":"","region":"Global","severity":"moderate","reports":[]})
         assert panel.radio.status.text()=="OFF"
         assert panel.radio._session is None
-        assert panel.tv.tv_status.text()=="OFF"
-        assert panel.tv.view is None
+        assert not hasattr(panel,"tv")
         assert panel.camera.camera is None
     finally:
         panel.shutdown();panel.deleteLater();app.processEvents()
+

@@ -1,0 +1,120 @@
+name: Source Expansion - France Economy and Southern Africa Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths:
+      - .github/workflows/source-expansion-fr-economy-za-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publisher-direct-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked app parser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Unadmitted candidates - direct Collector, bounded metadata-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector, timestamp
+
+          base = {
+              "adapter": "rss", "enabled": True, "metadata_only": True,
+              "access_status": "reviewed_public", "independence": "original",
+              "official": True, "min_interval": 1800,
+              "stale_after_days": 30,
+              "retention_days": 180, "language": "fr",
+              "region": "Europe", "country": "France",
+              "publisher_origin_id": "fr_economie",
+              "allowed_domains": ["www.economie.gouv.fr"],
+              "article_domains": ["www.economie.gouv.fr", "economie.gouv.fr"],
+          }
+          candidates = [
+              {**base, "id": "fr_economie_portal_probe",
+               "name": "France Ministry of Economy — Current News",
+               "url": "https://www.economie.gouv.fr/rss/toutesactualites",
+               "category": "Economy"},
+              {**base, "id": "fr_economie_dgccrf_probe",
+               "name": "France Consumer Protection Agency — News",
+               "url": "https://economie.gouv.fr/dgccrf/rss",
+               "allowed_domains": ["economie.gouv.fr"],
+               "category": "Government"},
+              {**base, "id": "fr_economie_daj_probe",
+               "name": "France Economy Legal Affairs — News",
+               "url": "https://www.economie.gouv.fr/daj/rss",
+               "category": "Government"},
+              {**base, "id": "fr_economie_tracfin_probe",
+               "name": "France TRACFIN — News",
+               "url": "https://www.economie.gouv.fr/tracfin/rss",
+               "category": "Government"},
+              {
+               **base, "id": "za_statssa_probe", "name": "Statistics South Africa — Official News",
+               "url": "https://www.statssa.gov.za/?feed=rss2",
+               "category": "Economy", "region": "Africa", "country": "South Africa",
+               "language": "en", "publisher_origin_id": "statssa",
+               "allowed_domains": ["www.statssa.gov.za"],
+               "article_domains": ["www.statssa.gov.za", "statssa.gov.za"],
+              }
+          ]
+          now = datetime.now(timezone.utc).timestamp()
+          passed = []
+          for candidate in candidates:
+              try:
+                  collected = Collector(candidate).collect()
+                  state = collected["state"]
+                  reports = collected.get("reports", [])
+                  recent = [
+                      r for r in reports if r.get("published_at")
+                      and 0 <= now - timestamp(r["published_at"]) <= 30*86400
+                  ]
+                  invalid = [
+                      r for r in reports if r.get("summary") or r.get("media")
+                      or not r.get("title") or not r.get("published_at")
+                      or r.get("origin_id") != candidate["publisher_origin_id"]
+                      or not r.get("attribution")
+                      or urlsplit(r.get("url", "")).scheme != "https"
+                      or urlsplit(r.get("url", "")).hostname not in candidate["article_domains"]
+                  ]
+                  ok = (state.get("status")=="available" and state.get("http_status")==200
+                        and len(reports)>0 and len(recent)>0 and len(invalid)==0)
+                  row = {
+                      "id": candidate["id"], "url": candidate["url"], "pass": ok,
+                      "status": state.get("status"), "http_status": state.get("http_status"),
+                      "reports": len(reports), "recent_30d": len(recent),
+                      "latest_publication": state.get("latest_publication") or "",
+                      "metadata_provenance_violations": len(invalid),
+                      "error": state.get("error") or "",
+                  }
+                  if ok:
+                      passed.append(candidate["id"])
+              except Exception as exc:
+                  row = {"id": candidate["id"], "pass": False,
+                         "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+              print("UNADMITTED_PUBLISHER_PROBE", json.dumps(row, sort_keys=True), flush=True)
+          print("PRE_ADMISSION_PROBE_COMPLETE", json.dumps({"passed":passed,
+                "tested":len(candidates),
+                "note":"No catalog writes; individual PASS is NOT post-catalog acceptance or QA approval."}),
+                flush=True)
+          PY

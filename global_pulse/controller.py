@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal
+from PySide6.QtCore import QObject, QUrl, QTimer, QEvent, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox, QInputDialog
 
@@ -27,8 +27,33 @@ def in_quiet_hours(settings, now=None):
     return quiet_hours_active(settings, now)
 
 
+class ShutdownPending(RuntimeError):
+    """Already-admitted archive work is draining, not a failed close.
+
+    Only the shutdown coordinator retries this state automatically, without
+    overlapping disk finalizers. Its original deadline bounds hidden waiting;
+    after that, visible progress can still complete automatically. Genuine
+    Store/SQLite/child-cleanup failures keep their original exception types.
+    """
+
+
 class Controller(QObject):
     data_changed = Signal()
+    # Real collector evidence is batched on the GUI event loop. Explicit user
+    # settings/filters keep the existing immediate data_changed semantics.
+    evidence_changed = Signal()
+    archive_reports_pruned = Signal()
+    # Source health/status-only callbacks never re-query the entire map for
+    # each provider ping. MainWindow coalesces this GUI-thread update.
+    source_status_changed = Signal()
+    # Native notification delivery/status is NOT news ingest. Distinct signal
+    # avoids synchronous 500 feed + 5k map + 5k country refresh on each toast.
+    notification_changed = Signal()
+    # Explicit opt-in changes can start the native bridge after launch without
+    # routing a Settings checkbox through a 5,000-event map redraw.
+    notification_preference_changed = Signal(bool)
+    # Bookmark-only updates must not repaint the entire 5,000-record map.
+    situation_changed = Signal(str, bool)
     status_changed = Signal(str)
     alert_received = Signal(dict)
     translation_ready = Signal(str, str)
@@ -49,13 +74,27 @@ class Controller(QObject):
         bundled = load_catalog()
         self._bundled_source_ids = {source["id"] for source in bundled}
         self.catalog = bundled + self.get_setting("user_feeds", [])
+        from .source_availability import migrate_all_available_sources_once
+        # Synthetic training profiles must keep their explicit fixture source selection.
+        self._enabled_sources_migrated = (not demo and
+            migrate_all_available_sources_once(self.store, self.catalog))
         self.media_catalog = load_media_catalog()
         self.monitoring = False
-        self.notification_status = "Registering native notifications"
+        self.notification_status = "Native pop-up notifications off · enable in Settings (alerts remain in history)"
         self.last_collection = "Never"
         self._closed = False
+        # Tray activation must not wait for collector-held SQLite locks merely
+        # to decide whether X hides the window. These values reflect persisted
+        # choices only, never an unsaved Settings checkbox.
+        self.close_to_tray_enabled = bool(self.get_setting("close_to_tray", True))
+        self.tray_explained = bool(self.get_setting("tray_explained", False))
         self.storage_problem.connect(self._pause_for_storage)
         self._ingest_lock = threading.RLock()
+        # A cooperative Brief read releases the Store lock between pages.
+        # Hold an independent lifetime lease until its last access and text
+        # preparation complete; a momentarily unlocked Store is not drained.
+        self._brief_readers = threading.Condition()
+        self._brief_reader_count = 0
         self._workers = TranslationProcess(self.data_dir, self)
         self._workers.completed.connect(self._translation_complete)
         self._workers.progress.connect(self._model_progress)
@@ -82,19 +121,25 @@ class Controller(QObject):
 
     def _prune_archive(self):
         if not self._closed:
-            self.store.prune(self.get_setting("retention_days", 365))
+            result=self.store.prune(self.get_setting("retention_days", 365))
+            if isinstance(result,dict) and result.get("reports"):
+                self.archive_reports_pruned.emit()
             self.data_changed.emit()
 
     def _apply_sources(self):
         from .source_availability import enabled_ids
         enabled = enabled_ids(self.catalog, self.get_setting("enabled_sources", None))
-        self.scheduler.set_sources([dict(source, enabled=source["id"] in enabled and not (
-            self.get_setting("gdelt_batches_enabled", False) is True and source.get("adapter") == "gdelt_doc"))
-                                    for source in self.catalog])
+        gdelt_batched = self.get_setting("gdelt_batches_enabled", False) is True
+        effective = [dict(source, enabled=source["id"] in enabled and not (
+            gdelt_batched and source.get("adapter") == "gdelt_doc")) for source in self.catalog]
+        self.scheduler.set_sources(effective)
+        # Native tray must reflect the SAME capability-filtered/owner-selected
+        # sources actually passed to Scheduler, not stale catalog defaults.
+        self._enabled_collection_ids = frozenset(s["id"] for s in effective if s["enabled"])
 
     def set_source_enabled(self, source_id, enabled):
         """Explicit provider-ID action; never starts monitoring or bypasses due times."""
-        from .source_availability import capability
+        from .source_availability import available_ids, capability
         if self._closed:
             raise RuntimeError("Controller is closed")
         if type(enabled) is not bool or not isinstance(source_id, str):
@@ -108,7 +153,7 @@ class Controller(QObject):
         # Match enabled_ids(): local/imported JSON settings may contain
         # non-string (including unhashable) entries.  Ignore those before
         # adding/removing a source; never reinterpret corrupt values as IDs.
-        requested = ({s["id"] for s in self.catalog if s.get("enabled")}
+        requested = (available_ids(self.catalog)
                      if preference is None else
                      {item for item in preference if isinstance(item, str)}
                      if isinstance(preference, list) else set())
@@ -127,6 +172,11 @@ class Controller(QObject):
             return size_gb(value)
         if key == "gdelt_batches_enabled":
             return value is True
+        if key == "notifications_enabled":
+            # Upgrades used to default to native toasts ON. Require a fresh
+            # explicit opt-in after this change, even if an old setting is True.
+            return (value is True and
+                    self.store.get_setting("native_notifications_opt_in_v2", False) is True)
         if key == "gdelt_retention_days":
             from .gdelt_schedule import retention_days as gdelt_days
             return gdelt_days(value)
@@ -141,6 +191,9 @@ class Controller(QObject):
     def set_setting(self, key, value):
         if self._closed:
             return
+        if key == "notifications_enabled" and type(value) is not bool:
+            raise ValueError("Native notifications require an explicit boolean choice")
+        old_native = self.get_setting("notifications_enabled", False) if key == "notifications_enabled" else False
         if key == "gdelt_batches_enabled" and type(value) is not bool:
             raise ValueError("GDELT collection requires a boolean")
         if key == "gdelt_retention_days" and (type(value) is not int or not 1 <= value <= 365):
@@ -168,8 +221,25 @@ class Controller(QObject):
                 self.store.set_setting(key, value)
             finally:
                 self._gdelt.set_active(was_active and self.monitoring and not self.demo)
+        elif key in {"close_to_tray", "tray_explained"}:
+            # Keep the policy cache in the same ordering as durable writes,
+            # including the background first-close explanation snapshot.
+            with self.store._lock:
+                self.store.set_setting(key, value)
+                if key == "close_to_tray":
+                    self.close_to_tray_enabled = bool(value)
+                else:
+                    self.tray_explained = bool(value)
         else:
             self.store.set_setting(key, value)
+        if key == "notifications_enabled":
+            # Only Settings Save or the tray toggle sets this migration marker;
+            # old permissive defaults can never silently launch native alerts.
+            self.store.set_setting("native_notifications_opt_in_v2", True)
+            if old_native != value:
+                self.notification_preference_changed.emit(value)
+            self.notification_changed.emit()
+            return
         if key == "gdelt_batches_enabled":
             self._apply_sources()
             self._gdelt.set_active(value and self.monitoring and not self.demo)
@@ -179,16 +249,73 @@ class Controller(QObject):
             self.scheduler.set_interval(int(value))
         elif key == "enabled_sources":
             self._apply_sources()
+            self.source_status_changed.emit()
+            return
         elif key == "retention_days":
-            self.store.prune(int(value))
+            result=self.store.prune(int(value))
+            if isinstance(result,dict) and result.get("reports"):
+                self.archive_reports_pruned.emit()
         self.data_changed.emit()
 
-    def archive_storage_status(self):
+    def persist_layout_snapshot(self, settings):
+        """Disk-only close-to-tray save; never emits dashboard refreshes.
+
+        The GUI owns snapshot capture. This method accepts only the layout
+        keys and optional first-tray notice marker, and is serialized with
+        ingestion/final shutdown so an older deferred save cannot overwrite
+        the final Exit snapshot or touch an already-closed connection.
+        """
+        required = {"window_geometry", "vertical_split", "lower_split",
+                    "map_view", "intel_split", "map_layers_visible"}
+        if (not isinstance(settings, dict) or not required <= settings.keys()
+                or settings.keys() - required - {"tray_explained"}):
+            raise ValueError("Invalid layout snapshot keys")
+        if not isinstance(settings["window_geometry"], str):
+            raise ValueError("Invalid window geometry")
+        for key in ("vertical_split", "lower_split", "intel_split"):
+            values = settings[key]
+            if (not isinstance(values, list) or len(values) > 16
+                    or any(type(value) is not int or value < 0 for value in values)):
+                raise ValueError("Invalid splitter layout")
+        if not isinstance(settings["map_view"], dict):
+            raise ValueError("Invalid map layout")
+        if type(settings["map_layers_visible"]) is not bool:
+            raise ValueError("Invalid map layer visibility")
+        if "tray_explained" in settings and type(settings["tray_explained"]) is not bool:
+            raise ValueError("Invalid tray explanation marker")
+        # Round-trip before waiting for locks: reject Qt objects/nonfinite
+        # numbers and detach mutable containers from the GUI-owned snapshot.
+        try:
+            snapshot = json.loads(json.dumps(settings, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("Layout snapshot must contain finite plain values") from error
+        with self._ingest_lock, self.store._lock:
+            if self._closed or self._store_closed:
+                return False
+            self.store.set_settings_atomic(snapshot)
+            if "tray_explained" in snapshot:
+                self.tray_explained = snapshot["tray_explained"]
+        return True
+
+    def archive_storage_status(self, *, nonblocking=False):
+        """Return honest archive status; passive Qt polls may defer on BUSY.
+
+        The old hidden Settings timer waited for the 5,000-event collector's
+        Store RLock on the GUI thread, even before any clicks. A nonblocking
+        request returns None rather than replacing the last real reading with
+        fabricated free-space/cleanup values. Explicit callers retain their
+        original serialized current-state behavior.
+        """
         from .archive_storage import snapshot, last_cleanup, last_cleanup_attempt
-        with self.store._lock:
+        acquired = self.store._lock.acquire(blocking=not nonblocking)
+        if not acquired:
+            return None
+        try:
             result = snapshot(self.store._conn, self.store.path)
             result["last_cleanup"] = last_cleanup(self.store._conn)
             result["cleanup_attempt"] = last_cleanup_attempt(self.store._conn)
+        finally:
+            self.store._lock.release()
         # The live result takes precedence over an older persisted attempt,
         # including when SQLite could not save the new status.
         if self._gdelt.cleanup_outcome:
@@ -202,7 +329,9 @@ class Controller(QObject):
             return False
         return self._gdelt.request_cleanup()
 
+    @Slot(str)
     def _pause_for_storage(self, message):
+        """Handle collector-origin disk failure on Controller GUI thread."""
         if not self._closed:
             self.pause()
             self.status_changed.emit(message)
@@ -213,8 +342,11 @@ class Controller(QObject):
     def gdelt_review_retry(self):
         self._gdelt.review_retry()
 
-    def headline_view(self, event):
-        return self._headlines.view(event)
+    def headline_view(self, event, *, defer_language=False, enabled_override=None):
+        # Feed previews may route unknown languages after first GUI paint.
+        # Selected-event evidence still uses the synchronous, exact route.
+        return self._headlines.view(event, defer_language=defer_language,
+                                    enabled_override=enabled_override)
 
     def events(self, **filters):
         return self.store.list_events(**filters)
@@ -273,18 +405,21 @@ class Controller(QObject):
             return
         if state.get("last_success"):
             self.last_collection = max(self.last_collection if self.last_collection != "Never" else "", state["last_success"])
-        self.data_changed.emit()
+        # Source status callback can occur once per enabled feed and is not
+        # new evidence. MainWindow merges repeated status-only notifications.
+        self.source_status_changed.emit()
 
     def _on_observations(self, observations):
         with self._ingest_lock:
             if not self._closed and self.monitoring:
                 from .archive_storage import StorageBlocked
                 try:
-                    self.store.put_observations(observations)
+                    changed = self.store.put_observations(observations)
                 except StorageBlocked as error:
                     self.storage_problem.emit(str(error))
                     return
-                self.data_changed.emit()
+                if changed:
+                    self.evidence_changed.emit()
 
     def _watched(self, event, previous=None, *, reason=None):
         # Persisted/imported JSON can bypass the Settings UI's list validation.
@@ -358,13 +493,17 @@ class Controller(QObject):
                 settings = {k: self.get_setting(k, default) for k, default in [("quiet_enabled", False), ("quiet_start", "22:00"), ("quiet_end", "07:00")]}
                 if self.demo:
                     self.store.update_alert_delivery(alert["id"], "Synthetic review: native delivery disabled")
-                elif not self.get_setting("notifications_enabled", True):
+                elif not self.get_setting("notifications_enabled", False):
                     self.store.update_alert_delivery(alert["id"], "Notifications muted: retained in internal history")
                 elif in_quiet_hours(settings):
                     self.store.update_alert_delivery(alert["id"], "Quiet hours: retained in internal history")
                 elif self.monitoring:
                     self.native_alert.emit(dict(event, _alert_id=alert["id"]), reason)
-            self.data_changed.emit()
+            # Store.ingest still runs even on empty input: clock-only evidence
+            # transitions must be materialized. A true no-op is not a reason
+            # to rebuild a 5k-item GUI map or source tab.
+            if changed:
+                self.evidence_changed.emit()
 
     @staticmethod
     def _has_fresh_change(event, now=None, *, reason=None):
@@ -426,7 +565,10 @@ class Controller(QObject):
         if self._closed:
             raise ValueError("Archive is closed")
         state = self.store.set_situation_saved(identifier, saved)
-        self.data_changed.emit()
+        # The evidence archive and geolocation did not change. Only the
+        # bookmark state needs to update; full data_changed would synchronously
+        # run every map/feed/GDELT query from the Star button's click handler.
+        self.situation_changed.emit(state["event_id"], state["saved"])
         return state
 
     def save_situation(self, identifier):
@@ -580,10 +722,22 @@ class Controller(QObject):
         self.data_changed.emit()
         return True
 
+    def brief_events(self, *, since: str, period: str = "daily"):
+        if period not in {"daily", "weekly"}:
+            raise ValueError("Brief period must be daily or weekly")
+        # The executive red index follows the unfiltered default Monitor
+        # inventory, not the Daily/Weekly detail cutoff or a selected category.
+        map_since=(datetime.fromisoformat(since.replace("Z","+00:00"))-
+                   timedelta(days=6 if period=="daily" else 0)).isoformat()
+        return self.store.list_brief_events(
+            since=since, per_domain=9 if period == "weekly" else 8,
+            map_since=map_since
+        )
+
     def export_brief(self, path, period="daily"):
         days = 7 if period == "weekly" else 1
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        events = self.store.list_events(since=since, limit=500)
+        events = self.brief_events(since=since, period=period)
         if Path(path).suffix.lower() in {".html", ".htm"}:
             from .brief_rendering import brief_html
             text = brief_html(events, period)
@@ -628,6 +782,77 @@ class Controller(QObject):
     def quit(self):
         self.quit_requested.emit()
 
+    def start_brief_reader(self, target, *, name):
+        """Admit a reader before thread start; shutdown fences future admission."""
+        with self._brief_readers:
+            if self._closed or self._store_closed:
+                raise ShutdownPending("Archive is closing; Brief read not admitted")
+            self._brief_reader_count += 1
+
+        def owned_read():
+            try:
+                target()
+            finally:
+                with self._brief_readers:
+                    self._brief_reader_count -= 1
+                    self._brief_readers.notify_all()
+
+        try:
+            threading.Thread(target=owned_read, name=name, daemon=True).start()
+        except BaseException:
+            with self._brief_readers:
+                self._brief_reader_count -= 1
+                self._brief_readers.notify_all()
+            raise
+
+    def _settle_brief_readers(self, timeout=1.0):
+        with self._brief_readers:
+            return self._brief_readers.wait_for(
+                lambda: self._brief_reader_count == 0, timeout=timeout)
+
+    def begin_close(self):
+        """GUI-affine, nonwaiting cancellation phase for explicit tray exit."""
+        self.monitoring = False
+        self._closed = True
+        self._retention_timer.stop()
+        self.translator.cancelled.set()
+        # Invalidate network callbacks immediately, without joining their
+        # provider timeouts on Qt. Scheduler workers are already daemonized;
+        # stop/generation checks reject newly completed network callbacks.
+        # Already-admitted archive work drains behind finish_close's barrier.
+        self.scheduler.request_stop()
+        self._headlines.close()
+        self._workers.begin_close()
+        self._gdelt.begin_close()
+        self._translation_pending.clear()
+        self._translation_keys.clear()
+        self._model_jobs.clear()
+
+    def close_ready(self):
+        # Always inspect both children; do not serialize cancellation or
+        # postpone releasing the second QProcess while the first exits.
+        translation_ready = self._workers.close_ready()
+        gdelt_ready = self._gdelt.close_ready()
+        return translation_ready and gdelt_ready
+
+    def finish_close(self, settings, delivery_outcomes=()):
+        """Disk-only phase, run off Qt after close_ready has confirmed exit."""
+        if self._store_closed:
+            return
+        if not self._settle_brief_readers(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted Brief archive reader to finish")
+        if not self.scheduler.settle_callbacks(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted source archive callback to finish")
+        if not self._ingest_lock.acquire(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted archive update to finish")
+        try:
+            self._gdelt.finish_close()
+            self._workers.finish_close()
+            self.store.close_after_shutdown(settings, delivery_outcomes)
+            self._store_closed = True
+        finally:
+            self._ingest_lock.release()
+
     def close(self):
         if self._store_closed:
             return
@@ -642,6 +867,8 @@ class Controller(QObject):
         self._translation_pending.clear()
         self._translation_keys.clear()
         self._model_jobs.clear()
+        if not self._settle_brief_readers(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted Brief archive reader to finish")
         with self._ingest_lock:
             self.store.close()
             self._store_closed = True

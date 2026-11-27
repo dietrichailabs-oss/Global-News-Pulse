@@ -1,0 +1,73 @@
+name: Source Expansion - US Federal Reserve Official RSS Pre-Admission
+on:
+  push:
+    branches: [eng/source-expansion-open-feeds-20261113]
+    paths: [.github/workflows/source-expansion-us-fed-pre-admission.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  fed-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env: {PYTHONUTF8: '1', PYTHONNOUSERSITE: '1', PIP_NO_INPUT: '1'}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Publisher origin and metadata-only baseline
+        run: python -m pytest -q tests/test_source_expansion_open_feeds.py tests/test_issue22_publisher_origin_group.py
+      - name: Direct bounded Collector publisher RSS checks (no catalog mutation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from urllib.parse import urlsplit
+          from global_pulse.sources import Collector,timestamp
+          feeds=[
+            ("fed_bcreg","https://www.federalreserve.gov/feeds/press_bcreg.xml","Economy"),
+            ("fed_enforcement","https://www.federalreserve.gov/feeds/press_enforcement.xml","Government"),
+            ("fed_monetary","https://www.federalreserve.gov/feeds/press_monetary.xml","Economy"),
+            ("fed_orders","https://www.federalreserve.gov/feeds/press_orders.xml","Government"),
+            ("fed_other","https://www.federalreserve.gov/feeds/press_other.xml","Government"),
+          ]
+          now=datetime.now(timezone.utc).timestamp()
+          for i,(sid,url,category) in enumerate(feeds):
+            if i:time.sleep(3)
+            source=dict(id=sid,name="Federal Reserve Board - "+sid,url=url,
+              adapter="rss",enabled=True,metadata_only=True,category=category,
+              region="North America",country="United States",language="en",
+              official=True,official_scope="statement",independence="original",
+              publisher_origin_id="federal_reserve_press",access_status="reviewed_public",
+              min_interval=3600,stale_after_days=30,retention_days=90,
+              allowed_domains=["www.federalreserve.gov"],
+              article_domains=["www.federalreserve.gov"],
+              attribution="Federal Reserve Board; publisher headline, timestamp, direct original link, no endorsement")
+            try:
+              out=Collector(source).collect();st=out["state"];rs=out["reports"]
+              recent=[r for r in rs if r.get("published_at") and 0<=now-timestamp(r["published_at"])<=30*86400]
+              bad=[r for r in rs if not r.get("title") or not r.get("published_at")
+                or r.get("url")!=r.get("original_url") or not r.get("original_url")
+                or r.get("summary") or r.get("media")
+                or r.get("origin_id")!="federal_reserve_press"
+                or r.get("country_basis")!="publisher_coverage"
+                or r.get("latitude") is not None or r.get("longitude") is not None
+                or urlsplit(r.get("url","")).hostname!="www.federalreserve.gov"
+                or urlsplit(r.get("url","")).scheme!="https"]
+              passed=bool(st.get("status")=="available" and st.get("http_status")==200 and rs and recent and not bad)
+              row=dict(id=sid,origin="federal_reserve_press",technical_eligible=passed,
+                status=st.get("status"),http_status=st.get("http_status"),reports=len(rs),
+                recent_30d=len(recent),latest=st.get("latest_publication"),violations=len(bad),
+                error=st.get("error",""),sample_original_urls=[r.get("original_url") for r in rs[:2]])
+            except Exception as exc:
+              row=dict(id=sid,technical_eligible=False,error=type(exc).__name__+":"+str(exc)[:200])
+            print("FED_PRE_ADMISSION",json.dumps(row,sort_keys=True),flush=True)
+          print("NO_CATALOG_MUTATION_NO_RELEASE",flush=True)
+          PY

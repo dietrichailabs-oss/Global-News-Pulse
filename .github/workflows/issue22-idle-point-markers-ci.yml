@@ -1,0 +1,61 @@
+name: Issue22 Idle Point Marker Metadata Qt Engineering
+on:
+  push:
+    branches: [eng/issue22-idle-point-marker-prep-20261119]
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    env:
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact frozen PR171 ancestry and three-path change guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor f498b5909b5f4b9abaabcea2392bfa6ce30d529e HEAD
+          git diff --name-only f498b5909b5f4b9abaabcea2392bfa6ce30d529e HEAD | python -c "import sys; expected={'.github/workflows/issue22-idle-point-markers-ci.yml','global_pulse/map_widget.py','tests/test_issue22_idle_point_marker_prep.py'}; actual={x.strip() for x in sys.stdin if x.strip()}; assert actual==expected,(actual,expected)"
+      - name: Native hosted Windows Qt
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'QT_QPA_PLATFORM=windows' >> "$GITHUB_ENV"
+      - name: Real QPainter point metadata and inherited strict idle gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q global_pulse tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_country_label_layout.py
+          python -m pytest -s -q --tb=short tests/test_issue22_idle_point_marker_prep.py tests/test_issue22_idle_country_label_layout.py tests/test_issue22_idle_country_backdrop.py tests/test_issue22_idle_map_footer_paint.py tests/test_issue58_map_paint_cache.py tests/test_issue22_startup_idle_profile.py tests/test_issue22_idle_gdelt_projection.py tests/test_issue22_idle_selected_context.py tests/test_issue22_idle_economy_same_evidence.py tests/test_issue22_idle_source_status_trylock.py tests/test_issue22_idle_archive_storage_trylock.py
+      - name: Tracked tree clean
+        if: always()
+        shell: bash
+        run: git diff --exit-code

@@ -1,4 +1,84 @@
-# Current freeware compliance candidate — 2026-11-10
+# R20 focused live-camera view — 2026-11-22
+
+This update focuses the three **manual-only** live-video choices alongside the
+unchanged 14-entry still-image bank. The live choices are GPC Tannum Sands, GPC
+1770, and BSYC Seacliff. The camera-only Windows WebView2 helper loads GPC's
+published video-player documents directly. BSYC's standalone embed is unavailable,
+so Seacliff retains the original public document and its provider-created iframe;
+only the surrounding page layout is adjusted. They are not automatically selected
+by event geography or started by automatic-camera consent. No YouTube/TV helper, KiwiSDR
+path, arbitrary page player, raw-stream extraction, token capture, or recording
+feature is restored. The 37 curated WebSDR entries remain unchanged.
+
+The focused view preserves player controls, branding and GPC's visible
+technical-availability notice. A changed provider structure falls back to the
+original page layout. Source and Source terms remain explicit external actions.
+The layout helper's local browser run was blocked by the environment, so that
+attempt produced no geometry or screenshot pass. Native Windows resizing and
+playback remain checks against the exact new package.
+
+The earlier session recorded visible player dimensions and advancing playback
+time on the three original public pages on November 22. Those are retained,
+attributed observations, not new checks made during reconstruction. They do not
+establish Windows Pulse playback, current provider uptime, fresh camera capture,
+or permission to record, mirror, or redistribute media. A loaded page, helper
+process, or embedded child window is not proof of moving video or working codecs.
+Separately, on November 22 the owner reported Town of 1770 working in the previous
+Windows build and supplied a screenshot of its full-page view. The dedicated
+1770 player displayed coastal video in cloud Chrome during this update. Neither
+result establishes the new Windows layout or playback for all three cameras.
+
+Windows live video requires the normally installed Microsoft Edge WebView2
+Runtime. The packaged helper is self-contained for its .NET runtime; it does not
+bundle or install the Edge runtime. Provider layout, host assignments, cookies,
+autoplay policy or codecs may change. The finite host policy fails closed when a
+provider needs an unreviewed host. Use **Source** if the in-app player is
+unavailable, and retain that limitation until the exact package is observed.
+
+Stop, camera changes, tab changes, hiding the panel and shutdown disconnect the
+camera. Returning to the panel does not resume live video. A Yes response to an
+older consent dialog must not restart a request canceled by Stop, hiding,
+shutdown or a changed selection. Failed inactive live sessions can be retried
+with a fresh manual Connect; active same-camera Connect is idempotent. Isolated
+private browser sessions can create temporary files. Cleanup is attempted on
+close, but crashes or locked files can leave remnants; memory-only privacy claims
+apply to the still-image path, not the native live helper.
+
+This source was reconstructed on base
+`74c8de9ef59df577b0d9ee7e902b2d98baa6903e` after the previous checkout disappeared.
+The unrecovered `a4e4c960bf8954a19db62a486c65822b7ef1019d` files and their reported
+2,320-test result are separate historical evidence. This reconstruction requires
+fresh source validation, an exact Windows build and playback/lifecycle checks.
+Historical timing failures on the base remain historical findings; the camera
+restoration is not presented as a correction for them. No public release is
+approved by source reconstruction or by an offline regression result.
+
+# Historical R20 WebSDR and worldwide camera expansion — 2026-11-21
+
+KiwiSDR support is retired at the owner's request. WebSDR receiver links are
+individually sourced; this is not a complete copy of WebSDR.org's maintained
+directory, whose reuse requires operator permission. The full original
+directory remains an explicit external link. Published bands and successful
+page checks do not prove current audio, waterfall or continuous uptime.
+
+The expanded public camera bank uses consented periodic still images. A
+successful source check is time-specific, not proof that every later frame is
+fresh or every camera is continuously available. Pulse's fetch time is separate
+from the provider's capture time. No private-camera discovery, recording archive,
+continuous-video player or YouTube integration is added. Exact source review and
+Windows package checks are required for this successor; earlier package passes
+do not approve changed bytes. Public release remains a separate decision.
+
+# Preserved owner-directed YouTube removal — 2026-11-21
+
+YouTube playback, the TV tab, saved-video controls and bundled native TV helper
+are removed. Radio/HAM and reviewed cameras remain. Earlier YouTube/Tousi TV
+capability descriptions below are historical and do not describe this candidate.
+For full physical removal when upgrading, uninstall the previous version before
+installing this build, or use a fresh portable extraction. See `USER_GUIDE.md`.
+This removal is not a YouTube playback fix or public-release approval.
+
+# Historical freeware compliance candidate — 2026-11-10
 
 Global Pulse is provided free of charge. This does not change the application's
 source-code licensing or remove third-party obligations.

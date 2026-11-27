@@ -27,6 +27,8 @@ class GdeltService(QObject):
         self.cleanup_outcome = {}
         self.retry_clock = 0.0
         self._maintenance = False
+        self._closing_nonblocking = False
+        self._shutdown_result = None
         self.timer = QTimer(self)
         self.timer.setInterval(15000)
         self.timer.timeout.connect(self.tick)
@@ -55,6 +57,11 @@ class GdeltService(QObject):
             return
         self.active = value
         if value:
+            try:
+                self.schedule.recover_legacy_transport_failure()
+            except (sqlite3.Error, OSError, ValueError):
+                # Normal schedule handling below will surface storage failures.
+                pass
             self.timer.start()
             self.tick()
         else:
@@ -131,11 +138,29 @@ class GdeltService(QObject):
         if process.state() != QProcess.ProcessState.NotRunning:
             return
         self.deadline.stop()
-        if self._maintenance:
+        result = (token, code, exit_status, self._maintenance, self.reason)
+        if self._closing_nonblocking:
+            # Final retry/cleanup receipts use a separate SQLite connection.
+            # Defer those writes too: a busy archive must not freeze Qt after
+            # the owned child exits.
+            self._shutdown_result = result
+        else:
+            self._save_result(*result)
+        process.finished.disconnect(self._finished)
+        process.errorOccurred.disconnect(self._process_error)
+        self.process = None
+        self.token = None
+        self._maintenance = False
+        process.deleteLater()
+        if not self.closed:
+            self.changed.emit()
+
+    def _save_result(self, token, code, exit_status, maintenance, reason):
+        if maintenance:
             # A native exit alone is not proof that a cleanup happened. The
             # child must have saved a receipt with THIS exact attempt identity.
-            if self.reason in ('failed_start', 'timeout', 'cancelled'):
-                outcome = self.reason
+            if reason in ('failed_start', 'timeout', 'cancelled'):
+                outcome = reason
             elif code != 0 or exit_status != QProcess.ExitStatus.NormalExit:
                 outcome = 'failed_exit'
             else:
@@ -169,16 +194,9 @@ class GdeltService(QObject):
             try:
                 # A normally completed worker already cleared its token. This is a
                 # no-op then; a killed/missing-result worker gets an owned failure.
-                self.schedule.finish(token, {'status': 'error'}, cancelled=self.reason == 'cancelled')
+                self.schedule.finish(token, {'status': 'error'}, cancelled=reason == 'cancelled')
             except (sqlite3.Error, OSError, ValueError):
                 self.local_error = 'GDELT result storage unavailable; saved retry time remains in effect.'
-        process.finished.disconnect(self._finished)
-        process.errorOccurred.disconnect(self._process_error)
-        self.process = None
-        self.token = None
-        self._maintenance = False
-        process.deleteLater()
-        self.changed.emit()
 
     @Slot()
     def _timeout(self):
@@ -219,3 +237,31 @@ class GdeltService(QObject):
         self.closed = True
         self.timer.stop()
         self._stop('cancelled')
+        self.finish_close()
+
+    def begin_close(self):
+        self._closing_nonblocking = True
+        self.active = False
+        self.closed = True
+        self.reason = 'cancelled'
+        self.timer.stop()
+        self.deadline.stop()
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            process.kill()
+
+    def close_ready(self):
+        process = self.process
+        if process and process.state() != QProcess.ProcessState.NotRunning:
+            return False
+        if process:
+            self._done(process, self.token, process.exitCode(), process.exitStatus())
+        return True
+
+    def finish_close(self):
+        """Save an owned cancellation receipt off the GUI thread, after exit."""
+        if self.process is not None:
+            raise RuntimeError("GDELT worker termination was not confirmed")
+        if self._shutdown_result is not None:
+            self._save_result(*self._shutdown_result)
+            self._shutdown_result = None

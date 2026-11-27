@@ -1,0 +1,9 @@
+# Owner feedback on exact 37ee23d setup
+
+Owner reports category changes and enabling/disabling disaster layers still cause freezes; changing controls also unexpectedly changes window size/maximized appearance. Physical acceptance is not established by prior hosted pass.
+
+Engineering correction: prepare source geography/hazard facts, dated economy aggregates and point metadata once per exact source snapshot on the existing worker. Local hazard/category projection uses those facts without re-parsing source text and retains the independent crisis source scope. No source cap, freshness, admission, evidence or visibility rules are relaxed. Retain genuine source/category/viewport raster invalidation; avoid a raster rebuild for a hazard switch with identical visible outlines and stripes. Cache immutable glyph paths and warning visibility. Route warmed search through existing queued filter path and defer hidden workspace work during user navigation. Constant-size feed rows use uniform layout hints.
+
+Window finding: long dynamic status/coverage strings and combo content can impose changing minimum widths; bounded elided status text (full tooltip/accessibility retained) and fixed minimum filter hints prevent those specific layout pressures. No automatic maximize, forced restore, or OS-frame override added. Physical window-state transitions remain to be reproduced on standard-user Windows; do not claim verified native root cause.
+
+Regression: 5000 source-shaped map rows, 3200 observations, exact crisis and hazard visibility/marker membership, no raw source-classification calls at toggle/paint; real 900-event/3200-observation Store and Qt category swaps; window geometry/state and Star identity; print heartbeat and action+paint timings. Existing timing thresholds, full regression, native package and separate physical acceptance gates unchanged. No public release.

@@ -51,6 +51,7 @@ $buildRoot = Join-Path $projectRoot 'build'
 $distRoot = Join-Path $projectRoot 'dist'
 $venvRoot = Join-Path $buildRoot 'venv-windows'
 $nativeRoot = Join-Path $buildRoot 'notifications'
+$cameraRoot = Join-Path $buildRoot 'camera'
 $workRoot = Join-Path $buildRoot 'pyinstaller-windows'
 $packageRoot = Join-Path $distRoot 'GlobalPulse'
 $helper = Join-Path $PSScriptRoot 'package_manifest.py'
@@ -67,7 +68,8 @@ if ((Test-Path -LiteralPath $outputRoot) -and (Get-ChildItem -LiteralPath $outpu
 
 foreach ($required in @('requirements-bootstrap.lock','requirements-build.lock','pyproject.toml',
         'global_pulse\resources\pulse.ico','global_pulse\resources\pulse.png',
-        'packaging\notifications\GlobalPulse.Notifications.csproj')) {
+        'packaging\notifications\GlobalPulse.Notifications.csproj',
+        'packaging\camera\GlobalPulse.Camera.csproj','packaging\camera\packages.lock.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot $required) -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -77,11 +79,26 @@ $pythonSelector = @()
 if ([System.IO.Path]::GetFileName($pythonCommand) -match '^py(?:\.exe)?$') { $pythonSelector = @('-3.12') }
 $pythonIdentity = & $pythonCommand @pythonSelector -c "import sys,platform; assert sys.version_info[:2]==(3,12), 'Python 3.12 is required'; assert platform.machine().lower() in ('amd64','x86_64'), 'Native x64 Python is required'; print(sys.version.split()[0])"
 if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 x64 prerequisite is not satisfied.' }
+# The first CLI invocation may emit first-use notices. Validate the actual
+# selected stable SDK and its presence in the installed list, never accepting
+# SDK 8/9/11, previews or an absent toolchain.
 $dotnet = (Get-Command 'dotnet.exe' -ErrorAction Stop).Source
-$dotnetVersion = (& $dotnet --version).Trim()
-if ($LASTEXITCODE -ne 0 -or $dotnetVersion -notmatch '^10\.\d+\.\d+$') {
-    throw '.NET SDK 10 stable must be the selected SDK. No SDK or system runtime is downloaded by this script.'
+$dotnetVersionOutput = @(& $dotnet --version 2>&1 | ForEach-Object { $_.ToString().Trim() })
+$dotnetVersionExit = $LASTEXITCODE
+$dotnetVersionMatches = @($dotnetVersionOutput | Where-Object { $_ -match '^\d+\.\d+\.\d+$' })
+$dotnetVersion = if ($dotnetVersionMatches.Count -eq 1) { $dotnetVersionMatches[0] } else { '' }
+$installedSdkLines = @(& $dotnet --list-sdks 2>&1 | ForEach-Object { $_.ToString().Trim() })
+$installedSdkExit = $LASTEXITCODE
+$installedVersion = @($installedSdkLines | Where-Object {
+    $_ -match ('^' + [regex]::Escape($dotnetVersion) + '\s+\[')
+})
+if ($dotnetVersionExit -ne 0 -or $installedSdkExit -ne 0 -or
+        $dotnetVersion -notmatch '^10\.\d+\.\d+$' -or
+        $installedVersion.Count -ne 1) {
+    throw ("Stable .NET SDK 10 selection failed: exe={0}, selected='{1}', version_exit={2}, installed_exit={3}, installed=[{4}]. No SDK is downloaded by this script." -f
+        $dotnet, $dotnetVersion, $dotnetVersionExit, $installedSdkExit, ($installedSdkLines -join '; '))
 }
+Write-Host "VERIFIED_DOTNET_SDK_10=$dotnetVersion PATH=$dotnet"
 if (-not $InnoCompiler) {
     $innoCommand = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
     if ($innoCommand) { $InnoCompiler = $innoCommand.Source }
@@ -112,6 +129,7 @@ if ($innoVersion -notmatch '^6\.7\.4(?:\D|$)') {
 New-Item -ItemType Directory -Path $buildRoot,$distRoot,$outputRoot -Force | Out-Null
 Remove-GeneratedDirectory -Path $venvRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $nativeRoot -AllowedParent $buildRoot
+Remove-GeneratedDirectory -Path $cameraRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $workRoot -AllowedParent $buildRoot
 Remove-GeneratedDirectory -Path $packageRoot -AllowedParent $distRoot
 
@@ -176,12 +194,51 @@ try {
         '--nuget-root',$nugetRoot, '--published',$nativeRoot
     )
 
+    Write-Host 'Restoring and publishing the isolated self-contained Windows camera helper.'
+    $cameraProject = Join-Path $projectRoot 'packaging\camera\GlobalPulse.Camera.csproj'
+    $cameraLock = Join-Path $projectRoot 'packaging\camera\packages.lock.json'
+    Invoke-Checked -File $dotnet -Arguments @('restore',$cameraProject,'--runtime','win-x64','--locked-mode')
+    Invoke-Checked -File $dotnet -Arguments @('publish',$cameraProject,'--configuration','Release','--runtime','win-x64','--self-contained','true','--no-restore','--output',$cameraRoot,'-p:PublishSingleFile=false','-p:PublishTrimmed=false')
+    foreach ($name in @('GlobalPulse.Camera.exe','GlobalPulse.Camera.dll','coreclr.dll',
+            'GlobalPulse.Camera.deps.json','GlobalPulse.Camera.runtimeconfig.json',
+            'Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll',
+            'Microsoft.Web.WebView2.Wpf.dll','WebView2Loader.dll')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $cameraRoot $name) -PathType Leaf)) {
+            throw "Required self-contained camera output missing: $name"
+        }
+    }
+    $cameraDeps = Join-Path $cameraRoot 'GlobalPulse.Camera.deps.json'
+    Invoke-Checked -File $buildPython -Arguments @(
+        'scripts\collect_dotnet_notices.py', '--component','camera',
+        '--deps',$cameraDeps, '--nuget-root',$nugetRoot, '--output',(Join-Path $cameraRoot 'licenses')
+    )
+    $cameraDependencyDocument = Get-Content -LiteralPath $cameraDeps -Raw | ConvertFrom-Json
+    if (@($cameraDependencyDocument.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'runtimepack.Microsoft.Windows.SDK.NET.Ref/*' }).Count -gt 0) {
+        Invoke-Checked -File $buildPython -Arguments @(
+            'scripts\sdk_distribution.py', '--component','camera', '--deps',$cameraDeps,
+            '--nuget-root',$nugetRoot, '--published',$cameraRoot
+        )
+    }
+    # This build does not install a WebView2 runtime or verify provider playback.
+    # The workflow probes the final shipped helper after this whole build returns.
+
     Write-Host 'Freezing the application from the explicit PyInstaller specification.'
     Invoke-Checked -File $buildPython -Arguments @('-m','PyInstaller','--noconfirm','--clean','--distpath',$distRoot,'--workpath',$workRoot,'packaging\GlobalPulse.spec')
     Copy-Item -LiteralPath $nativeRoot -Destination (Join-Path $packageRoot 'notifications') -Recurse
+    Copy-Item -LiteralPath $cameraRoot -Destination (Join-Path $packageRoot 'camera') -Recurse
     Copy-Item -LiteralPath 'global_pulse\resources\pulse.png' -Destination (Join-Path $packageRoot 'notifications\pulse.png')
     # The compiler's .pdb debugging symbols are engineering artifacts, not runtime.
-    Get-ChildItem -LiteralPath (Join-Path $packageRoot 'notifications') -Filter '*.pdb' -Recurse | Remove-Item -Force
+    # Generated symbols for the self-contained helper are engineering-only.
+    # Retain the global package scanner's .pdb prohibition (do not allowlist them).
+    foreach ($helperDir in @('notifications','camera')) {
+        Get-ChildItem -LiteralPath (Join-Path $packageRoot $helperDir) -Filter '*.pdb' -File -Recurse | Remove-Item -Force
+    }
+    # SDK XML IntelliSense documentation is not executable runtime or license
+    # material. Remove these three exact generated files; no broad XML bypass.
+    foreach ($assembly in @('Core','WinForms','Wpf')) {
+        $apiDocument = Join-Path $packageRoot ("camera\Microsoft.Web.WebView2.$assembly.xml")
+        if (Test-Path -LiteralPath $apiDocument -PathType Leaf) { Remove-Item -LiteralPath $apiDocument -Force }
+    }
     $userDocuments = [ordered]@{
         'docs\PRIVATE_TEST_GUIDE.md' = 'README.md'
         'docs\USER_GUIDE.md' = 'USER_GUIDE.md'
@@ -209,6 +266,7 @@ try {
     Invoke-Checked -File $buildPython -Arguments @($helper,'archive',$packageRoot,$portable)
     Copy-Item -LiteralPath (Join-Path $packageRoot 'MANIFEST.json'),(Join-Path $packageRoot 'SBOM.cdx.json') -Destination $outputRoot
     if (Test-Path -LiteralPath $nativeLock) { Copy-Item -LiteralPath $nativeLock -Destination (Join-Path $outputRoot 'native-packages.lock.json') }
+    Copy-Item -LiteralPath $cameraLock -Destination (Join-Path $outputRoot 'camera-packages.lock.json')
     $buildRecord = [ordered]@{
         product='Global Pulse';version=$version;candidate=$candidate;built_at_utc=(Get-Date).ToUniversalTime().ToString('o')
         python=($pythonIdentity -join '');dotnet_sdk=$dotnetVersion;inno_setup=$innoVersion
@@ -216,6 +274,12 @@ try {
         source_commit=((& git rev-parse HEAD) -join '').Trim()
         source_worktree_dirty=[bool]((& git status --porcelain --untracked-files=no) -join '')
         native_helper_self_contained=$true
+        camera_helper_self_contained=$true
+        camera_webview2_sdk='1.0.4314.35'
+        camera_webview2_runtime='User-installed Microsoft WebView2 runtime required; not bundled or installed here'
+        camera_helper_exe_sha256=(Get-FileHash -LiteralPath (Join-Path $packageRoot 'camera\GlobalPulse.Camera.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        camera_helper_dll_sha256=(Get-FileHash -LiteralPath (Join-Path $packageRoot 'camera\GlobalPulse.Camera.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+        live_camera_playback_verified=$false
         internal_automated_tests='See internal-tests.xml; command failed the build if any test failed'
         qt_test_platform='windows'
         windows_native_acceptance='NOT RUN by build script'
@@ -235,3 +299,4 @@ catch {
 finally {
     Pop-Location
 }
+

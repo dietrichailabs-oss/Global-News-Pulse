@@ -11,6 +11,9 @@ class ArchiveStorageControls(QGroupBox):
         self.controller = controller
         self._saved = DEFAULT_GB
         self._error = ''
+        # A passive status poll must never wait for a collector-owned Store lock.
+        # Preserve previously verified numbers while the archive is busy.
+        self._last_status_text = ''
         form = QFormLayout(self)
         self.maximum = QComboBox()
         self.maximum.setAccessibleName('Maximum local news archive size')
@@ -39,6 +42,10 @@ class ArchiveStorageControls(QGroupBox):
         self.timer.setInterval(5000)
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
+        self._busy_retry_timer = QTimer(self)
+        self._busy_retry_timer.setSingleShot(True)
+        self._busy_retry_timer.setInterval(250)
+        self._busy_retry_timer.timeout.connect(self.refresh)
         controller.data_changed.connect(self.refresh)
         controller.gdelt_status_changed.connect(self.refresh)
         self.refresh()
@@ -71,9 +78,22 @@ class ArchiveStorageControls(QGroupBox):
     def refresh(self):
         if getattr(self.controller, '_closed', False):
             self.timer.stop()
+            self._busy_retry_timer.stop()
             return
         try:
-            state = self.controller.archive_storage_status()
+            # Timer, source-signal and user-triggered display refreshes never
+            # wait behind the several-second country-evidence Store RLock.
+            state = self.controller.archive_storage_status(nonblocking=True)
+            if state is None:
+                self.clean.setEnabled(False)
+                previous = self._last_status_text or 'No prior verified archive status yet.'
+                self.usage.setText(
+                    'Archive status pending — database busy; previous values are not current.\n'
+                    + previous)
+                if not self._busy_retry_timer.isActive():
+                    self._busy_retry_timer.start()
+                return
+            self._busy_retry_timer.stop()
             self._saved = state['selected_gb']
         except (sqlite3.Error, OSError, RuntimeError, ValueError):
             blocked = self.maximum.blockSignals(True)
@@ -117,3 +137,4 @@ class ArchiveStorageControls(QGroupBox):
         self.usage.setText(f"{state['used_bytes']/GB:.2f} GB used / {self._saved} GB maximum"
             f"\n{state['free_disk_bytes']/GB:.2f} GB free on drive · {state['reusable_bytes']/GB:.2f} GB reusable database pages"
             f"\n{detail}\n{self._error}")
+        self._last_status_text = self.usage.text()

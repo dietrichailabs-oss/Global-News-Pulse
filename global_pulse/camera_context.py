@@ -1,4 +1,4 @@
-"""Trusted public landscape snapshots; never infer a camera witnessed an event."""
+"""Reviewed public cameras; never infer that a camera witnessed an event."""
 from __future__ import annotations
 import json
 import re
@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def camera_catalog():
-    return json.loads((Path(__file__).with_name('resources')/'context_cameras.json').read_text())['entries']
+    return json.loads((Path(__file__).with_name('resources')/'context_cameras.json').read_text(encoding='utf-8'))['entries']
 
 
 def _words(value):
@@ -26,7 +26,10 @@ def associated_cameras(event, catalog=None):
     # Without richer verified geography, ambiguous names remain unmatched.
     if set((title+' '+region).split()) & {'university','college','campus','school','hotel','restaurant','company','corporation'}:
         return []
-    entries=list(camera_catalog() if catalog is None else catalog)
+    # Manual live video is never covered by automatic snapshot consent or
+    # selected merely because a report names a matching place.
+    entries=[item for item in (camera_catalog() if catalog is None else catalog)
+             if not item.get('manual_only') and item.get('playback') != 'live_video']
     area_sets=[{_words(a) for a in item.get('area_keywords',[]) if len(_words(a))>=4}
                for item in entries]
     # Every explicitly named reviewed area must agree before choosing a camera.
@@ -57,5 +60,16 @@ def associated_cameras(event, catalog=None):
 
 def approved_camera(item):
     """Event/feed-supplied URLs cannot add remote endpoints to the trusted registry."""
-    return next((entry for entry in camera_catalog()
-                 if entry['id']==item.get('id') and entry['snapshot_url']==item.get('snapshot_url')),None)
+    if not isinstance(item, dict):
+        return None
+    for entry in camera_catalog():
+        if entry['id'] != item.get('id'):
+            continue
+        if entry.get('playback') == 'live_video':
+            if (item.get('playback') == 'live_video'
+                    and item.get('url') == entry['url']
+                    and not item.get('snapshot_url')):
+                return entry
+        elif entry.get('snapshot_url') and entry['snapshot_url'] == item.get('snapshot_url'):
+            return entry
+    return None

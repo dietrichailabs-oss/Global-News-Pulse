@@ -7,6 +7,7 @@ A government attribution is never promoted into proof of its underlying claim.
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from html import unescape
@@ -18,11 +19,13 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+import time
 from typing import Any, Iterable
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from uuid import UUID, uuid4, uuid5
 
 from .map_evidence import normalize_map_fields, event_areas
+from .hazards import canonical_hazard_types, report_hazard_types
 
 from .lifecycle import (normalize_lifecycle, apply_lifecycle, is_expired, select_warning_event,
                         register_warning, canonical_event, SCHEMA as LIFECYCLE_SCHEMA)
@@ -34,6 +37,10 @@ IGNORED_WORDS = frozenset("a an the and or in on at to of for from with by as is
 MAX_BATCH = 2000
 MAX_REPORTS = 250_000
 MAX_EVENTS = 50_000
+
+
+class MapSnapshotChanged(RuntimeError):
+    """A cooperative current-map read lost its exact source revision."""
 
 
 def utcnow() -> str:
@@ -237,6 +244,8 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     result["official"] = raw.get("official") is True
     result["metadata_only"] = raw.get("metadata_only") is True
     result["claims"] = _normalise_claims(raw.get("claims"))
+    if "hazard_types" in raw:
+        result["hazard_types"] = list(canonical_hazard_types(raw["hazard_types"]))
     result["latitude"] = result["longitude"] = None
     lat, lon = raw.get("latitude"), raw.get("longitude")
     if lat is not None and lon is not None:
@@ -253,7 +262,9 @@ def normalize_report(raw: dict, now: str | None = None) -> dict:
     elif result["geo_precision"] not in {"exact", "approximate", "regional", "country", "unknown"}:
         result["geo_precision"] = "unknown"
     result["media"] = []
-    for media in (raw.get("media") or [])[:30]:
+    # A reviewed metadata-only source must not persist media even if a
+    # hostile feed or alternate adapter supplies an embedded-media field.
+    for media in ([] if result["metadata_only"] else (raw.get("media") or [])[:30]):
         if not isinstance(media, dict):
             continue
         try:
@@ -598,6 +609,10 @@ def _build_event(event_id: str, reports: list[dict], *, previous: dict | None, s
                             "historical_abnormality": "Insufficient local baseline for an abnormality claim.",
                             "coverage_volume": len(reports), "reporting_changes": len(changes),
                             "contradictory_information": len(conflicts)}}
+    hazard_types = canonical_hazard_types(
+        [kind for report in active for kind in report_hazard_types(report)])
+    if hazard_types or any("hazard_types" in report for report in active):
+        event["hazard_types"] = list(hazard_types)
     event["map_areas"] = event_areas(active)
     seen_media = set()
     for report in eligible:
@@ -747,6 +762,10 @@ class Store:
         self._closed = False
         self.last_ingest_errors: list[dict] = []
         self.last_previous_events: dict[str, dict] = {}
+        # Bounded, read-through current Economy evidence. No source content
+        # leaves the process; every Store write or external SQLite commit
+        # changes the exact token. Serialized data yields independent callers.
+        self._observation_cache: tuple[tuple[int, int], str] | None = None
         self._conn = sqlite3.connect(self.path, timeout=15, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         if self._conn.execute("PRAGMA page_count").fetchone()[0] == 0:
@@ -1159,21 +1178,290 @@ class Store:
                 event["linked_event_histories"][linked] = snapshots
         return event
 
+    def _map_evidence_page_unlocked(self, page: list[sqlite3.Row]) -> list[dict | None]:
+        """Batch common stable map reports; preserve exact old projection for exceptions.
+
+        Map country/category circles need every labelled source report, not
+        merely the active subset. Historical, legacy, pending NWS, merged and
+        deferred-source cases still take the original read-only projection.
+        Called only while the Store lock is held.
+        """
+        saved = [(row, json.loads(row["body"])) for row in page]
+        common = []
+        expected_counts = {}
+        remaining_reports = 8192  # Finite aggregate memory budget per page.
+        for row, event in saved:
+            count = event.get("report_count")
+            if (event.get("status") != "active"
+                    or type(event.get("evidence_policy_version")) is not int
+                    or not 2 <= event["evidence_policy_version"] <= 3
+                    or event.get("merged_source_events")
+                    or event.get("map_areas")
+                    or type(count) is not int or not 0 <= count <= 64
+                    or count > remaining_reports):
+                continue
+            common.append(row["id"])
+            expected_counts[row["id"]] = count
+            remaining_reports -= count
+        if common:
+            placeholders = ",".join("?" for _ in common)
+            # A tampered/stale event report_count must not cause an unbounded
+            # group load or silently omit evidence. First verify the true
+            # indexed row counts before fetching source bodies.
+            actual_counts = {
+                row["event_id"]: row["n"] for row in self._conn.execute(
+                    "SELECT event_id,COUNT(*) AS n FROM reports WHERE event_id IN ("
+                    + placeholders + ") GROUP BY event_id", common)
+            }
+            common = [identity for identity in common
+                      if actual_counts.get(identity, 0) == expected_counts[identity]]
+        common_ids = set(common)
+        grouped = defaultdict(list)
+        if common:
+            # A page is at most 256 IDs; SQLite parameter bounds and ordering
+            # are preserved. This replaces thousands of per-event/per-report
+            # SELECT calls without inventing or discarding source evidence.
+            sql = ("SELECT event_id,body FROM reports WHERE event_id IN (" +
+                   ",".join("?" for _ in common) +
+                   ") ORDER BY event_id,published_at,record_key")
+            for row in self._conn.execute(sql, common):
+                grouped[row["event_id"]].append(json.loads(row["body"]))
+        output = []
+        for row, event in saved:
+            identity = row["id"]
+            if identity not in common_ids:
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            at = event["updated_at"]
+            reports = grouped.get(identity, [])
+            # The latest received revision may still be future by provider time.
+            # Only the old history-aware projection can select the earlier
+            # eligible immutable report_revisions entry in that case.
+            if any(_report_is_future(report, at) or report.get("source_id") == "nws"
+                   for report in reports):
+                output.append(self._get_event_unlocked(identity, map_projection=True))
+                continue
+            selected = []
+            for raw in reports:
+                report = dict(raw)
+                report["future_dated"] = False
+                report["expired"] = is_expired(report, at)
+                selected.append(report)
+            _, event["reports"] = _evidence_reports(selected, at)
+            # project_warning_context is an identity projection for active
+            # records; pending or area-bearing events took the original path.
+            output.append(event)
+        return output
+
     def get_event(self, event_id: str, at: str | None = None) -> dict | None:
         with self._lock:
             return self._get_event_unlocked(event_id, at)
 
+    def _current_feed_page_unlocked(self, rows: list[sqlite3.Row]) -> list[dict]:
+        """Hydrate a current top-feed page with bounded indexed batch reads.
+
+        The old list_events path performed event alias lookup, event header,
+        report history and full revision-timeline SQL separately for EVERY
+        event. At 500 rows this delayed a genuine new collector revision beyond
+        the owner 7-second no-click window despite a live Qt heartbeat.
+
+        Only ordinary canonical, eligible, E2/E3 records take the batched
+        projection. Future notices, historical policy, merges, absent/inexact
+        counts and legacy revisions use the original complete per-event reader.
+        Source, correction, retraction, chronology and identity are unchanged.
+        Called under the same Store RLock as list_events.
+        """
+        results = []
+        for offset in range(0, len(rows), 128):
+            page = rows[offset:offset + 128]
+            accepted = {}
+            for row in page:
+                event = json.loads(row["body"])
+                count = event.get("report_count")
+                if (event.get("id") != row["id"]
+                        or type(event.get("evidence_policy_version")) is not int
+                        or not 2 <= event["evidence_policy_version"] <= 3
+                        or event.get("merged_source_events")
+                        or type(count) is not int or not 0 <= count <= 64):
+                    continue
+                accepted[row["id"]] = event
+            reports = defaultdict(list)
+            histories = defaultdict(list)
+            if accepted:
+                ids = list(accepted)
+                args = ",".join("?" for _ in ids)
+                for item in self._conn.execute(
+                        "SELECT event_id,body FROM reports WHERE event_id IN (" +
+                        args + ") ORDER BY event_id,published_at,record_key", ids):
+                    reports[item["event_id"]].append(json.loads(item["body"]))
+                for item in self._conn.execute(
+                        "SELECT event_id,at,revision,body FROM event_revisions "
+                        "WHERE event_id IN (" + args +
+                        ") ORDER BY event_id,revision", ids):
+                    histories[item["event_id"]].append(item)
+            for row in page:
+                identity = row["id"]
+                event = accepted.get(identity)
+                if event is None:
+                    results.append(self._get_event_unlocked(identity))
+                    continue
+                entries = reports.get(identity, [])
+                snapshots = histories.get(identity, [])
+                # A pending future publication may require an earlier eligible
+                # immutable source revision, not the latest reports row.
+                # Preserve that path in the canonical reference reader.
+                if (len(entries) != event["report_count"] or not snapshots
+                        or any(_report_is_future(report, event["updated_at"])
+                               for report in entries)
+                        or any(json.loads(item["body"])["event"].get(
+                               "evidence_policy_version", 0) < 2
+                               for item in snapshots)):
+                    results.append(self._get_event_unlocked(identity))
+                    continue
+                selected = []
+                for original in entries:
+                    report = dict(original)
+                    report["future_dated"] = False
+                    report["expired"] = is_expired(report, event["updated_at"])
+                    selected.append(report)
+                _, event["reports"] = _evidence_reports(selected, event["updated_at"])
+                event["timeline"] = []
+                for item in snapshots:
+                    saved = json.loads(item["body"])["event"]
+                    event["timeline"].append({
+                        "at": item["at"], "timestamp": item["at"],
+                        "revision": item["revision"],
+                        "recorded_verification": saved.get("verification"),
+                        "title": saved["title"],
+                        "verification": saved["verification"],
+                        "severity": saved["severity"],
+                        "changes": saved.get("changes", []),
+                        "description": "; ".join(
+                            f"{change['publisher']}: {change['kind']} — {change['title']}"
+                            for change in saved.get("changes", [])),
+                    })
+                event["linked_event_histories"] = {}
+                results.append(event)
+        return results
+
+    def _cooperative_map_candidates(self, sql, params, limit, *, evidence):
+        """One ordered inventory read; no live cursor crosses the Store lock."""
+        with self._lock:
+            token=self.content_revision()
+            if evidence:
+                # Body size is a conservative work hint, not an eligibility
+                # test. Large geometry records receive smaller pages.
+                identity_sql=("SELECT id,length(CAST(body AS BLOB)) AS bytes"+
+                              sql[sql.index(" FROM events"):])
+                rows=[(row["id"],int(row["bytes"] or 0))
+                      for row in self._conn.execute(identity_sql,params)]
+                if len(rows)>MAX_EVENTS:
+                    raise ValueError("Map inventory exceeds archive event bound")
+            else:
+                # The compact point page is already bounded and ordered by
+                # the original SQL. Do not perform 157 ID re-queries just
+                # to retrieve those same 5,000 rows.
+                rows=self._conn.execute(sql+" LIMIT ?",[*params,limit]).fetchall()
+        return token,rows
+
+    def _cooperative_map_page(self, token, chunk):
+        """Hydrate one byte-/row-bounded page at the frozen revision."""
+        with self._lock:
+            if self.content_revision()!=token:
+                raise MapSnapshotChanged("Archive changed between map pages")
+            rows={row["id"]:row for row in self._conn.execute(
+                "SELECT id,body FROM events WHERE id IN ("+
+                ",".join("?" for _ in chunk)+")",chunk)}
+            if len(rows)!=len(chunk):
+                raise MapSnapshotChanged("Map candidate disappeared")
+            return self._map_evidence_page_unlocked([rows[identity] for identity in chunk])
+
+    @staticmethod
+    def _cooperative_map_yield():
+        # Yield to a runnable thread, not a fixed sleep per page. Windows
+        # timer granularity and scheduler contention can amplify even a
+        # nominal 1ms delay hundreds of times during a full map refresh.
+        time.sleep(0)
+
+    def _cooperative_map_projection(self, sql, params, limit, *, evidence, candidate=None):
+        """Bound lock ownership AND completion latency with exact revision checks.
+
+        Capture compact rows once, decode outside the lock. Canonical map
+        evidence retains accepted-only paging: adapt the page size from body
+        bytes and measured hydration time, never from severity or source
+        eligibility. Any mutation rejects the whole result.
+        """
+        token,inventory=self._cooperative_map_candidates(sql,params,limit,evidence=evidence)
+        output=[]
+        offset=0
+        page_limit=128
+        last_yield=time.perf_counter()
+        while offset<len(inventory):
+            if evidence:
+                # At most 128 ordinary rows and 256 KiB of body bytes per
+                # page. An individually larger record still has a slot;
+                # existing geometry, report and archive bounds are unchanged.
+                end=offset
+                size=0
+                while end<len(inventory) and end-offset<page_limit:
+                    next_size=inventory[end][1]
+                    if end>offset and size+next_size>256*1024:
+                        break
+                    size+=next_size
+                    end+=1
+                chunk=[identity for identity,_bytes in inventory[offset:end]]
+                started=time.perf_counter()
+                hydrated=self._cooperative_map_page(token,chunk)
+                elapsed=time.perf_counter()-started
+                # Adaptive target keeps expensive mixed/legacy pages short,
+                # while ordinary compact records avoid needless lock traffic.
+                if elapsed>.035:
+                    page_limit=max(8,page_limit//2)
+                elif elapsed<.012:
+                    page_limit=min(128,page_limit*2)
+            else:
+                end=min(offset+128,len(inventory))
+                hydrated=[json.loads(row["body"]) for row in inventory[offset:end]]
+            offset=end
+            for event in hydrated:
+                if evidence and (not event or not (
+                        event.get("status")=="active" or event.get("map_history_incomplete") is True)):
+                    continue
+                if candidate is not None and not candidate(event):
+                    continue
+                output.append(event)
+                if len(output)>=limit:break
+            if len(output)>=limit:break
+            if offset<len(inventory) and len(inventory)>256:
+                now=time.perf_counter()
+                if now-last_yield>=.025:
+                    self._cooperative_map_yield()
+                    last_yield=time.perf_counter()
+        if self.content_revision()!=token:
+            raise MapSnapshotChanged("Archive changed during map projection")
+        return output
+
+
     def list_events(self, query: str = "", category: str = "", region: str = "", since: str | None = None,
                     before: str | None = None, limit: int = 500,
                     map_view: bool = False, keep_significant: bool = False,
-                    map_evidence: bool = False) -> list[dict]:
+                    map_evidence: bool = False, *,
+                    _crisis_candidates: bool = False,
+                    _crisis_now: datetime | None = None,
+                    _cooperative_map: bool = False) -> list[dict]:
+        if _crisis_candidates:
+            if not map_evidence or before or category:
+                raise ValueError("Crisis context requires current all-category map evidence")
+            from .crisis_overlay import is_crisis_context_candidate
+            crisis_now = (_crisis_now or datetime.now(UTC)).astimezone(UTC)
         map_view = bool(map_view or map_evidence)
         # map_evidence retains country/area/unlocated records without inventing points.
         # Map membership is independent of the bounded text-feed page. Explicit
         # search/category/region filters still apply; historical views stay strict.
         limit = max(1, min(int(limit), 5000 if map_view else 2000))
         query = plain_text(query, 500)
-        with self._lock:
+        cooperative=bool(_cooperative_map and map_view and not before)
+        with (nullcontext() if cooperative else self._lock):
             if before:
                 # Historical playback reconstructs what was stored at that time;
                 # a later correction or headline never leaks into an old frame.
@@ -1190,6 +1478,8 @@ class Store:
                                 (map_evidence or (e.get("latitude") is not None and e.get("longitude") is not None))]
                 return sorted(filtered, key=lambda e: e["updated_at"], reverse=True)[:limit]
             where, params = ["id NOT IN (SELECT alias_id FROM event_aliases)"], []
+            if _crisis_candidates:
+                where.append("synthetic=0")
             if category:
                 where.append("lower(category)=lower(?)")
                 params.append(category)
@@ -1222,8 +1512,13 @@ class Store:
                         params.append("%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
             order = ("CASE json_extract(body,'$.severity') WHEN 'critical' THEN 4 WHEN 'high' THEN 3 "
                      "WHEN 'moderate' THEN 2 WHEN 'informational' THEN 1 ELSE 0 END DESC,") if map_view else ""
-            sql = ("SELECT body FROM events" if map_view and not map_evidence else "SELECT id FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
-            if map_evidence:
+            sql = ("SELECT body FROM events" if map_view and not map_evidence else
+                   "SELECT id,body FROM events" if map_evidence else "SELECT id,body,revision FROM events") + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY " + order + "updated_at DESC,id"
+            if cooperative:
+                candidate=(lambda event:is_crisis_context_candidate(event,now=crisis_now)) if _crisis_candidates else None
+                result=self._cooperative_map_projection(
+                    sql,params,limit,evidence=map_evidence,candidate=candidate)
+            elif map_evidence:
                 # PENDING_AREA_SQL is intentionally a broad cheap candidate filter:
                 # source history, actual effective/end dates, and missing earlier
                 # NWS bulletins must be checked at read time. Applying the user's
@@ -1236,32 +1531,200 @@ class Store:
                 # of hiding later eligible areas behind a larger arbitrary cap.
                 result = []
                 page_size = min(256, max(32, limit))
-                offset = 0
-                while len(result) < limit:
-                    page = self._conn.execute(sql + " LIMIT ? OFFSET ?",
-                                              [*params, page_size, offset]).fetchall()
-                    if not page:
-                        break
-                    offset += len(page)
-                    for row in page:
-                        event = self._get_event_unlocked(row[0], map_projection=True)
-                        if event and (event.get("status") == "active" or
-                                      event.get("map_history_incomplete") is True):
-                            result.append(event)
-                            if len(result) >= limit:
-                                break
-                    if len(page) < page_size:
-                        break
+                # One ordered, Store-locked cursor avoids re-sorting/re-reading
+                # every earlier candidate for each subsequent OFFSET page. A
+                # bounded fetchmany keeps materialized rows capped at 256 while
+                # the original accepted-only limit and warning checks remain.
+                cursor = self._conn.execute(sql, params)
+                scanned = 0
+                try:
+                    while len(result) < limit:
+                        # The independent topical read uses the archive's
+                        # bounded event budget, not the display page size.
+                        # Screen AFTER canonical source projection so stale,
+                        # withdrawn, future or ordinary records do not count.
+                        size = min(page_size, MAX_EVENTS-scanned) if _crisis_candidates else page_size
+                        if size <= 0:
+                            break
+                        page = cursor.fetchmany(size)
+                        if not page:
+                            break
+                        scanned += len(page)
+                        for event in self._map_evidence_page_unlocked(page):
+                            if event and (event.get("status") == "active" or
+                                          event.get("map_history_incomplete") is True):
+                                if _crisis_candidates and not is_crisis_context_candidate(event, now=crisis_now):
+                                    continue
+                                result.append(event)
+                                if len(result) >= limit:
+                                    break
+                        if len(page) < size:
+                            break
+                finally:
+                    cursor.close()
             else:
-                result = [(json.loads(row[0]) if map_view else self._get_event_unlocked(row[0]))
-                          for row in self._conn.execute(sql + " LIMIT ?", [*params, limit])]
+                page = self._conn.execute(sql + " LIMIT ?", [*params, limit]).fetchall()
+                result = ([json.loads(row[0]) for row in page] if map_view
+                          else self._current_feed_page_unlocked(page))
             if map_view:
+                cutoff=_iso(since) if since else None
                 for item in result:
-                    item["retained_on_map"] = bool(keep_significant and since and item["updated_at"] < _iso(since))
+                    item["retained_on_map"] = bool(keep_significant and cutoff and item["updated_at"] < cutoff)
                     # This is a display annotation, never a new source assertion.
                     item["map_retention_note"] = ("Retained significant event; no newer status received. Last update "
                                                   + item["updated_at"]) if item["retained_on_map"] else ""
             return result
+
+
+    def list_crisis_context(self, *, query="", region="", since=None,
+                            keep_significant=False, now=None, limit=5000,
+                            cooperative=False):
+        """Current source candidates; independent of ordinary map display rows.
+
+        Reuse canonical history/withdrawal-aware projection and scope. Neither
+        the bounded topic screen nor a candidate alone establishes geography
+        or corroboration. No archive writes, collection, or historical replay.
+        """
+        return self.list_events(query=query, region=region, since=since,
+                                keep_significant=keep_significant,
+                                map_evidence=True, limit=limit,
+                                _crisis_candidates=True, _crisis_now=now,
+                                _cooperative_map=cooperative)
+
+    def list_brief_events(self, *, since: str, per_domain: int = 9,
+                          map_since: str | None = None) -> list[dict]:
+        """Bounded, category-balanced Brief read without a multi-second Store lock.
+
+        Each event still goes through the canonical history/evidence projection.
+        Ranking and source bytes must describe one exact committed Store revision.
+        An unchanged source is hydrated with short, individually locked reads so
+        the GUI can probe Store availability between them. If source content
+        changes while reading, retry; on repeated contention use the original
+        atomic path rather than return mixed or fabricated evidence.
+        """
+        from .brief_selection import _DOMAIN_ALIASES, MAX_CRITICAL_ALERTS, is_active_critical
+        count = max(1, min(int(per_domain), 9))
+        aliases = sorted(_DOMAIN_ALIASES.items())
+        categories = "CASE lower(trim(category)) " + " ".join(
+            "WHEN ? THEN ?" for _ in aliases
+        ) + " ELSE ? END"
+        params = [text for alias, domain in aliases for text in (alias, domain)]
+        params.append("General news")
+        sql = (
+            "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY "
+            + categories +
+            " ORDER BY CASE WHEN lower(COALESCE(json_extract(body,'$.status'),'active')) "
+            "IN ('retracted','cancelled','canceled','expired','resolved','closed','ended') "
+            "THEN 0 ELSE 1 END DESC, "
+            "CASE lower(COALESCE(json_extract(body,'$.severity'),'unassessed')) "
+            "WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'moderate' THEN 2 "
+            "WHEN 'informational' THEN 1 ELSE 0 END DESC, "
+            "updated_at DESC, id) AS brief_rank FROM events "
+            "WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+            "AND updated_at>=?) WHERE brief_rank<=?"
+        )
+        values = (*params, _iso(since), count)
+        # Use the same canonical projection, accepted-only page ceiling,
+        # ordering and tie-break as the map. An unfiltered Daily/Weekly brief
+        # uses the standard seven-day Monitor scope (plus retained significant
+        # records). Explicit interactive map filters do not change that brief.
+        # Critical rows use the bounded map projection; only the detailed
+        # topic candidates require full history hydration.
+        def map_red(cooperative=False):
+            # With no stored red or legacy projection candidate, the map
+            # cannot produce an active critical record. Avoid rehydrating
+            # thousands of ordinary records during ordinary startup.
+            with self._lock:
+                possible=self._conn.execute(
+                    "SELECT 1 FROM events WHERE id NOT IN (SELECT alias_id FROM event_aliases) "
+                    "AND (json_extract(body,'$.severity')='critical' OR "
+                    "COALESCE(json_extract(body,'$.evidence_policy_version'),0)<2) LIMIT 1").fetchone()
+            if possible is None:
+                return []
+            return [event for event in self.list_events(
+                map_evidence=True, limit=MAX_CRITICAL_ALERTS,
+                since=map_since or since, keep_significant=True,
+                _cooperative_map=cooperative)
+                if is_active_critical(event)]
+
+        def combine(ordinary, critical):
+            by_id={str(event["id"]):event for event in critical}
+            result=[]
+            seen=set()
+            for event in ordinary:
+                if event is None:
+                    continue
+                identity=str(event["id"])
+                if identity in by_id:
+                    # Preserve complete evidence timeline for bounded detail
+                    # candidates, but canonical current map facts own priority.
+                    event=dict(event, **by_id[identity])
+                elif is_active_critical(event):
+                    # A detail candidate outside the accepted map inventory
+                    # cannot displace a red map record at the cap.
+                    continue
+                if identity not in seen:
+                    result.append(event)
+                    seen.add(identity)
+            result.extend(event for event in critical if str(event["id"]) not in seen)
+            return result
+
+        def revision_unlocked():
+            # Catch this Store's own writes and other SQLite connections'
+            # commits, including changes between individual evidence reads.
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+
+        for _attempt in range(2):
+            with self._lock:
+                source_revision = revision_unlocked()
+                ids=[row[0] for row in self._conn.execute(sql,values)]
+            events = []
+            for identity in ids:
+                with self._lock:
+                    event = self._get_event_unlocked(identity)
+                if event is not None:
+                    events.append(event)
+            try:
+                critical=map_red(cooperative=True)
+            except MapSnapshotChanged:
+                continue
+            with self._lock:
+                if revision_unlocked() == source_revision:
+                    return combine(events,critical)
+
+        # With continuous source mutations, preserve the old atomic read.
+        # Never return partially mixed revisions just to pass a heartbeat test.
+        with self._lock:
+            ids=[row[0] for row in self._conn.execute(sql,values)]
+            return combine([self._get_event_unlocked(identity) for identity in ids],map_red())
+
+    def brief_manifest_matches(self, manifest, *, nonblocking=False):
+        """Validate source-derived session text against exact retained event revisions.
+
+        Every admitted input is tracked, not just the displayed headline.
+        Ingest, withdrawal, merges and retention rebuilds increment/remove the
+        event revision. Aliased or missing records never validate. Unrelated
+        source/setting writes do not replace an opening Daily Brief.
+        None means busy, not unchanged; no waiting on the GUI export path.
+        """
+        if not self._lock.acquire(blocking=not nonblocking):
+            return None
+        try:
+            expected=dict(manifest)
+            identities=list(expected)
+            for offset in range(0,len(identities),256):
+                chunk=identities[offset:offset+256]
+                marks=",".join("?" for _ in chunk)
+                actual={row["id"]:row["revision"] for row in self._conn.execute(
+                    "SELECT id,revision FROM events WHERE id IN ("+marks+
+                    ") AND id NOT IN (SELECT alias_id FROM event_aliases)",chunk)}
+                if any(actual.get(identity)!=expected[identity] or identity not in actual
+                       for identity in chunk):
+                    return False
+            return True
+        finally:
+            self._lock.release()
 
     def event_filter_options(self) -> dict[str, list[str]]:
         """Archive-wide selector metadata, independent of any rendered page.
@@ -1310,10 +1773,114 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(key)[:200], encoded))
 
+    def set_settings_atomic(self, settings: dict[str, Any]) -> None:
+        """Persist one plain settings snapshot with the existing size limits.
+
+        Validation finishes before any SQL mutation. All rows commit together
+        or roll back together; callers must not fan a layout snapshot into
+        separate settings transactions or UI refresh signals.
+        """
+        if not isinstance(settings, dict):
+            raise ValueError("Settings snapshot must be a dictionary")
+        from .capacity_limits import MAX_USER_FEED_SETTING_BYTES
+        encoded = []
+        keys = set()
+        for key, value in settings.items():
+            name = str(key)[:200]
+            if name in keys:
+                raise ValueError("Settings snapshot contains overlapping keys")
+            keys.add(name)
+            payload = _json(value)
+            limit = MAX_USER_FEED_SETTING_BYTES if key == "user_feeds" else 250_000
+            if len(payload.encode("utf-8")) > limit:
+                raise ValueError("Setting is too large")
+            encoded.append((name, payload))
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                encoded)
+
     def get_source_state(self, source_id: str) -> dict:
         with self._lock:
             row = self._conn.execute("SELECT body FROM source_states WHERE source_id=?", (source_id,)).fetchone()
             return json.loads(row[0]) if row else {}
+
+    def list_source_states(self, source_ids: Iterable[str]) -> dict[str, dict]:
+        """Read only requested provider health in bounded SQLite batches.
+
+        An idle Sources repaint previously acquired the Store lock and ran a
+        SELECT for every configured source. One batch per 400 IDs avoids that
+        main-thread query fan-out, without caching error/retry checkpoints.
+        """
+        identities = list(dict.fromkeys(source_ids))
+        if any(not isinstance(sid, str) or not sid for sid in identities):
+            raise ValueError("Invalid source identity")
+        states: dict[str, dict] = {}
+        with self._lock:
+            for start in range(0, len(identities), 400):
+                batch = identities[start:start + 400]
+                sql = ("SELECT source_id,body FROM source_states WHERE source_id IN (" +
+                       ",".join("?" for _ in batch) + ")")
+                for row in self._conn.execute(sql, batch):
+                    states[row[0]] = json.loads(row[1])
+        return states
+
+
+    def source_status_snapshot_if_available(self, source_ids: Iterable[str]) -> dict | None:
+        """Atomically read provider settings and health without waiting on Qt.
+
+        An initial revision try-lock is not a lease: another collector may
+        acquire the Store lock just before Sources health SELECTs. BUSY means
+        defer (None), never display an empty or falsely healthy registry.
+        No Qt widgets run under this short source-data lock.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            revision = (self._conn.total_changes,
+                        int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+            row = self._conn.execute(
+                "SELECT value FROM settings WHERE key=?", ("enabled_sources",)
+            ).fetchone()
+            enabled = json.loads(row[0]) if row else None
+            states = self.list_source_states(source_ids)
+            return {"revision": revision, "enabled_sources": enabled,
+                    "states": states}
+        finally:
+            self._lock.release()
+
+    def any_source_error(self, source_ids: Iterable[str]) -> bool:
+        """One bounded, consistent source-state scan for the native tray icon.
+
+        Query only explicitly enabled identities. A malformed stored state is
+        conservatively considered an error; never silently report healthy.
+        SQLite's parameter limit is respected for catalogs over 400 sources.
+        """
+        identities = list(source_ids)
+        if any(not isinstance(item, str) or not item for item in identities):
+            return True
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            return False
+        statuses = {"error", "rate_limited", "failed"}
+        with self._lock:
+            for start in range(0, len(identities), 400):
+                batch = identities[start:start + 400]
+                sql = ("SELECT body FROM source_states WHERE source_id IN (" +
+                       ",".join("?" for _ in batch) + ")")
+                for row in self._conn.execute(sql, batch):
+                    try:
+                        state = json.loads(row[0])
+                    except (ValueError, TypeError):
+                        return True
+                    if not isinstance(state, dict):
+                        return True
+                    status = state.get("status")
+                    if "status" in state and not isinstance(status, str):
+                        return True  # Malformed list/dict/null cannot crash native tray.
+                    if status in statuses:
+                        return True
+        return False
 
     def set_source_state(self, source_id: str, state: dict) -> None:
         encoded = _json(state)
@@ -1453,8 +2020,14 @@ class Store:
                 body["delivery_status"] = plain_text(status, 500)
                 self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
 
-    def put_observations(self, observations: Iterable[dict]) -> None:
+    def put_observations(self, observations: Iterable[dict]) -> int:
+        """Store valid indicator revisions; return the count of material changes.
+
+        A repeated fingerprint may advance retrieved_at for custody without
+        rebuilding the full GUI map. New or corrected values remain visible.
+        """
         stamp = utcnow()
+        changed = 0
         with self._lock, write_transaction(self._conn, self.path):
             for index, raw in enumerate(observations):
                 if index >= 5000:
@@ -1499,8 +2072,38 @@ class Store:
                     else:
                         self._conn.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?)", (identity, source, indicator, country, date, stamp, retrieved, fingerprint, _json(body)))
                     self._conn.execute("INSERT INTO observation_revisions(observation_id,at,fingerprint,body) VALUES(?,?,?,?)", (identity, stamp, fingerprint, _json(body)))
+                    changed += 1
                 except (ValueError, TypeError):
                     continue
+        return changed
+
+    def content_revision(self) -> tuple[int, int]:
+        """Conservative SQLite mutation identity for volatile GUI read reuse.
+
+        total_changes catches THIS Store connection's writes; data_version
+        catches separate SQLite connections. Read both under the Store lock.
+        A change invalidates a cached *view*; it is never treated as evidence
+        of a changed event, a refreshed source, or a newer publication.
+        """
+        with self._lock:
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+
+    def content_revision_if_available(self) -> tuple[int, int] | None:
+        """Nonblocking revision probe for a Qt event-loop callback.
+
+        A worker can hold the Store RLock while importing or reading a large
+        source batch. Never wait for that worker merely to decide whether a
+        previously captured UI snapshot remains current. None means BUSY, not
+        unchanged; callers must defer or discard, never accept a stale view.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return (self._conn.total_changes,
+                    int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+        finally:
+            self._lock.release()
 
     def list_observations(self, indicator: str = "", country: str = "") -> list[dict]:
         where, params = [], []
@@ -1511,15 +2114,60 @@ class Store:
             where.append("country=?")
             params.append(country)
         with self._lock:
+            # SQLite's data_version includes other connections' committed
+            # writes, while total_changes covers this Store's own changes.
+            # A cached current observation read is valid ONLY at this exact
+            # token. Source corrections, retention and withdrawals all alter
+            # it. Filtered queries deliberately retain their existing SQL.
+            token = (self._conn.total_changes,
+                     int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+            if (not indicator and not country and self._observation_cache
+                    and self._observation_cache[0] == token):
+                return json.loads(self._observation_cache[1])
             sql = "SELECT id,body FROM observations" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY observation_date DESC,country LIMIT 10000"
+            rows = self._conn.execute(sql, params).fetchall()
+            # Old code issued one separate revision SELECT per observation:
+            # 3,200 rows meant 3,200 SQLite round-trips on the Qt GUI thread.
+            # Fetch revisions in bounded batches while retaining per-record
+            # revision order, previous_value and the exact returned schema.
+            revisions_by_id: dict[str, list[dict]] = {}
+            for offset in range(0, len(rows), 400):
+                chunk = rows[offset:offset + 400]
+                identities = [row["id"] for row in chunk]
+                placeholders = ",".join("?" for _ in identities)
+                query = (
+                    "SELECT observation_id,body FROM observation_revisions "
+                    f"WHERE observation_id IN ({placeholders}) ORDER BY id"
+                )
+                for revision in self._conn.execute(query, identities):
+                    revisions_by_id.setdefault(revision["observation_id"], []).append(
+                        json.loads(revision["body"])
+                    )
             result = []
-            for row in self._conn.execute(sql, params):
+            for row in rows:
                 body = json.loads(row["body"])
-                revisions = [json.loads(r[0]) for r in self._conn.execute("SELECT body FROM observation_revisions WHERE observation_id=? ORDER BY id", (row["id"],))]
+                revisions = revisions_by_id.get(row["id"], [])
                 body["revisions"] = revisions
                 body["revision_count"] = len(revisions)
                 body["previous_value"] = revisions[-2]["value"] if len(revisions) > 1 else None
                 result.append(body)
+            if not indicator and not country:
+                # Cache at most a bounded serialized snapshot. The first read
+                # occurs during the non-dismissable startup splash; subsequent
+                # post-collection no-op signals do not re-run thousands of
+                # SQLite history lookups merely to paint identical Economy.
+                # Re-check after reading to avoid caching an external commit
+                # that overlapped the read.
+                ending = (self._conn.total_changes,
+                          int(self._conn.execute("PRAGMA data_version").fetchone()[0]))
+                if ending == token and len(result) <= 5000:
+                    encoded = _json(result)
+                    self._observation_cache = (
+                        (token, encoded) if len(encoded.encode("utf-8")) <= 4_000_000
+                        else None
+                    )
+                else:
+                    self._observation_cache = None
             return result
 
     def prune(self, retention_days: int = 365, now: str | None = None) -> dict:
@@ -1578,6 +2226,47 @@ class Store:
                 self._conn.close()
                 self._closed = True
 
+    def close_after_shutdown(self, settings: dict, delivery_outcomes=(), *, lock_timeout=1.0) -> None:
+        """Commit final UI/history state without a blocking WAL truncate.
+
+        Called only by the shutdown finalizer after collection is gated and
+        owned database children have actually exited. The existing Store lock
+        protects an in-progress transaction; failure leaves the connection and
+        singleton alive for an explicit retry. A busy reader may retain a WAL,
+        which is durable SQLite state, not a reason to delay application exit.
+        """
+        encoded = [(str(key)[:200], _json(value)) for key, value in settings.items()]
+        if any(len(value.encode("utf-8")) > 250_000 for _, value in encoded):
+            raise ValueError("Shutdown setting is too large")
+        if not self._lock.acquire(timeout=max(0.0, lock_timeout)):
+            raise RuntimeError("An archive operation is still finishing; exit can be retried safely")
+        try:
+            if self._closed:
+                return
+            previous_timeout = self._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self._conn.execute("PRAGMA busy_timeout=250")
+            try:
+                # One transaction: do not lose half the layout or acknowledge
+                # native submissions before their history outcome is durable.
+                with self._conn:
+                    self._conn.executemany(
+                        "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        encoded)
+                    for alert_id, status in delivery_outcomes:
+                        row = self._conn.execute("SELECT body FROM alerts WHERE id=?", (alert_id,)).fetchone()
+                        if row:
+                            body = json.loads(row[0])
+                            body["delivery_status"] = plain_text(status, 500)
+                            self._conn.execute("UPDATE alerts SET body=? WHERE id=?", (_json(body), alert_id))
+                self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                self._conn.close()
+                self._closed = True
+            finally:
+                if not self._closed:
+                    self._conn.execute(f"PRAGMA busy_timeout={int(previous_timeout)}")
+        finally:
+            self._lock.release()
+
     def __enter__(self):
         return self
 
@@ -1589,41 +2278,249 @@ def _markdown_text(value: Any) -> str:
     return plain_text(value, 8000).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("*", "\\*").replace("_", "\\_").replace("#", "\\#").replace("`", "\\`")
 
 
-def build_brief(events: list[dict], period: str = "daily") -> str:
+def build_brief(events: list[dict], period: str = "daily", *, generated_at=None) -> str:
     if period not in {"daily", "weekly"}:
         raise ValueError("Brief period must be daily or weekly")
-    limit = 100 if period == "weekly" else 40
+    limit = 80 if period == "weekly" else 60
     title = "Weekly" if period == "weekly" else "Daily"
-    synthetic = any(e.get("synthetic") for e in events)
-    lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {utcnow()}", "",
+    generated = utcnow() if generated_at is None else _iso(generated_at)
+    moment = _dt(generated)
+    since = moment - timedelta(days=7 if period == "weekly" else 1)
+    window = "last 7 days" if period == "weekly" else "last 24 hours"
+    from .brief_selection import (balanced_brief_sections, BRIEF_DOMAINS,
+                                  MAX_PRIORITY_RECORDS, critical_alerts,
+                                  priority_rank, priority_heading)
+    supplied = [e for e in events[:MAX_PRIORITY_RECORDS] if isinstance(e, dict)]
+    synthetic = any(e.get("synthetic") for e in supplied)
+
+    def text(value, length=300):
+        from html import escape
+        # Markdown may contain inline HTML. Entity-encoded source markup must
+        # remain text even after plain_text has decoded its entities.
+        return escape(_markdown_text(plain_text(value, length)), quote=False)
+
+    def date(value):
+        try:
+            return _dt(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def source_time(report):
+        published = date(report.get("published_at"))
+        if report.get("publication_time_known") is not False and published:
+            return "source published " + _iso(published)
+        retrieved = date(report.get("first_retrieved_at") or report.get("retrieved_at"))
+        return ("publication time unknown; first retrieved " + _iso(retrieved)
+                if retrieved else "publication time unknown; retrieval time unavailable")
+
+    def period_changes(event):
+        # This is the local revision trail, not an inferred real-world change.
+        # Filter by the actual change timestamp, not the event's latest update.
+        candidates = []
+        for entry in event.get("timeline", [])[-40:]:
+            if isinstance(entry, dict):
+                candidates.extend((change, entry.get("at")) for change in
+                                  entry.get("changes", [])[:20] if isinstance(change, dict))
+        candidates.extend((change, event.get("updated_at")) for change in
+                          event.get("changes", [])[:20] if isinstance(change, dict))
+        found = {}
+        for change, fallback in candidates:
+            at = date(change.get("at") or fallback)
+            if at is None or not since <= at <= moment:
+                continue
+            key = (at, str(change.get("kind")), str(change.get("publisher")),
+                   str(change.get("report_id")), str(change.get("title")))
+            found[key] = (at, change)
+        return sorted(found.values(), key=lambda row: row[0], reverse=True)[:3]
+
+    lines = [f"# Global Pulse — {title} intelligence brief", "", f"Generated: {generated}", "",
+             f"**Reporting window (UTC):** {_iso(since)} through {_iso(moment)} — rolling {window}, not a calendar-day total.", "",
              "SYNTHETIC TRAINING DATA — NOT LIVE NEWS" if synthetic else "Source-linked summary of the supplied local monitoring records.", "",
-             "Coverage is limited to monitored sources. Official attribution does not independently confirm every underlying claim.", ""]
-    ranked = sorted(events, key=lambda e: (SEVERITY.get(e.get("severity"), 0), e.get("updated_at", "")), reverse=True)[:limit]
-    if not ranked:
+             "The requested window uses local record updates; source publication dates may be older. "
+             "Exact dates and any supplied historical context remain visible below. "
+             "Coverage is limited to monitored sources, not all world events.", "",
+             "**Read the labels separately:** UNASSESSED means the source has not supplied an importance/severity rating; "
+             "it does not mean a story is false or that verification was completed. "
+             "Evidence status describes source attribution and documented independent reporting. "
+             "An official statement confirms its publication, not every underlying claim.", ""]
+    # Executive priority index includes every admitted active red record,
+    # independent of the detailed topic caps. The source evidence below
+    # remains a bounded, balanced sample; red does not imply verification.
+    red=critical_alerts(supplied)
+    lines.extend(["## Critical alerts — immediate attention", "",
+                  f"{len(red)} active critical record(s) in the supplied local inventory. "
+                  "Severity is recorded importance, not confirmation of underlying claims.", ""])
+    if not red:
+        lines.extend(["No active critical alerts in the supplied scope. This is not a worldwide all-clear.", ""])
+    for event in red:
+        updated=date(event.get("updated_at"))
+        state=" · retained from before reporting window" if updated and updated<since else ""
+        sources=[]
+        for report in event.get("reports",[])[:100]:
+            if not isinstance(report,dict) or report.get("future_dated") or report.get("evidence_status","active")!="active":
+                continue
+            try:
+                url=safe_public_url(report.get("url","")).replace("(","%28").replace(")","%29").replace(" ","%20").replace("<","%3C").replace(">","%3E").replace('"',"%22")
+            except (TypeError,ValueError):
+                continue
+            sources.append(f"[{text(report.get('publisher') or report.get('source_id') or 'Original source',100)}]({url})")
+            break
+        lines.extend([
+            f"- Severity: **CRITICAL** · **{text(event.get('title') or 'Untitled source record',260)}** · "
+            f"{text(event.get('country') or event.get('region') or 'Unspecified location',100)} · "
+            f"Evidence: {text(event.get('verification') or 'unverified',30)} · "
+            f"Record update {text(event.get('updated_at') or 'unknown',60)}{state}"+
+            (" · "+sources[0] if sources else " · inspect local event "+text(event.get("id"),100)),
+            ""
+        ])
+    # A single high-volume weather adapter must not consume every detailed
+    # assessment slot. Select topic coverage first, then sort by importance.
+    grouped = balanced_brief_sections(
+        supplied, per_domain=8 if period == "daily" else 9,
+        max_total=limit, disaster_limit=3 if period == "daily" else 6
+    )
+    ranked = sorted(((domain, event) for domain, items in grouped for event in items),
+                    key=lambda row:priority_rank(row[1]), reverse=True)
+    selected = [event for _, event in ranked]
+    supplied_count = len({str(e.get("id")) for e in supplied if e.get("id")})
+    if not grouped:
         lines.extend(["No matching developments are stored for this period.", ""])
-    for index, event in enumerate(ranked, 1):
-        lines.extend([f"## {index}. {_markdown_text(event['title'])}", "",
-                      f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {_markdown_text(event['category'])} · {_markdown_text(event['region'])} · {_markdown_text(event['verification'])}", "",
-                      _markdown_text(event["recap"]), "",
-                      f"Last material record update: {event['updated_at']} · Local event: {event['id']}", ""])
+    else:
+        evidence_counts = {key: 0 for key in ("official", "corroborated", "developing", "unverified")}
+        for event in selected:
+            evidence = str(event.get("verification") or "unverified")
+            evidence_counts[evidence if evidence in evidence_counts else "unverified"] += 1
+        publishers = {str(r.get("source_id") or r.get("publisher"))
+                      for e in selected for r in e.get("reports", [])
+                      if isinstance(r, dict) and (r.get("source_id") or r.get("publisher"))}
+        unrated = sum(e.get("severity", "unassessed") == "unassessed" for e in selected)
+        lines.extend([
+            "## At a glance", "",
+            f"**Included:** {len(selected)} of {supplied_count} supplied local records across {len(grouped)} topics; "
+            f"{len(publishers)} source identities represented. This is a bounded sample, not a global event count.", "",
+            f"**Evidence in this sample:** {evidence_counts['official']} official measurement(s), "
+            f"{evidence_counts['corroborated']} corroborated event association(s), "
+            f"{evidence_counts['developing']} developing association(s), "
+            f"{evidence_counts['unverified']} unverified record(s). {unrated} have unassessed importance.", "",
+        ])
+        if supplied_count > len(selected):
+            lines.extend([f"{supplied_count - len(selected)} additional supplied records are outside the displayed topic limits. "
+                          "The critical-alert index above remains independent of those detail limits. "
+                          "Use the feed or event archive for their complete evidence.", ""])
+        lines.extend([
+            "## Topic coverage", "",
+            "Detailed assessments are ordered by current importance and then last recorded update, "
+            "with topic-balanced coverage. These sections do not establish worldwide coverage or verify a crisis.", ""
+        ])
+        present = {domain for domain, _ in grouped}
+        absent = [domain for domain in BRIEF_DOMAINS if domain not in present]
+        if absent:
+            lines.extend(["**Not represented in supplied local records:** " +
+                          ", ".join(absent) +
+                          ". This is a coverage gap, not evidence that no events occurred.", ""])
+        lines.extend([" | ".join(f"{domain}: {len(rows)}" for domain, rows in grouped), ""])
+        by_day = defaultdict(list)
+        for domain, event in ranked:
+            at = date(event.get("updated_at"))
+            if at:
+                by_day[at.date().isoformat()].append(domain)
+        if by_day:
+            lines.extend(["### Selected local record updates by date (UTC)", "",
+                          "These are archive update dates, not asserted event-occurrence or publication dates.", ""])
+            for day, domains in sorted(by_day.items(), reverse=True):
+                lines.append(f"- **{day}:** {len(domains)} selected record(s); " +
+                             ", ".join(domain for domain in BRIEF_DOMAINS if domain in domains) + ".")
+            lines.append("")
+    current_domain = None
+    current_priority = None
+    for index, (domain, event) in enumerate(ranked, 1):
+        priority=priority_heading(event)
+        if priority!=current_priority:
+            current_priority=priority
+            current_domain=None
+            lines.extend([f"# {priority} — detailed assessments", ""])
+        if domain != current_domain:
+            current_domain = domain
+            lines.extend([f"## {domain}", ""])
+        verification = str(event.get("verification") or "unverified")
+        evidence_label = {
+            "official": "Official measurement — source-attributed and potentially revisable",
+            "corroborated": "Corroborated event association — individual claims still require review",
+            "developing": "Developing association — independent confirmation remains incomplete",
+            "unverified": "Unverified — independent corroboration has not been established",
+        }.get(verification, "Unverified — assessment unavailable")
+        origins = len(set(event.get("independent_origins") or []))
+        reports = [r for r in event.get("reports", []) if isinstance(r, dict)]
+        lines.extend([f"### {index}. {text(event.get('title') or 'Untitled source record', 260)}", "",
+                      f"Severity: **{str(event.get('severity', 'unassessed')).upper() if event.get('severity') in SEVERITY else 'UNASSESSED'}** · {text(event.get('category') or 'News', 80)} · {text(event.get('region') or event.get('country') or 'Unspecified location', 120)}", "",
+                      f"**Evidence:** {evidence_label}. {len(reports)} source record(s); {origins} documented independent origin(s). "
+                      f"**Record status:** {text(event.get('status') or 'unknown', 40)}.", "",
+                      text(event.get("recap") or "No source-provided recap is available; inspect the original reports.", 1000), "",
+                      f"Last material record update: {text(event.get('updated_at') or 'unknown', 60)} · Local event: {text(event.get('id'), 100)}", ""])
+        updated = date(event.get("updated_at"))
+        if event.get("future_dated") or updated and updated > moment:
+            lines.extend(["**Future-dated context:** retained for review, not evidence of a current development.", ""])
+        elif updated and updated < since:
+            lines.extend(["**Historical context:** this supplied record is outside the requested rolling window; it is not presented as new today.", ""])
+        if event.get("official_attribution") and verification != "official":
+            lines.extend(["**Official-source attribution:** an official publication is present; this does not independently verify its underlying claims.", ""])
+        for reason in event.get("reasons", [])[:2]:
+            lines.extend(["Evidence basis: " + text(reason, 280), ""])
         if event.get("emerging"):
             lines.extend(["**Emerging signal:** Limited coverage in the monitored source set. This is not a measurement of worldwide media coverage.", ""])
-        for conflict in event.get("contradictions", []):
-            lines.extend([f"**Evidence discrepancy:** {_markdown_text(conflict['explanation'])}", ""])
-        sources = event.get("reports", [])[:20]
-        if sources:
-            lines.append("Sources:")
+        for conflict in event.get("contradictions", [])[:5]:
+            lines.extend([f"**Evidence discrepancy:** {text(conflict.get('explanation'), 400)}", ""])
+        changes = period_changes(event)
+        if changes:
+            lines.extend(["**Recorded changes during this window:**", ""])
+            for at, change in changes:
+                lines.append(f"- {_iso(at)} — {text(change.get('publisher') or 'Source unlisted', 80)}: "
+                             f"{text(change.get('kind') or 'update', 50)} — {text(change.get('title'), 240)}.")
             lines.append("")
-        for report in sources:
+
+        # Prefer current evidence, then show older/retracted/future records with
+        # their state. This never changes the canonical verification result.
+        reports = sorted(reports, key=lambda r: (
+            not bool(r.get("future_dated")), r.get("evidence_status", "active") == "active",
+            date(r.get("published_at")) or datetime.min.replace(tzinfo=UTC)), reverse=True)
+        sources = []
+        for report in reports:
             try:
-                url = safe_public_url(report["url"]).replace("(", "%28").replace(")", "%29").replace(" ", "%20")
-            except ValueError:
+                url = safe_public_url(report.get("url", "")).replace("(", "%28").replace(")", "%29").replace(" ", "%20").replace("<", "%3C").replace(">", "%3E").replace('"', "%22")
+            except (TypeError, ValueError):
                 continue
-            time_label = report['published_at'] if report.get('publication_time_known', True) else f"publication time unknown; first retrieved {report['retrieved_at']}"
-            lines.append(f"- [{_markdown_text(report['publisher'])}: {_markdown_text(report['title'])}]({url}) — {time_label}; {report.get('evidence_status', 'active')}; {report.get('independence', 'unknown')} provenance.")
-            credit = " · ".join(_markdown_text(report[k]) for k in ("byline", "attribution", "source_license") if report.get(k))
+            sources.append((report, url))
+            if len(sources) == 8:
+                break
+        detail_count = 0
+        seen_details = set()
+        for report, url in sources:
+            summary = plain_text(report.get("english_summary") or report.get("summary") or "", 420)
+            key = summary.casefold()
+            if (not summary or key in seen_details or summary == report.get("title")
+                    or report.get("future_dated") or report.get("evidence_status", "active") != "active"):
+                continue
+            seen_details.add(key)
+            if detail_count == 0:
+                lines.extend(["**Source-provided detail (attributed, not a new independent assessment):**", ""])
+            label = ("machine-translated excerpt" if report.get("translation_label")
+                     else "provided English excerpt" if report.get("english_summary") else "source excerpt")
+            lines.append(f"- [{text(report.get('publisher') or report.get('source_id') or 'Source', 100)}]({url}) "
+                         f"({source_time(report)}; {label}): “{text(summary, 420)}”")
+            detail_count += 1
+            if detail_count == 2:
+                break
+        if detail_count:
+            lines.append("")
+        if sources:
+            lines.extend(["Sources:", ""])
+        for report, url in sources:
+            lines.append(f"- [{text(report.get('publisher') or report.get('source_id') or 'Source', 100)}: {text(report.get('title') or 'Original report', 260)}]({url}) — {source_time(report)}; {text(report.get('evidence_status') or 'active', 40)}; {text(report.get('independence') or 'unknown', 40)} provenance.")
+            credit = " · ".join(text(report[k], 220) for k in ("byline", "attribution", "source_license") if report.get(k))
             if credit:
                 lines.append(f"  Credit: {credit}")
+        if len(reports) > len(sources):
+            lines.append(f"{len(reports) - len(sources)} additional source record(s) are omitted by the link/safety budget; inspect the event archive for the complete evidence trail.")
         lines.append("")
     lines.extend(["## Verification notes", "", "Repeated syndication adds no independent confirmation. Conflicting claims are preserved without selecting a winner. Recaps use source-provided metadata and bounded attributed excerpts; no unavailable article details are inferred.", ""])
     return "\n".join(lines)

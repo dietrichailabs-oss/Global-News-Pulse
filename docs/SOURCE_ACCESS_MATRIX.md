@@ -4,7 +4,15 @@
 
 ## What is enabled
 
-The installation has 14 enabled public source configurations, including USGS, NASA EONET, NWS, NOAA SWPC, GDACS, UK FCDO, ECB, Japan MOF, SAnews, Global Voices, India PIB, and three World Bank series. They require no API key. The 14 other catalog entries are disabled or manual; the application must not let a checkbox override `access_status=review_required`.
+The original November 8 inventory had 14 enabled public source configurations, including USGS, NASA EONET, NWS, NOAA SWPC, GDACS, UK FCDO, ECB, Japan MOF, SAnews, Global Voices, India PIB, and three World Bank series, plus 14 disabled/manual entries. Those counts are historical, not the current catalog total. The current bundled catalog and Settings list the available sources; the application must not let a checkbox override `access_status=review_required`.
+
+**R20 update, November 21:** YouTube playback and its `youtube`/`tousitv` manual catalog entries have been removed at the owner's request. Those two retired entries are omitted from the historical table below. News-source original links remain intact; no YouTube player or live-video discovery is provided.
+
+**Focused three-camera view, November 22:** the finite manual camera bank uses
+the three reviewed sources below. GPC opens its published video-player documents;
+Seacliff retains its original public document and provider-created player with a
+focused layout. This does not add general live-video discovery, arbitrary URLs,
+or automatic live playback. Dated observations and their limits are listed below.
 
 The app fetches public metadata, headlines, and bounded feed excerpts. It does not download complete publisher articles, photographs, account data, or video/audio files. Feed text is treated as untrusted plain text. Source attribution, author/byline where supplied, original URL, source-license text, publication date, retrieval date, and source update time travel with the record. A missing publication time remains explicitly unknown. An official statement confirms attribution, not all its claims. EONET and GDACS reuse external reporting and are not automatically independent corroboration.
 
@@ -40,8 +48,6 @@ Collection intervals are at least 10 minutes by default, 5 minutes only where co
 | `sec` — SEC EDGAR | Manual / disabled | [manual](https://www.sec.gov/edgar/search/) · 10 min floor | SEC fair access policy; filing content and company authorship remain separately attributable. [Provider documentation](https://www.sec.gov/about/developer-resources) | Entity watchlists and reviewed contact User-Agent required before automated requests. |
 | `imf` — International Monetary Fund | Manual / disabled | [manual](https://data.imf.org/) · 10 min floor | Dataset-specific IMF terms apply; API version/schema and rights require review. [Provider documentation](https://www.imf.org/en/About/copyright-and-terms) | Manual statistics portal. World Bank provides preconfigured historical economic data. |
 | `fred` — Federal Reserve Economic Data | Manual / disabled | [manual](https://fred.stlouisfed.org/) · 10 min floor | FRED API terms and original series rights apply; user credential not embedded. [Provider documentation](https://fred.stlouisfed.org/docs/api/fred/) | Manual portal; no credentials supplied. |
-| `tousitv` — Tousi TV | Manual / disabled | [manual](https://www.youtube.com/@TousiTV/streams) · 10 min floor | YouTube channel links and permitted official embeds; no video downloads or platform scraping. [Provider documentation](https://developers.google.com/youtube/terms/developer-policies) | Manual channel/stream selection. Free reliable automated live detection unavailable without approved API configuration. |
-| `youtube` — YouTube public videos | Manual / disabled | [manual](https://www.youtube.com/) · 10 min floor | Official embed only on user request; availability and provider permissions govern playback. [Provider documentation](https://developers.google.com/youtube/player_parameters) | Manual video links/official embeds; upload feeds do not prove that a broadcast is live. |
 | `x` — X public posts | Manual / disabled | [manual](https://x.com/) · 10 min floor | Provider terms and API access required for automated discovery. [Provider documentation](https://developer.x.com/en/developer-terms/agreement-and-policy) | User-supplied public links only; no scraping, private-account access or unverified auto-alerts. |
 | `facebook` — Facebook public posts | Manual / disabled | [manual](https://www.facebook.com/) · 10 min floor | Meta platform terms and approved access required for discovery/embeds. [Provider documentation](https://developers.facebook.com/terms/) | User-supplied public links only; no private-account monitoring. |
 
@@ -66,11 +72,58 @@ The standalone source suite passes **41 focused tests**, including RSS/Atom/RDF/
 
 ## Media and restricted sources
 
-[YouTube's Tousi TV channel](https://www.youtube.com/@TousiTV) and [streams page](https://www.youtube.com/@TousiTV/streams) resolve with the Tousi TV channel title; [Tousi's own about page](https://tousi.tv/about) identifies the outlet. Automated live status is not configured. A channel/upload listing does not prove a broadcast is live, and Global Pulse therefore offers the manual channel link without claiming a live alert. User-selected videos may use the official embedded player if allowed by the uploader. No website reverse engineering, stream downloading, autoplay with sound, or quota bypass is used.
+The YouTube/Tousi TV integration is retired. Historical reports and old saved-video preferences are not erased, but they cannot recreate a playback or dedicated media-source shortcut. The three explicitly listed public camera pages below have a camera-only in-app Windows player; other original news/provider links remain external actions.
 
 [ReliefWeb](https://apidoc.reliefweb.int/) now requires an approved appname for read/search; none was supplied. [BBC terms](https://downloads.bbc.co.uk/usingthebbc/bbc_terms_of_use_19September2022english.pdf) require permission for business RSS use. [UN terms](https://www.un.org/en/about-us/terms-of-use) restrict redistribution and derivatives. [EBC's current terms](https://www.ebc.com.br/termos-de-uso-e-condicoes-gerais-do-portal-da-ebc) have personal/noncommercial scope; older CC notices cannot silently override them. Those adapters remain disabled pending the stated review or approval.
 
-Public camera entries link to [NPS air-quality cameras](https://www.nps.gov/features/ard/webcams/) and [coastal webcams](https://www.nps.gov/subjects/oceans/webcams.htm). The air-quality network describes delayed images rather than continuous live video. Radio entries point to [WebSDR](https://websdr.org/) and [KiwiSDR's public directory](https://kiwisdr.com/public/). Directory inclusion does not assert every receiver is currently online or grant recording/redistribution rights. The user opens a provider's receiver page, and the application performs no audio recording, retransmission, private-camera discovery, private-account collection, or precise individual/tactical tracking.
+The 14 existing public snapshot entries use individually reviewed operator pages and attributed
+JPEG/PNG landscape snapshots. See [the worldwide camera review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WORLD_CAMERA_SOURCES_20261121.md)
+for exact endpoints, reuse terms and bounded availability observations. These
+are periodically refreshed stills, not continuous video or guaranteed current
+incident views. Their exact records and automatic association behavior are
+preserved in this successor.
+
+The separate manual-only live choices are:
+
+| Catalog ID | Original source / Source action | In-app player document | Provider rights/source references | Prior recorded public-page observation |
+| --- | --- | --- | --- | --- |
+| `gpc-tannum-sands-live` | [GPC Tannum Sands](https://gpcl.com.au/environment/live-beach-cameras/tannum-sands-webcam/) | [Published CoastalCOMS video player](https://widget.coastalcoms.com/video/005972b5-8290-420c-8527-9ce69bbcd2ec) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+| `gpc-1770-live` | [GPC 1770](https://gpcl.com.au/environment/live-beach-cameras/1770-webcam/) | [Published CoastalCOMS video player](https://widget.coastalcoms.com/video/e53407e0-915b-4964-b60a-638e1bd32d6d) | [GPC camera index](https://gpcl.com.au/environment/live-beach-cameras/) · [GPC disclaimer](https://gpcl.com.au/disclaimer/) | November 22: 1280×720 player and advancing playback time in cloud Chrome. |
+| `bsyc-seacliff-live` | [BSYC Seacliff on IPCamLive](https://www.ipcamlive.com/bsyc1080) | Same original public document; its provider-created iframe remains unchanged. | [BSYC weather page](https://www.bsyc.com.au/weather) · [IPCamLive terms](https://www.ipcamlive.com/terms) | November 22: 1920×1080 player and advancing playback time in cloud Chrome. |
+
+The table's observations are attributed to the earlier session. On November 22
+the owner separately reported working 1770 video in the previous Windows build
+and supplied a screenshot of its full-page view. The dedicated 1770 player also
+displayed coastal video in cloud Chrome during this update. These observations
+do not verify the focused layout inside the new Windows package or establish
+current playback for all three sources.
+
+The GPC player routes come from the video iframes published on the original GPC
+pages. Their controls, branding and visible technical-availability notice remain
+in the layout. IPCamLive's standalone BSYC embed reports that embedding is not
+available; Pulse keeps the working public document and adjusts its layout only,
+without changing the provider iframe's URL, parameters, access or error state.
+If the expected player structure is missing, the original page layout remains.
+
+Public availability and an observed player do not grant recording, mirroring or
+redistribution rights. Pulse retains the provider's player/credit and visible
+Source and Source terms actions, and captures neither
+raw stream URLs nor expiring access tokens. Source terms remain subject to exact
+review. Provider requests stay within each canonical entry's finite HTTPS host
+list; additional hosts require review, not a wildcard or automatic bypass.
+The native helper uses private sessions and attempts temporary-profile cleanup;
+it does not claim an entirely memory-only browser. Windows playback and exact
+package behavior still need validation for this focused-view candidate.
+
+Radio now supports [WebSDR](https://websdr.org/) only; KiwiSDR is retired. See
+[the individual receiver review](https://github.com/dietrichailabs-oss/Global-News-Pulse/blob/eng/issue21-r20-digital-radio-20261119/docs/WEBDR_OPERATOR_LINKS_20261121.md) for the expanded
+curated links. The central WebSDR.org maintained dataset explicitly requires
+permission for reuse in another website or automated system, so it is neither
+imported nor mirrored. Independently sourced operator links do not grant blanket
+recording or redistribution rights. Directory inclusion or an HTTP response
+does not verify live reception. The application performs no audio recording,
+retransmission, private-camera discovery, private-account collection, or precise
+individual/tactical tracking.
 
 ## Network and catalog boundaries
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -181,7 +181,15 @@ def test_store_crisis_one_current_official_source_allows_stripe(tmp_path):
         assert activity[normalize_country("France")]["conflict"] == 1
 
 
-def test_map_crisis_toggle_state_round_trips(app):
+def test_map_crisis_toggle_state_round_trips(app, monkeypatch):
+    from global_pulse import map_widget
+
+    class FixtureClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz) if tz is not None else NOW.replace(tzinfo=None)
+
+    monkeypatch.setattr(map_widget, "datetime", FixtureClock)
     world = WorldMap()
     world.set_events([
         event("war", "France", "Shelling and armed conflict reported", category="Conflict"),
@@ -206,13 +214,31 @@ def test_map_crisis_toggle_state_round_trips(app):
     restored.close()
 
 
-def test_gdelt_catalog_is_enabled_metadata_only_world_press():
+def test_crisis_source_freshness_boundary_is_fourteen_days():
+    def report_at(age):
+        return event("boundary", "France", "Fictional armed conflict reported",
+                     category="Conflict", updated=(NOW-age).isoformat())
+
+    # The source at the exact boundary is eligible; one second older is not.
+    assert build_country_activity([report_at(timedelta(days=14))], now=NOW)[
+        normalize_country("France")]["conflict"] == 1
+    assert not build_country_activity(
+        [report_at(timedelta(days=14, seconds=1))], now=NOW)
+    assert build_country_activity([report_at(timedelta(days=13, hours=23))], now=NOW)[
+        normalize_country("France")]["conflict"] == 1
+
+
+def test_gdelt_catalog_is_quarantined_metadata_only_world_press():
     source = next(item for item in load_catalog() if item["id"] == "gdelt_world_press")
-    assert source["enabled"]
+    assert source["enabled"] is False
+    assert source["status"] == "disabled"
     assert source["adapter"] == "gdelt_doc"
     assert source["metadata_only"]
     assert source["allowed_domains"] == ["api.gdeltproject.org"]
     assert source["country_batch_size"] == 8
+    assert "43448330100" in source["disabled_reason"]
+    assert "43448945600" in source["disabled_reason"]
+    assert "43448926428" in source["disabled_reason"]
 
 
 def test_gdelt_country_rotation_is_bounded_and_persistent():
@@ -352,7 +378,11 @@ def test_direct_global_reporting_feeds_are_reviewed_and_metadata_first():
     assert expected <= set(catalog)
     for identity in expected:
         source = catalog[identity]
-        assert source["enabled"]
+        if identity == "gdelt_world_press":
+            assert source["enabled"] is False
+            assert source["status"] == "disabled"
+        else:
+            assert source["enabled"]
         assert source["access_status"] == "reviewed_public"
         assert source.get("metadata_only")
         assert source["url"].startswith("https://")

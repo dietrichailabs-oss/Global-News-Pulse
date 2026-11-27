@@ -1,0 +1,107 @@
+name: Camera player offline layout
+
+on:
+  push:
+    branches: [eng/r20-live-cameras-20261122]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: camera-player-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      CI: 'true'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify installed Node and Microsoft Edge
+        id: runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:GP_CAMERA_LAYOUT_OUTPUT = Join-Path $env:RUNNER_TEMP "camera-player-layout-$env:GITHUB_SHA"
+          "GP_CAMERA_LAYOUT_OUTPUT=$env:GP_CAMERA_LAYOUT_OUTPUT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force -Path $env:GP_CAMERA_LAYOUT_OUTPUT | Out-Null
+          $runtime = [ordered]@{
+            source_sha = $env:GITHUB_SHA
+            purpose = 'Offline synthetic camera layout only; no live playback or native embedding claim'
+            image_version = $env:ImageVersion
+            status = 'BLOCKED'
+          }
+          try {
+            $head = (& git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'Checkout does not match the requested SHA' }
+            $runtime.node_path = (Get-Command node.exe -ErrorAction Stop).Source
+            $runtime.node_version = (& node.exe --version).Trim()
+            $runtime.npm_version = (& npm.cmd --version).Trim()
+            & node.exe -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
+            if ($LASTEXITCODE -ne 0) { throw 'The preinstalled Node must be version 20 or later' }
+            $candidates = @(${env:ProgramFiles(x86)}, $env:ProgramFiles) |
+              Where-Object { $_ } |
+              ForEach-Object { Join-Path $_ 'Microsoft\Edge\Application\msedge.exe' } |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+            $edge = $candidates | Select-Object -First 1
+            if (-not $edge) { throw 'Preinstalled Microsoft Edge was not found; no browser will be downloaded' }
+            $edge = (Resolve-Path -LiteralPath $edge).Path
+            $signature = Get-AuthenticodeSignature -FilePath $edge
+            $version = (Get-Item -LiteralPath $edge).VersionInfo
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation(?:,|$)' -or $version.ProductName -ne 'Microsoft Edge') {
+              throw 'The installed Edge executable did not pass product and Microsoft signature verification'
+            }
+            $runtime.edge_path = $edge
+            $runtime.edge_version = $version.ProductVersion
+            $runtime.edge_signature_status = [string]$signature.Status
+            $runtime.edge_signer = $signature.SignerCertificate.Subject
+            $runtime.status = 'READY'
+            "edge_path=$edge" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Installed Edge verified: $edge ($($version.ProductVersion))"
+          } finally {
+            $runtime | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:GP_CAMERA_LAYOUT_OUTPUT 'RUNTIME_DISCOVERY.json') -Encoding utf8
+          }
+
+      - name: Install the locked developer dependency without scripts
+        working-directory: scripts/camera_layout_dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & npm.cmd ci --ignore-scripts --audit=false --fund=false --registry=https://registry.npmjs.org
+          if ($LASTEXITCODE -ne 0) { throw 'Locked camera layout dependency installation failed' }
+
+      - name: Require offline layout PASS in sandboxed Edge
+        env:
+          GP_CAMERA_EDGE_PATH: ${{ steps.runtime.outputs.edge_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & node.exe scripts/qa_camera_player_view.cjs --browser $env:GP_CAMERA_EDGE_PATH --output-dir $env:GP_CAMERA_LAYOUT_OUTPUT
+          $qaExit = $LASTEXITCODE
+          $reportPath = Join-Path $env:GP_CAMERA_LAYOUT_OUTPUT 'CAMERA_PLAYER_LAYOUT.json'
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Camera layout QA produced no report' }
+          $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
+          if ($qaExit -ne 0 -or $report.status -ne 'PASS') { throw "Camera layout QA must PASS; exit=$qaExit, status=$($report.status)" }
+          if ($report.sourceCommit -ne $env:GITHUB_SHA -or $report.kind -ne 'OFFLINE_SYNTHETIC_LAYOUT_ONLY') { throw 'Unexpected QA evidence identity' }
+          if (-not $report.chromiumSandboxEnabled -or $report.playwright.package -ne 'playwright-core' -or $report.playwright.version -ne '1.62.1') { throw 'Unexpected browser sandbox/dependency configuration' }
+          if ($report.cases.Count -ne 6 -or $report.guards.Count -ne 16 -or $report.screenshots.Count -ne 9) { throw 'Camera layout QA coverage is incomplete' }
+          if ($report.network.aborted -ne 0 -or $report.network.fulfilled -le 0) { throw 'Unexpected fixture network activity' }
+          if ($report.liveCameraPlaybackVerified -or $report.windowsNativeEmbeddingVerified) { throw 'Offline QA must not claim playback or native embedding' }
+          Write-Host "OFFLINE_CAMERA_LAYOUT=PASS source=$env:GITHUB_SHA script=$($report.scriptSha256)"
+
+      - name: Upload offline report and screenshots for this SHA
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Camera-player-OFFLINE-layout-${{ github.sha }}
+          path: ${{ env.GP_CAMERA_LAYOUT_OUTPUT }}/
+          if-no-files-found: error
+          retention-days: 3

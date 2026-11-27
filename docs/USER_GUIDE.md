@@ -76,23 +76,75 @@ and output is labeled machine translation. Unsupported languages, missing models
 and failures produce a clear message. The application does not invent full
 article text, captions or audio transcripts.
 
-## Media, webcams and radio
+## Radio and cameras
 
-The contextual media panel shows related links and a small reviewed public-source
-directory. A supported YouTube video can use the official player after you accept
-the connection disclosure. Playback starts only with a user gesture and begins
-muted. **Float** creates a movable/resizable player window; **Stop** ends media
-playback without pausing source monitoring.
+The media panel opens on **Radio**, with separate **AM / FM / Internet Radio**
+and **HAM / SDR** controls. Choose a station or public receiver, connect, and use
+its available tuning controls. Local broadcast listings use Internet streams;
+receiving over-the-air radio requires compatible receiver hardware.
 
-The embedded player uses a temporary, isolated browser profile and denies camera,
-microphone, geolocation, downloads and new windows. It will not run with Chromium
-sandboxing disabled. Provider/region availability and rights are shown.
+HAM now uses **WebSDR** only; the KiwiSDR directory, tuning protocol and controls
+have been retired. The receiver bank includes links checked against individual
+operators, with published bands or exact ranges where available. Selecting or
+filtering a receiver does not connect it. Use **Connect** explicitly; some
+unreviewed or incompatible endpoints remain browser-only. **Open directory**
+still opens the operator's full WebSDR directory, but Pulse does not copy its
+permission-restricted maintained dataset. A listed or loaded receiver is not a
+guarantee of reception or current availability.
 
-Tousi TV is a verified channel link with a manual live-page fallback. This build
-does not claim to automatically detect its broadcasts. Webcam/radio entries are
-public directories or original-source links; individual endpoints still depend
-on provider permission and availability. The application does not record or
-retransmit audio or access private cameras/accounts.
+The **Cameras** tab offers a worldwide bank of reviewed public cameras even
+without a selected news event. Matching area cameras are shown for selected
+events, but they are area context, not evidence that a camera witnessed the
+story. The bank contains **14 still-image views** plus **three manual live-video
+choices**: GPC Tannum Sands, GPC 1770, and BSYC Seacliff.
+
+Connect a snapshot explicitly, or enable **Auto cameras (still images)** after
+its consent prompt. Snapshots are silent JPEG/PNG images with a refresh no faster
+than every 15 minutes. Check the image's capture time and provider status, not
+just Pulse's download time. Images stay in process memory without a recording
+archive. An endpoint working at its dated review is not an uptime guarantee.
+
+Live-video choices always require a separate manual **Connect** and consent.
+Selecting one, opening Cameras, or enabling automatic snapshots does not start
+live video. Entries marked **[LIVE]** open a view focused on the provider's
+player; press Play if asked. Tannum Sands and Town of 1770 load GPC's published
+video-player pages directly. Seacliff keeps its original public page and player
+while hiding the surrounding navigation. Resize the panel to change the video
+area. Player controls, branding and availability notices remain visible. If the
+provider changes its page structure, the original page layout can reappear.
+
+This feature requires Windows and the Microsoft Edge WebView2 Runtime.
+**Source** always opens the original provider page, including when the in-app
+player is unavailable. **Source terms** opens its terms reference; hover over
+the credit or camera count for the full review details. The source credit and
+provider terms still apply; Pulse does not record the video. The private browser
+session can create temporary files and attempts to remove them when it closes,
+but a crash or locked file
+can leave remnants.
+
+**Stop all media** ends media playback without pausing source monitoring.
+Changing cameras or tabs, hiding the dashboard, or exiting disconnects the
+previous camera. Returning does not resume live video; choose Connect again.
+A failed connection can be retried manually, while Connect on an already active
+camera keeps the existing session. A page-loaded message is not proof that video
+is moving. Watch the picture and provider controls to confirm playback.
+
+YouTube playback and the TV tab have been removed. There are no video test,
+saved-video, watch-page, or floating YouTube controls, and new packages do not
+include the native TV helper. Old saved-video preferences and historical news
+reports are preserved but do not start a player. Original news source links
+remain available; they are not in-app video playback.
+
+Public receiver/camera endpoints still depend on provider permission and
+availability. The application does not record or retransmit audio or access
+private cameras/accounts. The isolated browser used by HAM/SDR remains available
+and retains its existing consent and sandbox protections.
+
+When upgrading, the old installer can leave unused TV-helper files in its
+program directory. To remove those old files too, close Pulse, uninstall the
+previous installed version, then install the new build. The standard uninstaller
+preserves the separate application-data directory containing settings, radio
+presets, and the news archive; do not manually delete that data directory.
 
 ## Alerts and background behavior
 

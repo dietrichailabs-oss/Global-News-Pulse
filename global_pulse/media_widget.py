@@ -1,10 +1,10 @@
-"""Explicitly opened official YouTube player and lawful link directory."""
+"""Explicit public radio/camera connections and attributed source links."""
 from __future__ import annotations
 
 import hashlib
 import os
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -12,28 +12,75 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QPushBu
 
 from .security import safe_url
 
-VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+def _retired_receiver_record(item):
+    """Recognize retired provider metadata/hosts, not arbitrary word matches.
+
+    A custom hostname alone cannot establish its receiver software. Only
+    explicit old provider/type identifiers and the known service family are
+    retired here; unrelated records and on-disk preferences stay intact.
+    """
+    if not isinstance(item, dict):
+        return False
+    for key in ("id", "provider", "type", "receiver_type", "protocol"):
+        value = str(item.get(key, "")).strip().casefold()
+        if ((key in {"type", "receiver_type", "protocol"} and value == "kiwi")
+                or re.search(r"(?:^|[^a-z0-9])kiwi[\s_-]*sdr(?:$|[^a-z0-9])", value)):
+            return True
+    for key in ("url", "original_url", "receiver"):
+        try:
+            host = (urlsplit(str(item.get(key, ""))).hostname or "")
+            # Match the browser's canonical host, including fullwidth and
+            # zero-width IDNA aliases, before checking the retired family.
+            host = host.encode("idna").decode("ascii").lower().rstrip(".")
+        except (TypeError, ValueError):
+            continue
+        if host == "kiwisdr.com" or host.endswith(".kiwisdr.com"):
+            return True
+    return False
 
 
-def youtube_id(url):
+def _supported_media(item):
+    """Keep retired video/receiver records out of connections and shortcuts.
+
+    Historical events and saved settings can still contain old records. They
+    stay intact on disk, but must not recreate a removed player or its links.
+    """
+    if not isinstance(item, dict):
+        return False
+    if _retired_receiver_record(item):
+        return False
+    if str(item.get("type", "")).casefold() in {"video", "youtube"}:
+        return False
     try:
-        p = urlsplit(safe_url(url))
-    except (ValueError, TypeError):
-        return None
-    host = p.hostname.lower()
-    if host in {"youtu.be", "www.youtu.be"}:
-        candidate = p.path.strip("/")
-    elif host in {"youtube.com", "www.youtube.com", "m.youtube.com", "www.youtube-nocookie.com", "youtube-nocookie.com"}:
-        candidate = parse_qs(p.query).get("v", [""])[0]
-        if not candidate and p.path.startswith(("/embed/", "/live/", "/shorts/")):
-            candidate = p.path.split("/")[2]
-    else:
-        return None
-    return candidate if VIDEO_ID.fullmatch(candidate) else None
+        launch_url = safe_url(item.get("url", item.get("original_url", "")))
+    except (TypeError, ValueError):
+        return False
+    urls = [launch_url]
+    if item.get("original_url"):
+        urls.append(item["original_url"])
+    if item.get("receiver"):
+        urls.append(item["receiver"])
+    for url in urls:
+        try:
+            # A saved receiver can be an identity such as "rx-a", not an
+            # address. Keep that metadata; actual receiver navigation still
+            # validates the complete HTTPS URL independently.
+            host = (urlsplit(str(url)).hostname or "").lower().rstrip(".")
+        except (TypeError, ValueError):
+            return False
+        if any(host == family or host.endswith("." + family)
+               for family in ("youtube.com", "youtube-nocookie.com", "youtu.be")):
+            return False
+    return True
 
 
 def media_identity(item):
-    """Keep separate tuned stations even when they share one public receiver URL."""
+    """Keep distinct approved cameras/stations that share a provider page."""
+    if item.get("snapshot_url") or item.get("playback") == "live_video":
+        from .camera_context import approved_camera
+        camera = approved_camera(item)
+        if camera:
+            return ("camera", camera["id"], camera.get("snapshot_url") or camera["url"])
     url = str(item.get("url", item.get("original_url", "")))
     receiver = item.get("receiver")
     frequency = item.get("frequency")
@@ -48,15 +95,14 @@ class _MediaTile(QFrame):
         super().__init__(parent)
         self.media = []
         self.catalog = []
-        self.view = None
-        self.profile = None
         self.radio_view = None
         self.radio_profile = None
         self.radio_interceptor = None
         self.radio_host = ""
-        self.floating = None
         self.camera = None
         self.camera_id = None
+        self._shutting_down = False
+        self._camera_request_generation = 0
         self.auto_camera_suspended = False
         self.layout_ = QVBoxLayout(self)
         self.setObjectName("MediaTile")
@@ -100,7 +146,7 @@ class _MediaTile(QFrame):
         self.display.setStyleSheet("background:#10151b; color:#788595; border:1px solid #29303b; border-radius:7px;")
         self.layout_.addWidget(self.display, 1)
         row = QGridLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(2)
-        for index, (label, action) in enumerate([("Watch", self.watch), ("Source ↗", self.open_original), ("Float", self.float_player), ("Stop", self.user_stop)]):
+        for index, (label, action) in enumerate([("Connect", self.watch), ("Source ↗", self.open_original), ("Stop", self.user_stop)]):
             button = QPushButton(label)
             button.clicked.connect(action)
             button.setStyleSheet("font-size:10px;padding:2px 3px;")
@@ -120,18 +166,18 @@ class _MediaTile(QFrame):
             self.media = [m for r in (event or {}).get("reports", []) for m in r.get("media", [])]
         self._populate()
 
-    def _populate(self, initial_index=None):
+    def _populate(self, initial_index=None, *, preserve_live_selection=False):
         signature = repr(self.media + self.catalog)
         if signature == self._items_signature:
             return
-        self._items_signature = signature
-        self.stop()
-        self.selector.blockSignals(True)
-        self.selector.clear()
+        old_item = self._current()
+        rows = []
         seen = set()
         for item in self.media + self.catalog:
             if isinstance(item, str):
                 item = {"url": item, "title": "Original media"}
+            if not _supported_media(item):
+                continue
             url = item.get("url", item.get("original_url", ""))
             identity = media_identity(item)
             if not url or identity in seen:
@@ -140,13 +186,30 @@ class _MediaTile(QFrame):
             title = str(item.get("title", item.get("name", "Public source")))
             group = str(item.get("group", "")).strip()
             label = f"[{group.upper()}] {title}" if group else title
-            self.selector.addItem(label, item)
-        if not self.selector.count():
-            self.selector.addItem("No associated media", {})
-        if initial_index is not None and self.selector.count():
-            self.selector.setCurrentIndex(max(0, min(int(initial_index), self.selector.count() - 1)))
-        self.selector.blockSignals(False)
-        self._describe()
+            rows.append((label, item))
+        if not rows:
+            rows.append(("No associated media", {}))
+        target = max(0, min(int(initial_index or 0), len(rows) - 1))
+        keep_live = False
+        if (preserve_live_selection and old_item.get("playback") == "live_video"
+                and old_item == rows[target][1]):
+            from .camera_context import approved_camera
+            # Preserve only the identical admitted manual live entry. Never
+            # reuse an active player or pending consent for a changed route.
+            keep_live = approved_camera(old_item) == old_item
+        if not keep_live:
+            self.stop()
+        self._items_signature = signature
+        was_blocked = self.selector.blockSignals(True)
+        try:
+            self.selector.clear()
+            for label, item in rows:
+                self.selector.addItem(label, item)
+            self.selector.setCurrentIndex(target)
+        finally:
+            self.selector.blockSignals(was_blocked)
+        if not keep_live:
+            self._describe()
 
     def select_relative(self, step):
         """Select the adjacent channel without starting playback automatically."""
@@ -182,6 +245,9 @@ class _MediaTile(QFrame):
 
     def open_original(self):
         item = self._current()
+        if not _supported_media(item):
+            self.note.setText("This media source is no longer supported.")
+            return False
         try:
             QDesktopServices.openUrl(QUrl(safe_url(item.get("url", item.get("original_url", "")))))
         except ValueError as error:
@@ -194,26 +260,77 @@ class _MediaTile(QFrame):
     def connect_camera(self, auto_consented=False):
         from .camera_context import approved_camera
         item=approved_camera(self._current())
-        if not item or (auto_consented and self.auto_camera_suspended):return False
+        if self._shutting_down or not item or (auto_consented and self.auto_camera_suspended):return False
+        live = item.get('playback') == 'live_video'
+        if auto_consented and (live or item.get('manual_only')):
+            return False
         if not auto_consented:self.auto_camera_suspended=False
-        if self.camera and self.camera_id==item['id']:return True
+        if self.camera and self.camera_id==item['id']:
+            # Retain a working session. An asynchronous live-player failure
+            # leaves its error visible, but the next manual Connect can retry.
+            if not live or self.camera.active:
+                return True
         if not auto_consented:
+            request_generation = self._camera_request_generation
+            message = (
+                f"Open {item.get('title', 'this live camera')} inside Pulse? The public provider "
+                "and its reviewed media hosts receive your IP address and requests. "
+                "This uses the original provider's player in an isolated private browser session. "
+                "Temporary browser files may be created; cleanup is attempted when the session closes. "
+                "Press Play in that player if asked. No recording; Stop, switching sources or hiding "
+                "Pulse disconnects it. This is area context, not evidence of an incident. Continue?"
+                if live else
+                "This connects to the named public provider, which receives your IP address. Images stay in memory. This is area context, not evidence of the incident. Continue?"
+            )
             consent=QMessageBox.question(self,"Connect to public camera?",
-                "This connects to the named public provider, which receives your IP address. Images stay in memory. This is area context, not evidence of the incident. Continue?",
+                message,
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
             if consent!=QMessageBox.StandardButton.Yes:return False
-        from .camera_snapshot import CameraSnapshot
+            # The dialog pumps a nested event loop. Stop, hide, shutdown or
+            # selection changes during it invalidate this earlier request.
+            if (self._shutting_down or self._camera_request_generation != request_generation
+                    or approved_camera(self._current()) != item):
+                return False
         self.stop()
-        self.camera=CameraSnapshot(item,self);self.camera_id=item['id']
-        self.camera.status_changed.connect(self.note.setText)
-        self.layout_.insertWidget(3,self.camera,1);self.display.hide();self.camera.start()
+        try:
+            if live:
+                from .live_camera import LiveCamera
+                camera = LiveCamera(item, self)
+            else:
+                from .camera_snapshot import CameraSnapshot
+                camera = CameraSnapshot(item, self)
+            self.camera = camera
+            self.camera_id = item['id']
+            camera.status_changed.connect(
+                lambda text, session=camera: self._camera_status(session, text)
+            )
+            self.layout_.insertWidget(3,camera,1)
+            self.display.hide()
+            if camera.start() is False:
+                self.stop()
+                self.note.setText("Camera could not start. Select Source to open the public player.")
+                return False
+        except (ImportError, RuntimeError, ValueError) as error:
+            self.stop()
+            self.note.setText(str(error) + ". Select Source to open the public player.")
+            self.note.setToolTip(self.note.text())
+            return False
         return True
 
+    def _camera_status(self, session, text):
+        if not self._shutting_down and self.camera is session:
+            self.note.setText(text)
+            self.note.setToolTip(text)
+
     def watch(self):
+        if self._shutting_down:
+            return False
         item = self._current()
-        if item.get('snapshot_url'):
-            self.connect_camera()
-            return
+        if not _supported_media(item):
+            self.note.setText("Only public radio receivers and reviewed cameras can connect here.")
+            return False
+        if item.get('snapshot_url') or item.get('playback') == 'live_video':
+            return self.connect_camera()
         if str(item.get("type", "")).lower() == "radio" and all(item.get(key) not in {None, ""} for key in ("receiver", "frequency", "mode")):
             try:
                 receiver_url = safe_url(item.get("receiver") or item.get("url", item.get("original_url", "")))
@@ -240,31 +357,13 @@ class _MediaTile(QFrame):
             except (ImportError, RuntimeError, ValueError) as error:
                 self.note.setText(str(error) + ". The original-source link remains available.")
             return
-        video = youtube_id(item.get("url", item.get("original_url", "")))
-        if not video:
-            self.note.setText("This source supports its original website. Select Original source to open it.")
-            return
-        consent = QMessageBox.question(self, "Connect to YouTube?", "The official player connects directly to YouTube and its media servers. The provider receives your IP address and player requests. Playback is initially muted. Continue?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if consent != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            if os.environ.get("QTWEBENGINE_DISABLE_SANDBOX", "").lower() not in {"", "0", "false"} or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""):
-                raise RuntimeError("The embedded player requires Chromium sandboxing to remain enabled")
-            if hasattr(os, "geteuid") and os.geteuid() == 0:
-                raise RuntimeError("The sandboxed player requires a standard user session")
-            self._ensure_player()
-            from PySide6.QtWebEngineCore import QWebEngineHttpRequest
-            request = QWebEngineHttpRequest(QUrl(f"https://www.youtube-nocookie.com/embed/{video}?autoplay=0&mute=1&playsinline=1"))
-            request.setHeader(b"Referer", b"https://www.dietrichailabs.com/")
-            self.view.load(request)
-            self.view.show()
-            self.display.hide()
-            self.note.setText("Official YouTube player · Click Play to begin · initially muted")
-        except (ImportError, RuntimeError) as error:
-            self.note.setText(str(error) + ". The original-source link remains available.")
+        self.note.setText("This source supports its original website. Select Source to open it.")
+        return False
 
     def _connect_radio_receiver(self, receiver_url):
         receiver_url = safe_url(receiver_url)
+        if not _supported_media({"url": receiver_url, "type": "radio"}):
+            raise ValueError("This service is not a supported public radio receiver")
         if os.environ.get("QTWEBENGINE_DISABLE_SANDBOX", "").lower() not in {"", "0", "false"} or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""):
             raise RuntimeError("The embedded receiver requires Chromium sandboxing to remain enabled")
         if hasattr(os, "geteuid") and os.geteuid() == 0:
@@ -277,6 +376,8 @@ class _MediaTile(QFrame):
 
     def _ensure_radio_player(self, receiver_url):
         receiver_url = safe_url(receiver_url)
+        if not _supported_media({"url": receiver_url, "type": "radio"}):
+            raise ValueError("This service is not a supported public radio receiver")
         host = (urlsplit(receiver_url).hostname or "").lower()
         if not host:
             raise ValueError("A public receiver host is required")
@@ -352,82 +453,26 @@ class _MediaTile(QFrame):
         settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, True)
         self.layout_.insertWidget(3, self.radio_view, 1)
 
-    def _ensure_player(self):
-        if self.view:
-            return
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-        from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineSettings
-
-        class Interceptor(QWebEngineUrlRequestInterceptor):
-            def interceptRequest(self, info):
-                url = info.requestUrl()
-                if url.scheme() in {"about", "data", "blob"}:
-                    return
-                host = url.host().lower()
-                allowed = ("youtube-nocookie.com", "youtube.com", "googlevideo.com", "ytimg.com", "gstatic.com", "ggpht.com")
-                info.block(url.scheme() != "https" or url.port(443) != 443 or not any(host == x or host.endswith("." + x) for x in allowed))
-
-        class Page(QWebEnginePage):
-            def createWindow(self, _):
-                return None
-            def acceptNavigationRequest(self, url, kind, main):
-                return url.scheme() == "about" or (url.scheme() == "https" and url.host() in {"www.youtube-nocookie.com", "www.youtube.com"} and url.path().startswith("/embed/")) or not main
-
-        self.profile = QWebEngineProfile(self)
-        self.profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.MemoryHttpCache)
-        self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
-        self.profile.setPushServiceEnabled(False)
-        self.interceptor = Interceptor(self.profile)
-        self.profile.setUrlRequestInterceptor(self.interceptor)
-        self.profile.downloadRequested.connect(lambda download: download.cancel())
-        self.view = QWebEngineView(self)
-        page = Page(self.profile, self.view)
-        page.permissionRequested.connect(lambda permission: permission.deny())
-        page.certificateError.connect(lambda error: error.rejectCertificate())
-        self.view.setPage(page)
-        settings = page.settings()
-        for flag in (QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, QWebEngineSettings.WebAttribute.FullScreenSupportEnabled):
-            settings.setAttribute(flag, False)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, True)
-        self.layout_.insertWidget(3, self.view, 1)
-
-    def float_player(self):
-        if not self.view:
-            self.note.setText("Open a permitted video before floating the player.")
-            return
-        if self.floating:
-            self.floating.raise_()
-            return
-        self.floating = QDialog(self)
-        self.floating.setWindowTitle("Global Pulse · Media")
-        self.floating.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.floating.resize(520, 330)
-        layout = QVBoxLayout(self.floating)
-        layout.addWidget(self.view)
-        self.floating.finished.connect(self._dock)
-        self.floating.show()
-
-    def _dock(self, *_):
-        if self.view:
-            self.layout_.insertWidget(3, self.view, 1)
-        self.floating = None
-
     def stop(self):
+        self._camera_request_generation += 1
         if self.camera:
-            self.camera.stop();self.camera.hide();self.camera.deleteLater()
+            camera = self.camera
             self.camera=None;self.camera_id=None
-        if self.view:
-            self.view.stop()
-            self.view.setUrl(QUrl("about:blank"))
-            self.view.hide()
+            camera.stop();camera.hide();camera.deleteLater()
         if self.radio_view:
             self.radio_view.stop()
             self.radio_view.setUrl(QUrl("about:blank"))
             self.radio_view.hide()
-        if self.floating:
-            self.floating.close()
         self.display.show()
         self.note.setText("Media stopped. Source monitoring is controlled separately.")
+
+    def hideEvent(self, event):
+        self.stop()
+        super().hideEvent(event)
+
+    def shutdown(self):
+        self._shutting_down = True
+        self.stop()
 
 
 class MediaPanel(QWidget):
@@ -463,7 +508,7 @@ class MediaPanel(QWidget):
         tools = QHBoxLayout()
         tools.setSpacing(3)
         self.category_buttons = {}
-        for name in ("All", "Video", "Webcams", "Radio"):
+        for name in ("All", "Webcams", "Radio"):
             item = QPushButton(name)
             item.setCheckable(True)
             item.setChecked(name == "All")
@@ -473,8 +518,8 @@ class MediaPanel(QWidget):
             self.category_buttons[name] = item
         self.bank_combo = QComboBox()
         self.bank_combo.addItems(["All channels", "News", "Markets", "Weather", "World", "Public affairs"])
-        self.bank_combo.setAccessibleName("TV channel bank")
-        self.bank_combo.setToolTip("Filter the TV-style channel lineup by coverage bank")
+        self.bank_combo.setAccessibleName("Media channel bank")
+        self.bank_combo.setToolTip("Filter public radio and camera sources by coverage bank")
         self.bank_combo.setStyleSheet("font-size:10px;")
         self.bank_combo.currentTextChanged.connect(self._bank_changed)
         tools.addWidget(self.bank_combo)
@@ -565,7 +610,9 @@ class MediaPanel(QWidget):
         saved = getter("radio_presets", [None] * 5) if callable(getter) else [None] * 5
         if not isinstance(saved, list):
             saved = [None] * 5
-        normalized = [dict(item) if isinstance(item, dict) else None for item in saved[:5]]
+        normalized = [dict(item) if isinstance(item, dict)
+                      and not _retired_receiver_record(item) else None
+                      for item in saved[:5]]
         self.radio_presets = (normalized + [None] * 5)[:5]
 
         saved_stations = getter("radio_stations", []) if callable(getter) else []
@@ -633,7 +680,7 @@ class MediaPanel(QWidget):
             return "Radio"
         if "camera" in text or "webcam" in text:
             return "Webcams"
-        return "Video"
+        return "Links"
 
     @classmethod
     def _group(cls, item):
@@ -663,7 +710,7 @@ class MediaPanel(QWidget):
         items, seen = [], set()
         for raw in self._camera_matches + self.media + self.radio_stations + self.catalog:
             item = {"url": raw, "title": "Original media"} if isinstance(raw, str) else raw
-            if not isinstance(item, dict):
+            if not _supported_media(item):
                 continue
             url = item.get("url", item.get("original_url", ""))
             identity = media_identity(item)
@@ -677,10 +724,9 @@ class MediaPanel(QWidget):
             items.append(item)
         for index, tile in enumerate(self.tiles):
             # Preserve the established four-way contextual-media/camera
-            # distribution unless the user explicitly chooses a TV channel
-            # bank.  A selected bank is a television-style browsing mode: each
-            # tile can channel-surf the complete bank and starts at a different
-            # channel.  The default All/type-filter paths retain the prior
+            # distribution unless the user explicitly chooses a channel bank.
+            # Each tile can then browse the complete bank and starts at a
+            # different channel. The default All/type-filter paths retain the prior
             # one-copy-per-item behavior so camera auto-follow never multiplies
             # a single matching camera across all four tiles.
             if self.channel_bank == "All channels":
@@ -734,6 +780,8 @@ class MediaPanel(QWidget):
 
     @classmethod
     def _normalize_radio_station(cls, item):
+        if _retired_receiver_record(item):
+            raise ValueError("This receiver provider is no longer supported")
         name = cls._radio_text(item.get("name", item.get("title", "")), "station name", 120)
         frequency = cls._radio_text(item.get("frequency"), "frequency", 40)
         mode = cls._radio_text(item.get("mode"), "mode", 20).upper()
@@ -742,6 +790,8 @@ class MediaPanel(QWidget):
         if not re.fullmatch(r"[A-Z0-9 +/_-]+", mode):
             raise ValueError("Invalid radio mode")
         url = safe_url(item.get("url", item.get("receiver", "")))
+        if not _supported_media({"url": url, "type": "radio"}):
+            raise ValueError("This service is not a supported public radio receiver")
         identity = hashlib.sha256((url + "\0" + frequency + "\0" + mode).encode("utf-8")).hexdigest()[:20]
         return {
             "id": "user_radio_" + identity,
@@ -794,7 +844,7 @@ class MediaPanel(QWidget):
         layout = QVBoxLayout(dialog)
         help_text = QLabel(
             "Save an exact public HTTPS receiver/tune URL plus the frequency and mode you selected on that provider. "
-            "Pulse does not scan the air, guess receiver parameters, record audio, or open the receiver until you explicitly choose Watch/Source."
+            "Pulse does not scan the air, guess receiver parameters, record audio, or open the receiver until you explicitly choose Connect/Source."
         )
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
@@ -953,7 +1003,7 @@ class MediaPanel(QWidget):
         return all(str(record.get(key, "")) == str(preset.get(key, "")) for key in ("receiver", "frequency", "mode"))
 
     def _select_radio_item(self, item):
-        if not isinstance(item, dict) or self._kind(item) != "Radio" or not self._station_record(item):
+        if not _supported_media(item) or self._kind(item) != "Radio" or not self._station_record(item):
             return False
         # A selected station becomes the primary radio tile. Preserve the rest
         # of the grid, but stop prior in-app media before replacing the tile.
@@ -978,7 +1028,7 @@ class MediaPanel(QWidget):
         return self._same_station(tile._current(), item)
 
     def _select_radio_preset_record(self, preset):
-        if not preset:
+        if not preset or _retired_receiver_record(preset):
             return False
         candidates = []
         for raw in self.media + self.radio_stations + self.catalog:

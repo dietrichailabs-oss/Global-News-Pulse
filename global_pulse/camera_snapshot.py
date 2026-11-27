@@ -8,6 +8,15 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkRe
 from .camera_context import approved_camera
 
 
+def _snapshot_image_type(payload):
+    """Only raster formats admitted by this view, regardless of server MIME."""
+    if payload.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if payload.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    return None
+
+
 class CameraSnapshot(QLabel):
     status_changed=Signal(str)
     MAX_BYTES=4_000_000
@@ -19,7 +28,8 @@ class CameraSnapshot(QLabel):
     def __init__(self,item,parent=None):
         super().__init__(parent)
         self.item=approved_camera(item)
-        if not self.item:raise ValueError('Camera is not in the reviewed public registry')
+        if not self.item or not self.item.get('snapshot_url') or self.item.get('playback') == 'live_video':
+            raise ValueError('Camera is not a reviewed still-image snapshot')
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.setMinimumSize(40,40)
@@ -78,8 +88,19 @@ class CameraSnapshot(QLabel):
         if not reply:return
         self._read();self.reply=None;self.deadline.stop()
         status=reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        content=bytes(reply.rawHeader('Content-Type')).decode('ascii','ignore').split(';')[0].lower()
-        valid=not self._stopped and reply.error()==QNetworkReply.NetworkError.NoError and status==200 and content in {'image/jpeg','image/png'} and len(self._data)<=self.MAX_BYTES
+        content=bytes(reply.rawHeader('Content-Type')).decode('ascii','ignore').split(';')[0].strip().lower()
+        image_type=_snapshot_image_type(self._data)
+        # Some reviewed public-camera services send JPEGs as octet-stream.
+        # Only the canonical bundled registry can grant that exact exception;
+        # approved_camera discarded caller/event-supplied fields in __init__.
+        # A generic binary/HTML/SVG response never becomes an image by MIME alone.
+        reviewed_types=self.item.get('allowed_content_types', ())
+        binary_allowed=(isinstance(reviewed_types,(list,tuple))
+                        and 'application/octet-stream' in reviewed_types)
+        permitted_content=(image_type is not None
+                           and (content==image_type
+                                or content=='application/octet-stream' and binary_allowed))
+        valid=not self._stopped and reply.error()==QNetworkReply.NetworkError.NoError and status==200 and permitted_content and len(self._data)<=self.MAX_BYTES
         if valid:
             data=QByteArray(bytes(self._data));buffer=QBuffer(data);buffer.open(QIODevice.OpenModeFlag.ReadOnly)
             reader=QImageReader(buffer);size=reader.size()

@@ -37,6 +37,13 @@ def test_status_cards_have_readable_viewports_without_forcing_window_growth(work
     app.processEvents()
     app.processEvents()
     assert (window.width(), window.height()) == size
+    # The new overview is the default when no story has been selected.
+    # The old evidence/status-card readability contract applies to the
+    # explicit Selected event mode, not an inactive hidden stacked page.
+    assert window.intelligence_mode.currentIndex() == (1 if selected else 0)
+    assert window.overview_browser is not None
+    window.intelligence_mode.setCurrentIndex(1)
+    app.processEvents()
     assert window.lower_split.sizes()[2] / sum(window.lower_split.sizes()) < .25
     assert window.intel_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     for browser in (window.intel_browser, window.evidence_status_text, window.change_status_text):

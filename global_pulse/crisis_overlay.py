@@ -17,14 +17,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from .map_evidence import incident_country
+from .map_evidence import incident_country, structured_incident_country
 
 UTC = timezone.utc
 
 CONFLICT_PATTERNS = (
     r"\bwar\b", r"\barmed conflict\b", r"\bfighting\b", r"\bclashes?\b",
-    r"\bairstrikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
-    r"\boffensive\b", r"\bmissile(?:s| strike)?\b", r"\bdrone strike\b",
+    r"\bair[ -]?strikes?\b", r"\bshelling\b", r"\bbombard(?:ment|ed|ing)\b",
+    r"\boffensive\b", r"\bmissile(?:s| strikes?| attacks?)?\b",
+    r"\b(?:drone|rocket|military|armed) (?:strikes?|attacks?)\b",
+    r"\b(?:launch|launched|launches|fresh|renewed|retaliatory|deadly|overnight).{0,45}\bstrikes?\b",
+    r"\bstrikes? on .{0,45}\b(?:power grid|energy infrastructure|military targets?|civilian infrastructure)\b",
+    r"\b(?:killed|injured|wounded).{0,55}\battacks?\b",
+    r"\battacks?.{0,55}\b(?:killed|injured|wounded)\b",
+    r"\b(?:armed|military|regional|cross-border) conflict\b",
+    r"\bconflict (?:in|between|with)\b",
     r"\binvasion\b", r"\bcombat\b", r"\bceasefire violation\b",
 )
 # A bare "war" in a headline is not invariably armed conflict. Keep
@@ -394,7 +401,63 @@ def _recent_report_scope(event: dict, now: datetime, max_age_days: int) -> dict 
     return scoped
 
 
-def build_country_activity(events: Iterable[dict], *, now: datetime | None = None, max_age_days: int = 14) -> dict[str, dict]:
+def _scoped_crisis_candidate(raw: dict, now: datetime, max_age_days: int):
+    """Share the exact date/status/topic screen with the independent map read.
+
+    Single-source records must survive this screen: separate independent
+    reports can corroborate a country/topic in the aggregate classifier.
+    """
+    if not isinstance(raw, dict):
+        return None
+    event = _recent_report_scope(raw, now, max_age_days)
+    if event is None or event.get("synthetic") or event.get("historical_view"):
+        return None
+    if str(event.get("status", "active")).casefold() in {
+        "retracted", "resolved", "closed", "ended", "cancelled", "expired", "pending"
+    }:
+        return None
+    stamp = _evidence_timestamp(event)
+    if stamp is None or (now - stamp).total_seconds() < -3600:
+        return None
+    if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
+        return None
+    kinds = _topical_kinds(event)
+    return (event, stamp, kinds) if kinds else None
+
+
+def is_crisis_context_candidate(event: dict, *, now: datetime) -> bool:
+    """Recent topical source records are candidates, not crisis decisions."""
+    return _scoped_crisis_candidate(event, now, 14) is not None
+
+
+def load_crisis_context(store, map_filters, country_evidence, *, now, cooperative=False):
+    """Separate current crisis context from the ordinary category/display cap.
+
+    Preserve search, region, time and significant-retention scope; only the
+    category is independent. Historical replay never borrows current context.
+    """
+    if map_filters.get("before"):
+        return None
+    if (not map_filters.get("category") and
+            len(country_evidence) < int(map_filters.get("limit", 5000))):
+        return country_evidence
+    candidates = store.list_crisis_context(
+        query=map_filters.get("query", ""), region=map_filters.get("region", ""),
+        since=map_filters.get("since"),
+        keep_significant=bool(map_filters.get("keep_significant")), now=now,
+        **({"cooperative":True} if cooperative else {}),
+    )
+    # Preserve exact matching object identities for the neutral-ring credit
+    # contract. Do not substitute a different version of any source record.
+    ordinary = {str(e.get("id", "")): e for e in country_evidence}
+    return [ordinary[str(e.get("id", ""))]
+            if str(e.get("id", "")) in ordinary
+            and ordinary[str(e.get("id", ""))] == e else e
+            for e in candidates]
+
+
+def build_country_activity(events: Iterable[dict], *, now: datetime | None = None, max_age_days: int = 14,
+                           single_record_credits: set[tuple[int, str]] | None = None) -> dict[str, dict]:
     """Aggregate recent supported activity by country without losing split-source corroboration.
 
     Existing event-level official/two-origin rules remain authoritative. A second
@@ -408,33 +471,33 @@ def build_country_activity(events: Iterable[dict], *, now: datetime | None = Non
     candidates: list[tuple[dict, datetime, str, set[str]]] = []
 
     for raw in events:
-        if not isinstance(raw, dict):
+        scoped = _scoped_crisis_candidate(raw, now, max_age_days)
+        if scoped is None:
             continue
-        event = _recent_report_scope(raw, now, max_age_days)
-        if event is None or event.get("synthetic") or event.get("historical_view"):
-            continue
-        if str(event.get("status", "active")).casefold() in {
-            "retracted", "resolved", "closed", "ended", "cancelled", "expired", "pending"
-        }:
-            continue
-        stamp = _evidence_timestamp(event)
-        if stamp is None or (now - stamp).total_seconds() < -3600:
-            continue
-        if (now - stamp).total_seconds() > max(1, int(max_age_days)) * 86400:
-            continue
-
-        structured_country = normalize_country(incident_country(event))
+        event, stamp, kinds = scoped
+        structured_country = normalize_country(structured_incident_country(event))
         text_country = _explicit_text_country(event) if not structured_country else ""
         country = structured_country or text_country
-        kinds = _topical_kinds(event)
-        if not country or not kinds:
+        if not country:
             continue
         candidates.append((event, stamp, country, kinds))
+
+        # The GUI's neutral archive formerly ran this complete classifier once
+        # more PER country-only record to ask if that one record by itself
+        # qualifies for a stripe. Return the same answer while the event and
+        # source-time scope are already in hand. Python object identity avoids
+        # collisions between duplicate historical event IDs in a view. A pair
+        # is credited ONLY if the single record would independently qualify,
+        # never merely from cross-event corroboration later in this function.
+        credible = _credible(event)
+        if single_record_credits is not None and (
+                credible or len(_independent_report_origins(event)) >= 2):
+            single_record_credits.add((id(raw), country))
 
         # Preserve the already-accepted strict event-level path. When the
         # location itself came only from one explicit country in source text,
         # keep that basis visible rather than calling it structured evidence.
-        if not _credible(event):
+        if not credible:
             continue
         entry = result.setdefault(country, {
             "conflict": 0, "unrest": 0, "migration": 0,

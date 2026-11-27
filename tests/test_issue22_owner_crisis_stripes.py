@@ -100,6 +100,28 @@ def test_two_independent_explicit_france_reports_create_unrest_stripe():
     assert activity[normalize_country("France")]["basis"]["unrest"]=="cross_event_independent"
 
 
+def test_current_military_strike_and_drone_phrasing_supports_ukraine_conflict():
+    a=event("a",report("r1","publisher_a","Ukraine reports Russian drone attack on Kyiv",origin="one"))
+    b=event("b",report("r2","publisher_b","Moscow and Kyiv trade air strikes in Ukraine",origin="two",publisher_country="France"))
+    activity=build_country_activity([a,b],now=NOW)
+    assert activity[normalize_country("Ukraine")]["conflict"]==2
+
+
+def test_current_war_plus_fresh_strikes_supports_iran_conflict():
+    a=event("a",report("r1","publisher_a","War in Iran continues as diplomacy stalls",origin="one"))
+    b=event("b",report("r2","publisher_b","Leaders discuss launching fresh Iran strikes",origin="two",publisher_country="France"))
+    activity=build_country_activity([a,b],now=NOW)
+    assert activity[normalize_country("Iran")]["conflict"]==2
+
+
+def test_labor_strike_and_health_attack_words_do_not_become_conflict():
+    labor_a=event("a",report("r1","publisher_a","Workers strike over wages in Germany",origin="one"))
+    labor_b=event("b",report("r2","publisher_b","Germany faces another rail strike over pay",origin="two",publisher_country="France"))
+    health_a=event("c",report("r3","publisher_c","Heart attack prevention campaign expands in France",origin="three"))
+    health_b=event("d",report("r4","publisher_d","France launches heart attack awareness week",origin="four",publisher_country="Germany"))
+    assert build_country_activity([labor_a,labor_b,health_a,health_b],now=NOW)=={}
+
+
 def test_nonmilitary_war_idiom_stays_out_even_with_country_text():
     a=event("a",report("r1","publisher_a","Germany expands its war for talent",origin="one"))
     b=event("b",report("r2","publisher_b","Germany employers intensify war for talent",origin="two",publisher_country="France"))

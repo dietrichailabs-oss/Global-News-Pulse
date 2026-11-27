@@ -9,10 +9,17 @@ from PySide6.QtWidgets import QListWidgetItem, QMenu
 class SituationActions:
     """Small MainWindow mixin; persistence remains in Store/Controller."""
 
-    def _sync_situation_star(self, event=None):
+    def _sync_situation_star(self, event=None, *, saved_override=None):
         identity = str((event or {}).get("id") or "")
         try:
-            state = self.controller.store.situation_state(identity) if identity else None
+            # A revision-validated in-memory feed row may supply its canonical
+            # event ID and bookmark bit during a no-click translation repaint.
+            # Explicit Star actions still validate the live archived identity
+            # and write through Store; this hint is display-only.
+            if identity and saved_override is not None:
+                state = {"event_id": identity, "saved": bool(saved_override)}
+            else:
+                state = self.controller.store.situation_state(identity) if identity else None
         except (sqlite3.Error, RuntimeError):
             state = None
         saved = bool(state and state["saved"])
@@ -86,14 +93,17 @@ class SituationActions:
             identity = str(item.data(Qt.ItemDataRole.UserRole) or "")
             self._set_situation_star(identity, False)
 
-    def _refresh_saved_situations(self):
+    def _refresh_saved_situations(self, saved_rows=None):
+        # Use source-consistent worker rows for no-click Qt refresh; explicit
+        # Star/Unstar and splash initialization still read the live archive.
         old = self.situation_list.currentItem()
         selected = str(old.data(Qt.ItemDataRole.UserRole) or "") if old is not None else ""
         restored = False
         blocked = self.situation_list.blockSignals(True)
         try:
             self.situation_list.clear()
-            for saved in self.controller.store.list_situations():
+            for saved in (self.controller.store.list_situations()
+                          if saved_rows is None else saved_rows):
                 identity = str(saved.get("event_id") or saved.get("id") or "")
                 event = saved.get("event") or {}
                 title = saved.get("title") or event.get("title") or "Saved situation"

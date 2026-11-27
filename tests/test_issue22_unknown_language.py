@@ -4,6 +4,7 @@ This tests production parsing, custom-feed construction, Collector receipt and
 SQLite persistence offline. It does not install models or assert translation.
 """
 from datetime import datetime, timezone
+import socket
 
 import httpx
 import pytest
@@ -68,16 +69,27 @@ def test_unknown_cyrillic_and_arabic_script_not_mislabeled_english():
     assert parse_feed(rss("أخبار المنطقة"), source, RETRIEVED)[0]["language"] == "ar"
 
 
-def test_collector_to_persisted_report_preserves_unknown_language(tmp_path):
+def test_collector_to_persisted_report_preserves_unknown_language(tmp_path, monkeypatch):
     source = custom()
     payload = rss("Breve aviso")
     calls = []
+    resolved = []
+    def public_fixture_dns(host, port, *args, **kwargs):
+        # MockTransport does not replace Collector's earlier custom-feed DNS
+        # admission. Exercise that public-address validation without live DNS.
+        assert host == "example.org" and port == 443
+        assert not args and kwargs == {"type": socket.SOCK_STREAM}
+        resolved.append((host, port))
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+                 ("8.8.8.8", 443))]
+    monkeypatch.setattr("global_pulse.sources.socket.getaddrinfo", public_fixture_dns)
     def handler(request):
         calls.append(request.url)
         return httpx.Response(200, headers={"content-type": "application/rss+xml"}, content=payload)
     def client_factory(**kwargs):
         return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
     result = Collector(source, now=lambda: NOW, client_factory=client_factory).collect({"configured_interval": 600})
+    assert resolved == [("example.org", 443)]
     assert len(calls) == 1
     assert result["state"]["status"] == "available"
     assert len(result["reports"]) == 1

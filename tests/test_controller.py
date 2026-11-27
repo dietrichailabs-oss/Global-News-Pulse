@@ -47,6 +47,8 @@ def capture_native(controller):
 
 
 def test_real_controller_routes_fresh_alert_with_exact_internal_identity(controller):
+    # Native alerts are owner opt-in; test delivery only after explicit selection.
+    controller.set_setting("notifications_enabled", True)
     native = capture_native(controller)
     controller._on_reports([report()])
     alerts = controller.store.list_alerts()
@@ -72,6 +74,7 @@ def test_undated_feed_with_fresh_retrieval_is_feed_only(controller):
 
 
 def test_fresh_provider_revision_of_old_record_can_alert(controller):
+    controller.set_setting("notifications_enabled", True)
     old = iso(datetime.now(timezone.utc) - timedelta(days=4))
     native = capture_native(controller)
     controller._on_reports([report(published_at=old, source_updated_at=iso())])
@@ -110,6 +113,7 @@ def test_muted_second_origin_cannot_corroborate_remaining_source(controller):
 
 
 def test_quiet_hours_retains_alert_with_truthful_delivery_status(controller):
+    controller.set_setting("notifications_enabled", True)
     native = capture_native(controller)
     controller.set_setting("quiet_enabled", True)
     controller.set_setting("quiet_start", "00:00")
