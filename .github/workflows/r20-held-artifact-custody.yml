@@ -1,0 +1,84 @@
+name: R20 held artifact custody - exact original archive bytes
+on:
+  push:
+    branches: [eng/r20-held-artifact-custody-d4ff8fb-20261127]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: r20-held-custody-d4ff8fb
+  cancel-in-progress: false
+jobs:
+  preserve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Retrieve and verify six original held artifact ZIPs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "dietrichailabs-oss/Global-News-Pulse"
+          mkdir -p custody
+          cat > custody/ORIGINAL_ARCHIVES.tsv <<'EXPECTED'
+          setup 15230719212 249477497 5a5e77af18e9dce55d96648e35337212e1209a9710ca0474248f3f7667684df7
+          portable 15230564346 369997415 8c7f3fa7c4011c1cb3fd4d0348d7ca8e342daf7eeb530560ff5705121ba6be28
+          receipts 15230589401 356726 4a7b5cd21554da8b2e9de7b3f43204c89324edda6dccf0dc14cdc3b965c64b1f
+          regression 15231231482 52312 6c40f8784a49b526562154dd627e7789255a105b47abe503b526e88da9e202a0
+          camera-probes 15230394574 1288 827bd54d5b1aef54c4c69f59001827e4219922feeca2f34cb403debbe2fa91f5
+          camera-embed 15231006651 1076 ab191e80943587d25a45ed621130f0e4fd1c85cc00eb16d19c18ecfe70b7d531
+          EXPECTED
+          while read -r kind id bytes sha; do
+            name="custody/${id}-${kind}.zip"
+            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 300 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" -o "$name"
+            test "$(stat -c %s "$name")" = "$bytes"
+            printf '%s  %s\n' "$sha" "$name" | sha256sum --check
+          done < custody/ORIGINAL_ARCHIVES.tsv
+          printf '%s\n' 'source=d4ff8fb70b1dc8ae41b14f23ad519ca04450679a' 'original_run=46064298575' 'HELD VALIDATION ONLY. No rebuild, binary modification, signing, release, or public-distribution approval.' > custody/CUSTODY_SCOPE.txt
+      - name: Preserve exact original archives as files for 30 days
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: GlobalPulse-R20-HELD-CUSTODY-d4ff8fb70b1dc8ae41b14f23ad519ca04450679a
+          path: custody/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+  readback:
+    needs: preserve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download new custody wrapper and verify original archive hashes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUSTODY_ID: ${{ needs.preserve.outputs.artifact_id }}
+          CUSTODY_DIGEST: ${{ needs.preserve.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "dietrichailabs-oss/Global-News-Pulse"
+          [[ "$CUSTODY_ID" =~ ^[0-9]+$ ]]
+          [[ "$CUSTODY_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 300 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$CUSTODY_ID/zip" -o custody-readback.zip
+          printf '%s  custody-readback.zip\n' "$CUSTODY_DIGEST" | sha256sum --check
+          python - <<'PY'
+          import zipfile, hashlib
+          expected = [["setup",15230719212,249477497,"5a5e77af18e9dce55d96648e35337212e1209a9710ca0474248f3f7667684df7"],["portable",15230564346,369997415,"8c7f3fa7c4011c1cb3fd4d0348d7ca8e342daf7eeb530560ff5705121ba6be28"],["receipts",15230589401,356726,"4a7b5cd21554da8b2e9de7b3f43204c89324edda6dccf0dc14cdc3b965c64b1f"],["regression",15231231482,52312,"6c40f8784a49b526562154dd627e7789255a105b47abe503b526e88da9e202a0"],["camera-probes",15230394574,1288,"827bd54d5b1aef54c4c69f59001827e4219922feeca2f34cb403debbe2fa91f5"],["camera-embed",15231006651,1076,"ab191e80943587d25a45ed621130f0e4fd1c85cc00eb16d19c18ecfe70b7d531"]]
+          with zipfile.ZipFile("custody-readback.zip") as z:
+              assert len(z.namelist()) == len(set(z.namelist())) == 8
+              assert set(z.namelist()) == {f"{id}-{kind}.zip" for kind,id,size,sha in expected} | {"ORIGINAL_ARCHIVES.tsv","CUSTODY_SCOPE.txt"}
+              for kind,id,size,sha in expected:
+                  name = f"{id}-{kind}.zip"
+                  assert z.getinfo(name).file_size == size
+                  with z.open(name) as f:
+                      actual = hashlib.file_digest(f,"sha256").hexdigest()
+                  assert actual == sha, (name,actual,sha)
+                  print(f"CUSTODY_READBACK_PASS {name} {size} {actual}",flush=True)
+          PY
+          echo "CUSTODY_ARTIFACT_ID=$CUSTODY_ID"
+          echo 'All six original GitHub artifact ZIPs preserved byte-for-byte. No public release.'
