@@ -462,6 +462,7 @@ class MainWindow(SituationActions, QMainWindow):
     # thread. No Qt widget, model, WebEngine or painter runs inside that worker.
     _idle_snapshot_ready = Signal(object)
     _idle_brief_ready = Signal(object)
+    _requested_brief_ready = Signal(object)
     _idle_alerts_ready = Signal(object)
     def __init__(self, controller):
         super().__init__()
@@ -479,6 +480,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._deferred_brief_generated=None
         self._deferred_brief_markdown=None
         self._brief_request_epoch=0
+        self._requested_brief_target=None
+        self._requested_brief_job=None
+        self._requested_brief_attempts=0
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -506,6 +510,8 @@ class MainWindow(SituationActions, QMainWindow):
             self._apply_idle_snapshot, Qt.ConnectionType.QueuedConnection)
         self._idle_brief_ready.connect(
             self._apply_idle_brief, Qt.ConnectionType.QueuedConnection)
+        self._requested_brief_ready.connect(
+            self._apply_requested_brief, Qt.ConnectionType.QueuedConnection)
         self._idle_alerts_ready.connect(
             self._apply_idle_alert_snapshot, Qt.ConnectionType.QueuedConnection)
         # Hidden workspaces are populated once per real data revision, not
@@ -974,7 +980,7 @@ class MainWindow(SituationActions, QMainWindow):
         self.brief_browser=QTextBrowser();self.brief_browser.setOpenExternalLinks(False);self.brief_browser.anchorClicked.connect(lambda u:self.controller.open_url(u.toString()));panel.layout.addWidget(self.brief_browser,1)
         self.brief_state_label=label("Opening intelligence brief pending","Muted",True)
         panel.layout.addWidget(self.brief_state_label)
-        panel.layout.addWidget(label("Daily is the dated opening snapshot; Generate brief, a new UTC day, or a change/removal of its included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
+        panel.layout.addWidget(label("Daily is the dated opening snapshot. An empty opening waits for first eligible evidence; Generate brief, a new UTC day, or a change/removal of included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
         self.brief_period.currentIndexChanged.connect(self._brief_period_changed)
         self._brief_clock_timer=QTimer(self)
         self._brief_clock_timer.setInterval(30000)
@@ -1184,7 +1190,7 @@ class MainWindow(SituationActions, QMainWindow):
         # The Daily/Weekly SQL runs independently after the critical feed/map
         # result, so a slow brief cannot starve the no-click GUI refresh.
         # Do not perform a hidden synchronous SQLite brief query meanwhile.
-        if page==5 and self._idle_brief_inflight:
+        if page==5 and (self._idle_brief_inflight or self._requested_brief_target is not None):
             other=self._dirty_pages-{5}
             if not other:
                 self._workspace_warm_timer.start()
@@ -1591,7 +1597,9 @@ class MainWindow(SituationActions, QMainWindow):
         controller=self.controller
         signal=self._idle_snapshot_ready
         brief_pending=(not self._idle_brief_inflight
-                       and not self._has_current_daily_brief(brief_period))
+                       and self._requested_brief_target is None
+                       and (not self._has_current_daily_brief(brief_period)
+                            or not self._daily_brief_snapshot["manifest"]))
         if brief_pending:
             self._idle_brief_inflight=True
         self._idle_snapshot_inflight=True
@@ -2078,6 +2086,7 @@ class MainWindow(SituationActions, QMainWindow):
                 range(1,6) if _idle_snapshot is None else (1,2,4,5)
             )
             if (self._has_current_daily_brief(self.brief_period.currentText().lower())
+                    and self._daily_brief_snapshot["manifest"]
                     and self._displayed_brief_key==self._daily_brief_snapshot["key"]):
                 self._dirty_pages.discard(5)
             if _idle_snapshot is None:
@@ -3052,7 +3061,8 @@ class MainWindow(SituationActions, QMainWindow):
         # the document heading. It is not a claim of current world state.
         self.brief_state_label.setText(
             item["key"][0].title()+" brief as of "+item["key"][1]+
-            " · fixed opening evidence; Monitor is live" if item["key"][0]=="daily"
+            (" · fixed opening evidence; Monitor is live" if item["manifest"] else
+             " · provisional empty opening; awaiting eligible evidence") if item["key"][0]=="daily"
             else "Weekly brief as of "+item["key"][1])
         self.brief_export_button.setEnabled(
             item["key"][0]==self.brief_period.currentText().lower()
@@ -3099,6 +3109,7 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_evidence_refresh()
 
     def _brief_period_changed(self,*_args):
+        self._requested_brief_target=None
         self._brief_request_epoch+=1
         self._discard_brief_read()
         self._clear_brief_presentation("Preparing the selected briefing period…")
@@ -3108,21 +3119,175 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_evidence_refresh()
 
     def _request_brief(self,*_args):
-        # The visible Generate button does not run thousands of source reads
-        # on Qt. Keep the internal synchronous route for masked cold startup.
+        # A user-requested document is independent of Monitor category/map
+        # refresh and navigation cooldown. Never wait for the next collection.
         if not self._background_warm_enabled:
             return self._generate_brief()
-        if self.brief_period.currentText().lower()=="daily":
+        period=self.brief_period.currentText().lower()
+        target=self._requested_brief_target
+        if target is not None and target==(self._brief_request_epoch,period):
+            return  # Coalesce repeated clicks, not an unbounded read queue.
+        if period=="daily":
             self._daily_brief_snapshot=None
         self._brief_request_epoch+=1
         self._discard_brief_read()
         self._clear_brief_presentation("Generating current source-linked briefing…")
         self._dirty_pages.add(5)
-        self._schedule_evidence_refresh()
+        self._requested_brief_target=(self._brief_request_epoch,period)
+        self._requested_brief_attempts=0
+        self._start_requested_brief()
+
+    def _start_requested_brief(self):
+        target=self._requested_brief_target
+        if (target is None or self._requested_brief_job is not None
+                or self._force_close or getattr(self.controller,"_closed",False)):
+            return
+        if target!=(self._brief_request_epoch,self.brief_period.currentText().lower()):
+            self._requested_brief_target=None
+            self._schedule_workspace_warm()
+            return
+        if self._requested_brief_attempts>=3:
+            self._requested_brief_failed("Source evidence is changing. Click Generate brief to retry.")
+            return
+        self._requested_brief_attempts+=1
+        job=(target,self._requested_brief_attempts)
+        self._requested_brief_job=job
+        controller=self.controller
+        signal=self._requested_brief_ready
+        period=target[1]
+        generated=datetime.now(timezone.utc)
+        since=(generated-timedelta(days=1 if period=="daily" else 7)).isoformat()
+
+        def read():
+            result={"job":job,"generated":generated}
+            try:
+                # list_brief_events already returns one coherent Store
+                # revision (or its original atomic fallback). A later
+                # unrelated settings/observation write need not invalidate a
+                # dated, manifest-bound document. An EMPTY read is different:
+                # prove that its archive revision is still the one read.
+                before=controller.store.content_revision()
+                events=controller.brief_events(since=since,period=period)
+                after=controller.store.content_revision()
+                from .core import build_brief
+                result.update(events=events,before=before,after=after,
+                    manifest=tuple(sorted((str(e["id"]),e.get("revision"))
+                                          for e in events if e.get("id"))),
+                    markdown=build_brief(events,period,generated_at=generated))
+            except Exception as exc:
+                result["error"]=type(exc).__name__+": "+str(exc)[:160]
+            try:
+                signal.emit(result)
+            except (RuntimeError,TypeError):
+                # Window may have been destroyed during shutdown.
+                pass
+        try:
+            threading.Thread(target=read,name="pulse-requested-brief",daemon=True).start()
+        except Exception as exc:
+            self._requested_brief_job=None
+            self._requested_brief_failed("Could not start briefing read: "+str(exc)[:160])
+            return
+        QTimer.singleShot(15000,lambda j=job:self._requested_brief_slow(j))
+
+    def _requested_brief_slow(self,job):
+        if (not self._force_close and not getattr(self.controller,"_closed",False)
+                and self._requested_brief_job==job
+                and self._requested_brief_target==job[0]):
+            self.brief_state_label.setText(
+                "Archive read still running. No new document or export until verified.")
+
+    def _requested_brief_failed(self,message):
+        self._requested_brief_target=None
+        self._requested_brief_job=None
+        self._clear_brief_presentation(message)
+        self._dirty_pages.discard(5)
+
+    def _requested_brief_valid(self,result):
+        store=self.controller.store
+        manifest=result["manifest"]
+        if manifest:
+            return store.brief_manifest_matches(manifest,nonblocking=True)
+        revision=store.content_revision_if_available()
+        return None if revision is None else revision==result["before"]==result["after"]
+
+    @Slot(object)
+    def _apply_requested_brief(self,result):
+        job=result["job"]
+        if self._requested_brief_job!=job:
+            return
+        if self._force_close or getattr(self.controller,"_closed",False):
+            self._requested_brief_job=None
+            self._requested_brief_target=None
+            return
+        target,attempt=job
+        period=target[1]
+        if (self._requested_brief_target!=target
+                or target!=(self._brief_request_epoch,self.brief_period.currentText().lower())):
+            self._requested_brief_job=None
+            # A newer explicit request may have arrived during this read.
+            self._start_requested_brief()
+            self._schedule_workspace_warm()
+            return
+        if "error" in result:
+            self._requested_brief_failed("Brief read failed: "+result["error"]+" · Click Generate brief to retry.")
+            return
+        generated=result["generated"]
+        if period=="daily" and generated.date()!=datetime.now(timezone.utc).date():
+            self._requested_brief_job=None
+            self._start_requested_brief()
+            return
+        result.setdefault("validation_deadline",time.monotonic()+15)
+        try:
+            checked=self._requested_brief_valid(result)
+            if checked is True and "html" not in result:
+                from .brief_rendering import brief_html
+                result["html"]=brief_html(result["events"],period,markdown=result["markdown"])
+                # Never expose a document corrected or pruned during rendering.
+                checked=self._requested_brief_valid(result)
+            if checked is None:
+                if time.monotonic()>=result["validation_deadline"]:
+                    self._requested_brief_failed("Archive busy; briefing not published. Click Generate brief to retry.")
+                else:
+                    self.brief_state_label.setText("Waiting to verify retained source evidence…")
+                    QTimer.singleShot(250,lambda value=result:self._apply_requested_brief(value))
+                return
+            if checked is False:
+                self._requested_brief_job=None
+                self._start_requested_brief()
+                return
+            if (period=="daily" and generated.date()!=datetime.now(timezone.utc).date()
+                    or target!=(self._brief_request_epoch,self.brief_period.currentText().lower())):
+                self._requested_brief_job=None
+                self._start_requested_brief()
+                return
+            key=(period,generated.isoformat())
+            snapshot={"day":generated.date().isoformat(),"key":key,
+                      "manifest":result["manifest"],"markdown":result["markdown"],
+                      "html":result["html"]}
+            self.brief_browser.setHtml(snapshot["html"])
+            self._displayed_brief_key=key
+            self._displayed_brief_snapshot=snapshot
+            if period=="daily":
+                self._daily_brief_snapshot=snapshot
+            self._set_brief_state(snapshot)
+            self._discard_brief_read()
+            self._dirty_pages.discard(5)
+            self._requested_brief_job=None
+            self._requested_brief_target=None
+        except Exception as exc:
+            self._requested_brief_failed("Brief presentation failed: "+str(exc)[:160]+" · Click Generate brief to retry.")
 
     def _generate_brief(self, *, idle=False, preserve_daily=False):
+        if self._requested_brief_target is not None:
+            return False  # Explicit single-flight request owns the document.
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
-        if (idle or preserve_daily) and self._has_current_daily_brief(period):
+        # Do not freeze an empty first-launch brief after eligible evidence
+        # has been collected. A nonempty dated opening remains immutable.
+        provisional_ready=(self._daily_brief_snapshot is not None
+            and not self._daily_brief_snapshot["manifest"]
+            and getattr(self,"_deferred_brief_events",None) is not None
+            and getattr(self,"_deferred_brief_period",None)==period)
+        if (idle or preserve_daily) and self._has_current_daily_brief(period) and not provisional_ready:
             snapshot=self._daily_brief_snapshot
             valid=self.controller.store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
             if valid is None:
