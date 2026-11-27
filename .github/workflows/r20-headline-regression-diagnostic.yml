@@ -1,4 +1,4 @@
-name: R20 exact headline regression diagnostic
+name: R20 headline hunk A/B regression diagnostic
 on:
   push:
     branches: [eng/r20-passive-headline-diagnostics-20261126]
@@ -7,7 +7,7 @@ permissions:
 jobs:
   isolate:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -38,22 +38,26 @@ jobs:
           git diff --exit-code 03a72dc7fde4b9e180b5576cfdfe2dbc985bde79 HEAD -- global_pulse requirements-bootstrap.lock requirements-build.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
           python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
-      - name: Identical isolated regression on exact candidate and predecessor
+      - name: Compare all four immutable variants on identical isolated test
         shell: bash
         run: |
           set -uo pipefail
           diagnostic="$PWD/tests/test_r20_filter_window_responsiveness.py"
           git worktree add --detach "$RUNNER_TEMP/gp-headline-old" ccec1a711afbbf656f5f1f0f3303732cbe71365a
           git worktree add --detach "$RUNNER_TEMP/gp-headline-new" 03a72dc7fde4b9e180b5576cfdfe2dbc985bde79
+          git worktree add --detach "$RUNNER_TEMP/gp-headline-row" 73f660185233db5b0913eee86ca2866d8f201af1
+          git worktree add --detach "$RUNNER_TEMP/gp-headline-timer" 0d770e06d2cf047814c356a944374c0aca4f123b
           rc=0
           for trial in 1 2; do
-            for variant in old new; do
+            for variant in old row timer new; do
               if (
                 cd "$RUNNER_TEMP/gp-headline-$variant" || exit 1
                 actual=$(git rev-parse HEAD) || exit 1
                 case "$variant" in
                   old) expected=ccec1a711afbbf656f5f1f0f3303732cbe71365a ;;
                   new) expected=03a72dc7fde4b9e180b5576cfdfe2dbc985bde79 ;;
+                  row) expected=73f660185233db5b0913eee86ca2866d8f201af1 ;;
+                  timer) expected=0d770e06d2cf047814c356a944374c0aca4f123b ;;
                   *) exit 1 ;;
                 esac
                 test "$actual" = "$expected" || exit 1
@@ -69,5 +73,69 @@ jobs:
               echo "R20_ISOLATION_EXIT=$result variant=$variant trial=$trial"
               if [ "$result" -ne 0 ]; then rc=1; fi
             done
+          done
+          exit "$rc"
+  matched:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+        variant: [old, row, timer, new]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      PYTHONNOUSERSITE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PIP_NO_INPUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+      - name: Locked dependencies
+        shell: bash
+        run: |
+          git diff --exit-code 03a72dc7fde4b9e180b5576cfdfe2dbc985bde79 HEAD -- global_pulse requirements-bootstrap.lock requirements-build.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-bootstrap.lock
+          python -m pip install --require-hashes --no-build-isolation -r requirements-build.lock
+      - name: Exact variant full loaded-archive comparison
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -uo pipefail
+          case "$VARIANT" in
+            old) expected=ccec1a711afbbf656f5f1f0f3303732cbe71365a ;;
+            new) expected=03a72dc7fde4b9e180b5576cfdfe2dbc985bde79 ;;
+            row) expected=73f660185233db5b0913eee86ca2866d8f201af1 ;;
+            timer) expected=0d770e06d2cf047814c356a944374c0aca4f123b ;;
+            *) exit 1 ;;
+          esac
+          probe="$PWD/scripts/qa_r20_brief_loaded_archive.py"
+          git worktree add --detach "$RUNNER_TEMP/gp-hunk-load" "$expected"
+          cd "$RUNNER_TEMP/gp-hunk-load"
+          test "$(git rev-parse HEAD)" = "$expected"
+          git diff --exit-code -- global_pulse requirements-bootstrap.lock requirements-build.lock
+          rc=0
+          for trial in 1 2; do
+            echo "R20_HUNK_LOAD=$VARIANT trial=$trial head=$expected"
+            if R20_MATCHED_TRIAL="$trial" python -c 'import runpy,sys; p=sys.argv.pop(1); runpy.run_path(p,run_name="__main__")' "$probe"; then
+              result=0
+            else
+              result=$?
+            fi
+            echo "R20_HUNK_LOAD_EXIT=$result variant=$VARIANT trial=$trial"
+            if [ "$result" -ne 0 ]; then rc=1; fi
           done
           exit "$rc"
