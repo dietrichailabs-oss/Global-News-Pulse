@@ -806,3 +806,74 @@ def test_automatic_failure_or_empty_recovers_on_next_collection(desktop,monkeypa
                      and w._displayed_brief_snapshot is w._daily_brief_snapshot
                      and w.brief_export_button.isEnabled())
     assert "FICTIONAL executive report 1" in w.brief_browser.toPlainText()
+
+
+@pytest.mark.parametrize("outcome",["error","coherent_empty","stale_empty"])
+def test_single_evidence_signal_during_automatic_read_is_not_lost(desktop,monkeypatch,outcome):
+    app,ctl,w=desktop
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        if threading.current_thread().name!="pulse-requested-brief":
+            return original(**kwargs)
+        rows=original(**kwargs)
+        calls.append(len(rows))
+        if len(calls)==1:
+            assert not rows
+            entered.set()
+            assert release.wait(8)
+            if outcome=="error":
+                raise RuntimeError("offline gated automatic read failure")
+        return rows
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        _begin_automatic_for_test(w)
+        assert entered.wait(2)
+        first=w._requested_brief_job
+        assert w._automatic_brief_target==first[0]
+        assert not w._provisional_brief_signal_pending
+        # A delayed notification may accompany no new eligible rows. For the
+        # other cases actually commit a first eligible source during the read.
+        if outcome!="coherent_empty":
+            ctl.store.ingest([_report(1,"critical","Disaster")])
+        ctl.evidence_changed.emit()
+        # Isolate the automatic notification path, not the Monitor fallback.
+        # The original unchanged churn test still runs both paths together.
+        w._evidence_refresh_timer.stop()
+        w._workspace_warm_timer.stop()
+        assert w._provisional_brief_signal_pending
+        assert not w._provisional_brief_timer.isActive()
+        assert w._requested_brief_job==first
+        assert calls==[0]
+        release.set()
+        # No further collection signals and no Generate click after release.
+        assert wait_until(lambda:len(calls)>=2
+                         and w._requested_brief_job is None
+                         and w._requested_brief_target is None)
+        assert ctl._settle_brief_readers(timeout=5)
+        assert len(calls)==2
+        snapshot=w._displayed_brief_snapshot
+        assert snapshot is not None
+        assert w._automatic_brief_target is None
+        assert not w._provisional_brief_signal_pending
+        assert not w._provisional_brief_timer.isActive()
+        assert w.brief_export_button.isEnabled()
+        if outcome=="coherent_empty":
+            # A genuinely coherent empty result consumes exactly the saved
+            # notification with one new request, not a periodic read loop.
+            assert calls==[0,0] and not snapshot["manifest"]
+            assert w._requested_brief_serial==first[0][0]+1
+        elif outcome=="error":
+            assert calls==[0,1] and snapshot["manifest"]
+            assert w._requested_brief_serial==first[0][0]+1
+        else:
+            # An obsolete empty capture must retry under its original
+            # request's revision gate rather than publish stale emptiness.
+            assert calls==[0,1] and snapshot["manifest"]
+            assert w._requested_brief_serial==first[0][0]
+        if outcome!="coherent_empty":
+            assert "FICTIONAL executive report 1" in w.brief_browser.toPlainText()
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
