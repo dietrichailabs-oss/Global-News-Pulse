@@ -1,7 +1,7 @@
 name: R20 owner Brief recovery exact candidate
 on:
   push:
-    branches: [eng/r20-owner-brief-recovery-20261127]
+    branches: [eng/r20-brief-timer-isolation-20261127]
   workflow_dispatch:
 permissions:
   contents: read
