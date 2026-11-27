@@ -90,6 +90,11 @@ class Controller(QObject):
         self.tray_explained = bool(self.get_setting("tray_explained", False))
         self.storage_problem.connect(self._pause_for_storage)
         self._ingest_lock = threading.RLock()
+        # A cooperative Brief read releases the Store lock between pages.
+        # Hold an independent lifetime lease until its last access and text
+        # preparation complete; a momentarily unlocked Store is not drained.
+        self._brief_readers = threading.Condition()
+        self._brief_reader_count = 0
         self._workers = TranslationProcess(self.data_dir, self)
         self._workers.completed.connect(self._translation_complete)
         self._workers.progress.connect(self._model_progress)
@@ -777,6 +782,34 @@ class Controller(QObject):
     def quit(self):
         self.quit_requested.emit()
 
+    def start_brief_reader(self, target, *, name):
+        """Admit a reader before thread start; shutdown fences future admission."""
+        with self._brief_readers:
+            if self._closed or self._store_closed:
+                raise ShutdownPending("Archive is closing; Brief read not admitted")
+            self._brief_reader_count += 1
+
+        def owned_read():
+            try:
+                target()
+            finally:
+                with self._brief_readers:
+                    self._brief_reader_count -= 1
+                    self._brief_readers.notify_all()
+
+        try:
+            threading.Thread(target=owned_read, name=name, daemon=True).start()
+        except BaseException:
+            with self._brief_readers:
+                self._brief_reader_count -= 1
+                self._brief_readers.notify_all()
+            raise
+
+    def _settle_brief_readers(self, timeout=1.0):
+        with self._brief_readers:
+            return self._brief_readers.wait_for(
+                lambda: self._brief_reader_count == 0, timeout=timeout)
+
     def begin_close(self):
         """GUI-affine, nonwaiting cancellation phase for explicit tray exit."""
         self.monitoring = False
@@ -806,6 +839,8 @@ class Controller(QObject):
         """Disk-only phase, run off Qt after close_ready has confirmed exit."""
         if self._store_closed:
             return
+        if not self._settle_brief_readers(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted Brief archive reader to finish")
         if not self.scheduler.settle_callbacks(timeout=1.0):
             raise ShutdownPending("Waiting for an admitted source archive callback to finish")
         if not self._ingest_lock.acquire(timeout=1.0):
@@ -832,6 +867,8 @@ class Controller(QObject):
         self._translation_pending.clear()
         self._translation_keys.clear()
         self._model_jobs.clear()
+        if not self._settle_brief_readers(timeout=1.0):
+            raise ShutdownPending("Waiting for an admitted Brief archive reader to finish")
         with self._ingest_lock:
             self.store.close()
             self._store_closed = True

@@ -302,3 +302,105 @@ def test_requested_worker_render_correction_is_revalidated_before_publication(de
     assert "FICTIONAL corrected during HTML preparation" in w.brief_browser.toPlainText()
     assert ctl.store.brief_manifest_matches(w._displayed_brief_snapshot["manifest"])
     assert w.brief_export_button.isEnabled()
+
+
+def test_real_scheduled_deadline_keeps_reader_lease_and_late_retry_recovers(desktop,monkeypatch):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"high","Health")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["period"])
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(65),"test did not release actual deadline fixture"
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        started=time.monotonic()
+        w._request_brief()
+        assert entered.wait(2)
+        old=w._requested_brief_job
+        # No timer substitution, manual expiry call or changed production bound.
+        assert wait_until(lambda:w._requested_brief_target is None,timeout=50)
+        elapsed=time.monotonic()-started
+        assert 44<=elapsed<50,elapsed
+        assert w._requested_brief_job==old
+        assert ctl._brief_reader_count==1
+        assert "timed out" in w.brief_browser.toPlainText()
+        assert not w.brief_export_button.isEnabled()
+        w._request_brief()
+        assert w._requested_brief_target!=old[0]
+        assert w._requested_brief_job==old
+        assert len(calls)==1
+        release.set()
+        assert wait_until(lambda:w._requested_brief_job is None
+                         and w._displayed_brief_snapshot is not None)
+        assert len(calls)==2
+        assert ctl._settle_brief_readers()
+        assert w.brief_export_button.isEnabled()
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+
+
+@pytest.mark.parametrize("period",["daily","weekly"])
+def test_close_during_owned_brief_read_preserves_store_until_reader_drains(desktop,monkeypatch,period):
+    from global_pulse.controller import ShutdownPending
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"high","Health")])
+    w.brief_period.setCurrentIndex(0 if period=="daily" else 1)
+    w._workspace_warm_timer.stop()
+    w._evidence_refresh_timer.stop()
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    finished=threading.Event()
+    outcomes=[]
+    def read(**kwargs):
+        # The actual worker has released SQLite but still requires a later
+        # access. The connection must stay open across shutdown finalization.
+        assert ctl.store.content_revision()
+        entered.set()
+        assert release.wait(8)
+        rows=original(**kwargs)
+        finished.set()
+        return rows
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        ctl.begin_close()
+        with pytest.raises(ShutdownPending,match="closing"):
+            ctl.start_brief_reader(lambda:None,name="forbidden-after-close")
+        def finish():
+            try:
+                ctl.finish_close({})
+            except Exception as exc:
+                outcomes.append(exc)
+            else:
+                outcomes.append("closed")
+        finalizer=threading.Thread(target=finish)
+        finalizer.start()
+        assert wait_until(lambda:bool(outcomes),timeout=4)
+        finalizer.join(2)
+        assert len(outcomes)==1 and isinstance(outcomes[0],ShutdownPending),outcomes
+        assert "Brief archive reader" in str(outcomes[0])
+        assert not ctl._store_closed and not ctl.store._closed
+        assert ctl.store.stats()["events"]==1
+        release.set()
+        assert wait_until(lambda:finished.is_set() and ctl._brief_reader_count==0)
+        assert wait_until(lambda:w._requested_brief_job is None)
+        assert w._displayed_brief_snapshot is None
+        assert not w.brief_export_button.isEnabled()
+        assert wait_until(ctl.close_ready)
+        outcomes.clear()
+        finalizer=threading.Thread(target=finish)
+        finalizer.start()
+        assert wait_until(lambda:bool(outcomes),timeout=5)
+        finalizer.join(2)
+        assert outcomes==["closed"],outcomes
+        assert ctl._store_closed and ctl.store._closed
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)

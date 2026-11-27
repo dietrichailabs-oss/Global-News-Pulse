@@ -1806,8 +1806,7 @@ class MainWindow(SituationActions, QMainWindow):
 
         self._idle_brief_worker_active=True
         try:
-            threading.Thread(target=collect_brief,name="pulse-idle-brief",
-                             daemon=True).start()
+            controller.start_brief_reader(collect_brief,name="pulse-idle-brief")
         except Exception as exc:
             self._idle_brief_worker_active=False
             self._idle_brief_inflight=False
@@ -3255,7 +3254,7 @@ class MainWindow(SituationActions, QMainWindow):
                 # Window may have been destroyed during shutdown.
                 pass
         try:
-            threading.Thread(target=read,name="pulse-requested-brief",daemon=True).start()
+            controller.start_brief_reader(read,name="pulse-requested-brief")
         except Exception as exc:
             self._requested_brief_job=None
             self._requested_brief_failed("Could not start briefing read: "+str(exc)[:160])
