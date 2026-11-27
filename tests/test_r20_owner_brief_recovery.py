@@ -144,3 +144,112 @@ def test_generate_read_error_is_visible_and_manual_retry_recovers(desktop,monkey
                      and w._displayed_brief_snapshot is not None)
     assert len(calls)==2
     assert w.brief_export_button.isEnabled()
+
+
+def test_timeout_retires_document_but_never_overlaps_previous_reader(desktop,monkeypatch):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"high","Health")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["period"])
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(5)
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        first=w._requested_brief_job
+        w._expire_requested_brief(first[0])
+        assert w._requested_brief_target is None
+        assert w._requested_brief_job==first
+        assert "timed out" in w.brief_browser.toPlainText()
+        assert not w.brief_export_button.isEnabled()
+        w._request_brief()
+        queued=w._requested_brief_target
+        w._request_brief()
+        assert w._requested_brief_target==queued and queued!=first[0]
+        assert w._requested_brief_job==first and len(calls)==1
+        release.set()
+        assert wait_until(lambda:w._requested_brief_job is None
+                         and w._displayed_brief_snapshot is not None)
+        assert len(calls)==2
+        assert w.brief_export_button.isEnabled()
+    finally:
+        release.set()
+
+
+def test_actual_idle_reader_drains_before_requested_reader(desktop,monkeypatch):
+    from datetime import timedelta
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"high","Health")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["period"])
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(5)
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    generated=datetime.now(timezone.utc)
+    snapshot={"generation":w._idle_snapshot_generation,
+              "brief_period":"daily","brief_epoch":w._brief_request_epoch,
+              "brief_since":(generated-timedelta(days=1)).isoformat(),
+              "brief_generated":generated}
+    try:
+        w._idle_brief_inflight=True
+        w._begin_idle_brief_read(snapshot)
+        assert entered.wait(2) and w._idle_brief_worker_active
+        w._request_brief()
+        assert w._requested_brief_job is None and w._requested_brief_target is not None
+        assert len(calls)==1
+        release.set()
+        assert wait_until(lambda:w._requested_brief_target is None
+                         and w._displayed_brief_snapshot is not None)
+        assert len(calls)==2
+        assert not w._idle_brief_worker_active
+        assert not w._idle_brief_inflight
+    finally:
+        release.set()
+
+
+def test_hidden_daily_correction_does_not_cancel_requested_weekly(desktop,monkeypatch):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    assert w._generate_brief()
+    w.brief_period.setCurrentIndex(1)
+    w._workspace_warm_timer.stop()
+    w._evidence_refresh_timer.stop()
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["period"])
+        entered.set()
+        assert release.wait(5)
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        target=w._requested_brief_target
+        old_epoch=w._brief_request_epoch
+        ctl.store.ingest([dict(_report(1,"critical","Disaster"),
+                              title="FICTIONAL corrected daily evidence")])
+        w._validate_brief_snapshots()
+        assert w._brief_request_epoch>old_epoch
+        assert w._requested_brief_target==target
+        release.set()
+        assert wait_until(lambda:w._requested_brief_target is None
+                         and w._displayed_brief_snapshot is not None)
+        assert calls==["weekly"]
+        assert w._displayed_brief_key[0]=="weekly"
+        assert "FICTIONAL corrected daily evidence" in w.brief_browser.toPlainText()
+        assert w.brief_export_button.isEnabled()
+    finally:
+        release.set()

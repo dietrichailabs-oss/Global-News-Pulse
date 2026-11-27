@@ -483,6 +483,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._requested_brief_target=None
         self._requested_brief_job=None
         self._requested_brief_attempts=0
+        self._requested_brief_serial=0
+        self._requested_brief_deadline=0.0
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -494,6 +496,7 @@ class MainWindow(SituationActions, QMainWindow):
         self._refreshing=False
         self._idle_snapshot_inflight=False
         self._idle_brief_inflight=False
+        self._idle_brief_worker_active=False
         self._idle_alerts_inflight=False
         self._deferred_alert_rows=None
         self._deferred_alert_revision=None
@@ -1190,7 +1193,8 @@ class MainWindow(SituationActions, QMainWindow):
         # The Daily/Weekly SQL runs independently after the critical feed/map
         # result, so a slow brief cannot starve the no-click GUI refresh.
         # Do not perform a hidden synchronous SQLite brief query meanwhile.
-        if page==5 and (self._idle_brief_inflight or self._requested_brief_target is not None):
+        if page==5 and (self._idle_brief_inflight or self._requested_brief_target is not None
+                        or self._requested_brief_job is not None):
             other=self._dirty_pages-{5}
             if not other:
                 self._workspace_warm_timer.start()
@@ -1598,6 +1602,7 @@ class MainWindow(SituationActions, QMainWindow):
         signal=self._idle_snapshot_ready
         brief_pending=(not self._idle_brief_inflight
                        and self._requested_brief_target is None
+                       and self._requested_brief_job is None
                        and (not self._has_current_daily_brief(brief_period)
                             or not self._daily_brief_snapshot["manifest"]))
         if brief_pending:
@@ -1763,6 +1768,14 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller,"_closed",False):
             self._idle_brief_inflight=False
             return
+        # An explicit request supersedes a reserved (not yet started) idle
+        # read. Do not launch the old delayed callback alongside it.
+        if (self._requested_brief_target is not None
+                or self._requested_brief_job is not None
+                or snapshot.get("brief_epoch",self._brief_request_epoch)!=self._brief_request_epoch):
+            self._idle_brief_inflight=False
+            self._start_requested_brief()
+            return
         controller=self.controller
         signal=self._idle_brief_ready
         generation=snapshot["generation"]
@@ -1791,8 +1804,15 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 pass
 
-        threading.Thread(target=collect_brief,name="pulse-idle-brief",
-                         daemon=True).start()
+        self._idle_brief_worker_active=True
+        try:
+            threading.Thread(target=collect_brief,name="pulse-idle-brief",
+                             daemon=True).start()
+        except Exception as exc:
+            self._idle_brief_worker_active=False
+            self._idle_brief_inflight=False
+            self.status_label.setText("Idle brief worker could not start: "+str(exc)[:160])
+            self._schedule_workspace_warm()
 
     @Slot(object)
     def _apply_idle_snapshot(self, snapshot):
@@ -1880,8 +1900,15 @@ class MainWindow(SituationActions, QMainWindow):
         Busy means defer this SAME result, never accept stale data or launch a
         duplicate Brief worker. Only fresh, exact-revision results are cached.
         """
+        self._idle_brief_worker_active=False
         if self._force_close or getattr(self.controller,"_closed",False):
             self._idle_brief_inflight=False
+            return
+        if self._requested_brief_target is not None or self._requested_brief_job is not None:
+            # The old reader has returned; only the requested document owns
+            # presentation. No old idle result or duplicate read is admitted.
+            self._idle_brief_inflight=False
+            self._start_requested_brief()
             return
         if "error" in brief:
             self._idle_brief_inflight=False
@@ -3109,12 +3136,17 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_evidence_refresh()
 
     def _brief_period_changed(self,*_args):
+        requested=(self._requested_brief_target is not None
+                   or self._requested_brief_job is not None)
         self._requested_brief_target=None
         self._brief_request_epoch+=1
         self._discard_brief_read()
         self._clear_brief_presentation("Preparing the selected briefing period…")
         self._dirty_pages.add(5)
         if self._background_warm_enabled:
+            if requested:
+                self._request_brief()
+                return
             self._schedule_workspace_warm()
             self._schedule_evidence_refresh()
 
@@ -3125,7 +3157,7 @@ class MainWindow(SituationActions, QMainWindow):
             return self._generate_brief()
         period=self.brief_period.currentText().lower()
         target=self._requested_brief_target
-        if target is not None and target==(self._brief_request_epoch,period):
+        if target is not None and target[1]==period:
             return  # Coalesce repeated clicks, not an unbounded read queue.
         if period=="daily":
             self._daily_brief_snapshot=None
@@ -3133,16 +3165,40 @@ class MainWindow(SituationActions, QMainWindow):
         self._discard_brief_read()
         self._clear_brief_presentation("Generating current source-linked briefing…")
         self._dirty_pages.add(5)
-        self._requested_brief_target=(self._brief_request_epoch,period)
+        # Explicit request ownership is separate from the hidden Daily
+        # snapshot's invalidation epoch. Its own exact manifest still gates
+        # publication, including changes during a Weekly request.
+        self._requested_brief_serial+=1
+        target=(self._requested_brief_serial,period)
+        self._requested_brief_target=target
         self._requested_brief_attempts=0
+        self._requested_brief_deadline=time.monotonic()+45
+        if self._requested_brief_job is not None or self._idle_brief_worker_active:
+            self.brief_state_label.setText("Previous archive read still running; one retry queued.")
+        QTimer.singleShot(45000,lambda value=target:self._expire_requested_brief(value))
         self._start_requested_brief()
+
+    def _expire_requested_brief(self,target):
+        if (self._force_close or getattr(self.controller,"_closed",False)
+                or self._requested_brief_target!=target):
+            return
+        # A deadline expires the presentation request, NOT a Python thread.
+        # Keep any running worker's lease until its actual result arrives.
+        self._requested_brief_target=None
+        self._clear_brief_presentation(
+            "Brief request timed out; no document published. Click Generate brief to retry after the previous read finishes.")
+        self._dirty_pages.discard(5)
 
     def _start_requested_brief(self):
         target=self._requested_brief_target
         if (target is None or self._requested_brief_job is not None
+                or self._idle_brief_worker_active
                 or self._force_close or getattr(self.controller,"_closed",False)):
             return
-        if target!=(self._brief_request_epoch,self.brief_period.currentText().lower()):
+        if time.monotonic()>=self._requested_brief_deadline:
+            self._expire_requested_brief(target)
+            return
+        if target[1]!=self.brief_period.currentText().lower():
             self._requested_brief_target=None
             self._schedule_workspace_warm()
             return
@@ -3221,8 +3277,11 @@ class MainWindow(SituationActions, QMainWindow):
             return
         target,attempt=job
         period=target[1]
+        if (self._requested_brief_target==target
+                and time.monotonic()>=self._requested_brief_deadline):
+            self._expire_requested_brief(target)
         if (self._requested_brief_target!=target
-                or target!=(self._brief_request_epoch,self.brief_period.currentText().lower())):
+                or period!=self.brief_period.currentText().lower()):
             self._requested_brief_job=None
             # A newer explicit request may have arrived during this read.
             self._start_requested_brief()
@@ -3256,9 +3315,14 @@ class MainWindow(SituationActions, QMainWindow):
                 self._start_requested_brief()
                 return
             if (period=="daily" and generated.date()!=datetime.now(timezone.utc).date()
-                    or target!=(self._brief_request_epoch,self.brief_period.currentText().lower())):
+                    or self._requested_brief_target!=target
+                    or period!=self.brief_period.currentText().lower()
+                    or time.monotonic()>=self._requested_brief_deadline):
                 self._requested_brief_job=None
-                self._start_requested_brief()
+                if time.monotonic()>=self._requested_brief_deadline:
+                    self._expire_requested_brief(target)
+                else:
+                    self._start_requested_brief()
                 return
             key=(period,generated.isoformat())
             snapshot={"day":generated.date().isoformat(),"key":key,
@@ -3278,7 +3342,7 @@ class MainWindow(SituationActions, QMainWindow):
             self._requested_brief_failed("Brief presentation failed: "+str(exc)[:160]+" · Click Generate brief to retry.")
 
     def _generate_brief(self, *, idle=False, preserve_daily=False):
-        if self._requested_brief_target is not None:
+        if self._requested_brief_target is not None or self._requested_brief_job is not None:
             return False  # Explicit single-flight request owns the document.
         period=self.brief_period.currentText().lower();days=1 if period=="daily" else 7
         # Do not freeze an empty first-launch brief after eligible evidence
