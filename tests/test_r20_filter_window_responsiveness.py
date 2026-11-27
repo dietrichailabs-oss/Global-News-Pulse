@@ -5,13 +5,14 @@ timings cannot establish physical Windows compositor or live-media acceptance.
 """
 import os
 import time
+import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from global_pulse import map_widget
@@ -144,20 +145,139 @@ def test_loaded_window_category_and_hazard_changes_keep_geometry(tmp_path,monkey
         original=ctl.events
         import threading
         gui=threading.get_ident()
+        trace=[]
+        preference_busy=[0]
+        revision_busy=[0]
+        clock=time.perf_counter
+        origin=clock()
+        def record(kind, **fields):
+            if len(trace)<4000:
+                trace.append(dict(kind=kind, ms=round((clock()-origin)*1000,3),
+                                  thread="gui" if threading.get_ident()==gui else "worker",
+                                  **fields))
+        def observe(snapshot):
+            # Never access widgets from the signal's emitting thread.
+            record("snapshot", **{key:snapshot.get(key) for key in (
+                "scope","generation","selected_id","archive_pin_id",
+                "explicit_selection_id","revision_before","revision_after",
+                "retry_snapshot","error","explicit_filter")})
+        w._idle_snapshot_ready.connect(observe)
         def guarded(**kwargs):
             assert threading.get_ident()!=gui,"category click queried SQLite on GUI"
-            return original(**kwargs)
+            record("events_start", filters=kwargs)
+            wall=time.perf_counter()
+            cpu=time.thread_time()
+            try:
+                result=original(**kwargs)
+                record("events_end", rows=len(result), filters=kwargs,
+                       wall_ms=(time.perf_counter()-wall)*1000,
+                       thread_cpu_ms=(time.thread_time()-cpu)*1000)
+                return result
+            except Exception as exc:
+                record("events_error", error=type(exc).__name__+": "+str(exc)[:160])
+                raise
         monkeypatch.setattr(ctl,"events",guarded)
+        for method in ("brief_manifest_matches","list_observations",
+                       "_cooperative_map_candidates","_cooperative_map_page"):
+            original_method=getattr(ctl.store,method,None)
+            if original_method is None:
+                continue
+            def timed(*args,_method=method,_fn=original_method,**kwargs):
+                wall=time.perf_counter()
+                cpu=time.thread_time()
+                try:
+                    return _fn(*args,**kwargs)
+                finally:
+                    record("store_phase", phase=_method,
+                           wall_ms=(time.perf_counter()-wall)*1000,
+                           thread_cpu_ms=(time.thread_time()-cpu)*1000)
+            monkeypatch.setattr(ctl.store,method,timed)
+        original_revision=ctl.store.content_revision_if_available
+        def revision():
+            value=original_revision()
+            if value is None:
+                revision_busy[0]+=1
+            else:
+                record("revision_probe", value=value)
+            return value
+        monkeypatch.setattr(ctl.store,"content_revision_if_available",revision)
+        original_pref=getattr(ctl._headlines,"enabled_if_available",None)
+        if original_pref is not None:
+            def preference():
+                value=original_pref()
+                if value is None:
+                    preference_busy[0]+=1
+                return value
+            monkeypatch.setattr(ctl._headlines,"enabled_if_available",preference)
+
+        def capture_filter_state():
+            return dict(pending=w._filter_refresh_pending,
+                        inflight=w._idle_snapshot_inflight,
+                        refreshing=w._refreshing, generation=w._idle_snapshot_generation,
+                        scope=w._archive_scope_key(), selected=w._selected_id,
+                        archive_pin=w._archive_selection_id,
+                        explicit_selection=w._explicit_feed_selection_id,
+                        filter_timer=w._filter_refresh_timer.isActive(),
+                        filter_remaining=w._filter_refresh_timer.remainingTime(),
+                        deferred=len(ctl._headlines.deferred),
+                        deferred_interval=ctl._headlines.deferred_timer.interval(),
+                        deferred_active=ctl._headlines.deferred_timer.isActive(),
+                        pause_reasons=sorted(getattr(ctl._headlines,"_deferred_pause_reasons",())),
+                        count=w.count_label.text()[:240], status=w.status_label.text()[:240])
         last[0]=time.perf_counter()
         timer.start()
         for category in ("Health","Disaster",""):
             index=w.category.findData(category)
             assert index>=0
+            record("category_request", category=category, state=capture_filter_state())
             w.category.setCurrentIndex(index)
             limit=time.monotonic()+12
-            while w._filter_refresh_pending and time.monotonic()<limit:
-                app.processEvents()
-                QTest.qWait(10)
+            previous=[None]
+            mode=os.environ.get("R20_WAIT_MODE","pump")
+            def sample():
+                current=capture_filter_state()
+                key=tuple(str(current[k]) for k in (
+                    "pending","inflight","refreshing","generation","scope","selected",
+                    "archive_pin","explicit_selection","filter_timer","count","status",
+                    "deferred_active","pause_reasons"))
+                if key!=previous[0]:
+                    record("state", state=current)
+                    previous[0]=key
+            if mode=="eventloop":
+                loop=QEventLoop()
+                poll=QTimer()
+                poll.setInterval(10)
+                def check():
+                    sample()
+                    if not w._filter_refresh_pending or time.monotonic()>=limit:
+                        loop.quit()
+                poll.timeout.connect(check)
+                poll.start()
+                try:
+                    if w._filter_refresh_pending:
+                        loop.exec()
+                finally:
+                    poll.stop()
+            elif mode=="pump":
+                while w._filter_refresh_pending and time.monotonic()<limit:
+                    app.processEvents()
+                    QTest.qWait(10)
+                    sample()
+            else:
+                raise AssertionError("unknown diagnostic wait mode")
+            # Always emit the terminal state separately from bounded trace storage.
+            terminal=dict(kind="category_end", category=category, mode=mode,
+                          state=capture_filter_state(),
+                          heartbeat_max_ms=max(heartbeat,default=0),
+                          headline_preference_busy=preference_busy[0],
+                          revision_probe_busy=revision_busy[0],
+                          recorded_events=len(trace))
+            for entry in trace:
+                print("R20_FILTER_TRACE="+json.dumps(entry,default=str),flush=True)
+            print("R20_FILTER_END="+json.dumps(terminal,default=str),flush=True)
+            trace.clear()
+            preference_busy[0]=0
+            revision_busy[0]=0
             assert not w._filter_refresh_pending
             if category:
                 assert w._events and all(e["category"]==category for e in w._events)
