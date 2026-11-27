@@ -637,3 +637,65 @@ def test_large_brief_preview_pages_preserve_full_text_links_and_export(desktop,m
     assert w._displayed_brief_snapshot is None
     assert not w.brief_export_button.isEnabled()
     assert w.brief_preview_page.maximum()==1
+
+
+def test_multipage_preview_busy_and_rollover_before_clock_tick(desktop,monkeypatch):
+    from datetime import timedelta
+    from global_pulse import ui
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(i,"critical","Disaster") for i in range(1,301)])
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None
+                     and w._displayed_brief_snapshot is not None)
+    snapshot=w._displayed_brief_snapshot
+    pages=snapshot["preview_pages"]
+    assert len(pages)>1
+    first=w.brief_browser.toPlainText()
+    with patch.object(ctl.store,"brief_manifest_matches",return_value=None):
+        w.brief_preview_page.setValue(2)
+        assert w._brief_preview_index==0
+        assert w.brief_preview_page.value()==1
+        assert w.brief_browser.toPlainText()==first
+        assert w._displayed_brief_snapshot is snapshot
+        assert not w.brief_export_button.isEnabled()
+    w.brief_preview_page.setValue(2)
+    assert w._brief_preview_index==1
+    assert w.brief_export_button.isEnabled()
+    next_day=datetime.now(timezone.utc)+timedelta(days=1)
+    class NextDay(datetime):
+        @classmethod
+        def now(cls,tz=None):
+            return next_day.astimezone(tz) if tz else next_day.replace(tzinfo=None)
+    monkeypatch.setattr(ui,"datetime",NextDay)
+    # No clock tick: the actual page-control signal detects the expired day.
+    w.brief_preview_page.setValue(1)
+    assert w._displayed_brief_snapshot is None
+    assert w._daily_brief_snapshot is None
+    assert w.brief_preview_page.maximum()==1
+    assert w.brief_preview_page.value()==1
+    assert w._brief_preview_index==0
+    assert w.brief_preview_controls.isHidden()
+    assert not w.brief_export_button.isEnabled()
+    assert "FICTIONAL executive report" not in w.brief_browser.toPlainText()
+
+
+def test_page_change_rejects_mismatched_period_even_before_period_handler(desktop):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(i,"critical","Disaster") for i in range(1,301)])
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None
+                     and w._displayed_brief_snapshot is not None)
+    assert len(w._displayed_brief_snapshot["preview_pages"])>1
+    # Exercise a stale control independently of the usual period-change
+    # handler, which already clears the visible report.
+    blocked=w.brief_period.blockSignals(True)
+    try:
+        w.brief_period.setCurrentIndex(1)
+        w.brief_preview_page.setValue(2)
+        assert w._displayed_brief_snapshot is None
+        assert w.brief_preview_page.maximum()==1
+        assert w.brief_preview_controls.isHidden()
+        assert not w.brief_export_button.isEnabled()
+        assert "FICTIONAL executive report" not in w.brief_browser.toPlainText()
+    finally:
+        w.brief_period.blockSignals(blocked)

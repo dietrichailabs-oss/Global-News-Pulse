@@ -3088,8 +3088,15 @@ class MainWindow(SituationActions, QMainWindow):
             return
         if (snapshot["key"][0]!=self.brief_period.currentText().lower()
                 or (snapshot["key"][0]=="daily" and not self._has_current_daily_brief("daily"))):
+            # Expiry can discard the entire displayed snapshot. Never restore
+            # page controls or preview text from a discarded document.
             self._expire_daily_brief()
-            self._set_brief_preview_page_control(previous,len(pages))
+            if self._displayed_brief_snapshot is snapshot:
+                self._clear_brief_presentation("The selected briefing changed. Preparing current evidence.")
+                self._dirty_pages.add(5)
+            if self._background_warm_enabled:
+                self._schedule_evidence_refresh()
+                self._schedule_workspace_warm()
             return
         valid=self.controller.store.brief_manifest_matches(snapshot["manifest"],nonblocking=True)
         if valid is False:
