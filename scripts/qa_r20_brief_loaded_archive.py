@@ -251,7 +251,7 @@ def main():
     app=QApplication.instance() or QApplication([])
     summary={"baseline":args.baseline,"trial":os.environ.get("R20_MATCHED_TRIAL","1"),
              "wait_mode":os.environ.get("R20_WAIT_MODE","pump")}
-    assert summary["wait_mode"] in {"pump","eventloop"}
+    assert summary["wait_mode"] in {"pump","eventloop","application"}
     started=time.perf_counter()
     runner_root=private_fixture_root()
     with tempfile.TemporaryDirectory(prefix="gp-r20-load-",dir=runner_root) as directory, PhaseRecorder() as profiler:
@@ -428,48 +428,112 @@ def main():
                 return rows
             settles=[]
             with patch.object(ctl,"events",contested):
-                for category in ("Health","Disaster",""):
-                    profiler.stage="category_"+(category or "All")
-                    ix=w.category.findData(category)
-                    assert ix>=0
-                    phase=time.perf_counter()
-                    w.category.setCurrentIndex(ix)
-                    deadline=time.monotonic()+90
-                    if summary["wait_mode"]=="eventloop":
-                        loop=QEventLoop()
-                        observe=QTimer()
-                        observe.setInterval(10)
-                        def check():
-                            if not w._filter_refresh_pending or time.monotonic()>=deadline:
-                                loop.quit()
-                        observe.timeout.connect(check)
-                        observe.start()
+                if summary["wait_mode"]=="application":
+                    # One application-owned event loop for the entire category
+                    # sequence. No nested loops or manual event pumping.
+                    categories=iter(("Health","Disaster",""))
+                    current={}
+                    failures=[]
+                    observe=QTimer()
+                    observe.setInterval(10)
+                    def fail(exc):
+                        failures.append(exc)
+                        observe.stop()
+                        app.exit(1)
+                    def start_next():
                         try:
-                            if w._filter_refresh_pending:
-                                loop.exec()
-                        finally:
+                            category=next(categories)
+                        except StopIteration:
                             observe.stop()
-                    else:
-                        while w._filter_refresh_pending and time.monotonic()<deadline:
-                            app.processEvents()
-                            QTest.qWait(10)
-                    settles.append((time.perf_counter()-phase)*1000)
-                    print("R20_LOAD_FILTER="+json.dumps({
-                        "category":category,"wait_mode":summary["wait_mode"],
-                        "elapsed_ms":settles[-1],"pending":w._filter_refresh_pending,
-                        "inflight":w._idle_snapshot_inflight,
-                        "generation":w._idle_snapshot_generation,
-                        "filter_timer":w._filter_refresh_timer.isActive(),
-                        "status":w.status_label.text()[:240],
-                        "pause_reasons":sorted(getattr(ctl._headlines,"_deferred_pause_reasons",())),
-                        "deferred_active":ctl._headlines.deferred_timer.isActive(),
-                        "deferred_count":len(ctl._headlines.deferred)},sort_keys=True),flush=True)
-                    assert not w._filter_refresh_pending,"category did not settle"
-                    assert not writer_errors,writer_errors
-                    assert w.geometry()==geometry and w.windowState()==state
-                    if category:
-                        assert all(e["category"]==category for e in w._events)
-                    w._workspace_warm_timer.stop()
+                            app.exit(0)
+                            return
+                        try:
+                            profiler.stage="category_"+(category or "All")
+                            ix=w.category.findData(category)
+                            assert ix>=0
+                            current.update(category=category,phase=time.perf_counter(),
+                                           deadline=time.monotonic()+90)
+                            w.category.setCurrentIndex(ix)
+                            observe.start()
+                        except Exception as exc:
+                            fail(exc)
+                    def check():
+                        try:
+                            if w._filter_refresh_pending and time.monotonic()<current["deadline"]:
+                                return
+                            observe.stop()
+                            category=current["category"]
+                            phase=current["phase"]
+                            settles.append((time.perf_counter()-phase)*1000)
+                            print("R20_LOAD_FILTER="+json.dumps({
+                                "category":category,"wait_mode":summary["wait_mode"],
+                                "elapsed_ms":settles[-1],"pending":w._filter_refresh_pending,
+                                "inflight":w._idle_snapshot_inflight,
+                                "generation":w._idle_snapshot_generation,
+                                "filter_timer":w._filter_refresh_timer.isActive(),
+                                "status":w.status_label.text()[:240],
+                                "pause_reasons":sorted(getattr(ctl._headlines,"_deferred_pause_reasons",())),
+                                "deferred_active":ctl._headlines.deferred_timer.isActive(),
+                                "deferred_count":len(ctl._headlines.deferred)},sort_keys=True),flush=True)
+                            assert not w._filter_refresh_pending,"category did not settle"
+                            assert not writer_errors,writer_errors
+                            assert w.geometry()==geometry and w.windowState()==state
+                            if category:
+                                assert all(e["category"]==category for e in w._events)
+                            w._workspace_warm_timer.stop()
+                            QTimer.singleShot(0,start_next)
+                        except Exception as exc:
+                            fail(exc)
+                    observe.timeout.connect(check)
+                    QTimer.singleShot(0,start_next)
+                    result=app.exec()
+                    observe.stop()
+                    if failures:
+                        raise failures[0]
+                    assert result==0 and len(settles)==3
+                else:
+                    for category in ("Health","Disaster",""):
+                        profiler.stage="category_"+(category or "All")
+                        ix=w.category.findData(category)
+                        assert ix>=0
+                        phase=time.perf_counter()
+                        w.category.setCurrentIndex(ix)
+                        deadline=time.monotonic()+90
+                        if summary["wait_mode"]=="eventloop":
+                            loop=QEventLoop()
+                            observe=QTimer()
+                            observe.setInterval(10)
+                            def check():
+                                if not w._filter_refresh_pending or time.monotonic()>=deadline:
+                                    loop.quit()
+                            observe.timeout.connect(check)
+                            observe.start()
+                            try:
+                                if w._filter_refresh_pending:
+                                    loop.exec()
+                            finally:
+                                observe.stop()
+                        else:
+                            while w._filter_refresh_pending and time.monotonic()<deadline:
+                                app.processEvents()
+                                QTest.qWait(10)
+                        settles.append((time.perf_counter()-phase)*1000)
+                        print("R20_LOAD_FILTER="+json.dumps({
+                            "category":category,"wait_mode":summary["wait_mode"],
+                            "elapsed_ms":settles[-1],"pending":w._filter_refresh_pending,
+                            "inflight":w._idle_snapshot_inflight,
+                            "generation":w._idle_snapshot_generation,
+                            "filter_timer":w._filter_refresh_timer.isActive(),
+                            "status":w.status_label.text()[:240],
+                            "pause_reasons":sorted(getattr(ctl._headlines,"_deferred_pause_reasons",())),
+                            "deferred_active":ctl._headlines.deferred_timer.isActive(),
+                            "deferred_count":len(ctl._headlines.deferred)},sort_keys=True),flush=True)
+                        assert not w._filter_refresh_pending,"category did not settle"
+                        assert not writer_errors,writer_errors
+                        assert w.geometry()==geometry and w.windowState()==state
+                        if category:
+                            assert all(e["category"]==category for e in w._events)
+                        w._workspace_warm_timer.stop()
             timer.stop()
             summary["category_settle"]=stats(settles)
             assert not w._idle_snapshot_inflight
