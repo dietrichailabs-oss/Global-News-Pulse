@@ -404,3 +404,191 @@ def test_close_during_owned_brief_read_preserves_store_until_reader_drains(deskt
     finally:
         release.set()
         assert ctl._settle_brief_readers(timeout=5)
+
+
+def test_real_period_supersession_queues_weekly_and_rejects_old_daily(desktop,monkeypatch):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["period"])
+        rows=original(**kwargs)
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(8)
+        return rows
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        original_job=w._requested_brief_job
+        w.brief_period.setCurrentIndex(1)
+        assert w._requested_brief_target[1]=="weekly"
+        assert w._requested_brief_job==original_job
+        assert calls==["daily"] and not w.brief_export_button.isEnabled()
+        release.set()
+        assert wait_until(lambda:w._requested_brief_target is None
+                          and w._displayed_brief_snapshot is not None)
+        assert calls==["daily","weekly"]
+        assert w._displayed_brief_key[0]=="weekly"
+        assert w._daily_brief_snapshot is None
+        assert ctl.store.brief_manifest_matches(w._displayed_brief_snapshot["manifest"])
+        assert w.brief_export_button.isEnabled()
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+
+
+def test_real_requested_daily_rollover_rejects_old_day_and_recaptures(desktop,monkeypatch):
+    from datetime import timedelta
+    from global_pulse import ui
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    now=datetime.now(timezone.utc)
+    next_day=now+timedelta(days=1)
+    calls=[]
+    def read(**kwargs):
+        calls.append(kwargs["since"])
+        rows=original(**kwargs)
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(8)
+        return rows
+    class NextDay(datetime):
+        @classmethod
+        def now(cls,tz=None):
+            return next_day.astimezone(tz) if tz else next_day.replace(tzinfo=None)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        monkeypatch.setattr(ui,"datetime",NextDay)
+        w._brief_clock_tick()
+        assert not w.brief_export_button.isEnabled()
+        release.set()
+        assert wait_until(lambda:w._requested_brief_target is None
+                          and w._displayed_brief_snapshot is not None)
+        assert len(calls)==2
+        snapshot=w._displayed_brief_snapshot
+        assert snapshot["day"]==next_day.date().isoformat()
+        assert snapshot["manifest"]
+        assert datetime.fromisoformat(calls[1])==next_day-timedelta(days=1)
+        assert w.brief_export_button.isEnabled()
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+
+
+def test_real_prune_during_requested_read_cannot_publish_removed_source(desktop,monkeypatch):
+    from datetime import timedelta
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        rows=original(**kwargs)
+        calls.append(len(rows))
+        if len(calls)==1:
+            entered.set()
+            assert release.wait(8)
+        return rows
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        w._request_brief()
+        assert entered.wait(2)
+        assert ctl.store.prune(1,now=(datetime.now(timezone.utc)+timedelta(days=2)).isoformat())["reports"]==1
+        w._brief_reports_pruned()
+        assert not w.brief_export_button.isEnabled()
+        release.set()
+        assert wait_until(lambda:w._requested_brief_target is None
+                          and w._displayed_brief_snapshot is not None)
+        assert calls==[1,0]
+        assert not w._displayed_brief_snapshot["manifest"]
+        assert "FICTIONAL executive report 1" not in w.brief_browser.toPlainText()
+        assert "FICTIONAL executive report 1" not in w._displayed_brief_snapshot["html"]
+        assert "FICTIONAL executive report 1" not in w._displayed_brief_snapshot["markdown"]
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+
+
+def test_actual_idle_reader_exit_coordinator_waits_and_finalizes_once(desktop,monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from global_pulse.__main__ import _ExitCoordinator
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    def read(**kwargs):
+        assert ctl.store.content_revision()
+        entered.set()
+        assert release.wait(12)
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    completed,waiting,blocked=[],[],[]
+    # Actual coordinator and archive, inert notification dependency only.
+    notifier=SimpleNamespace(begin_close=lambda:[],close_ready=lambda:True)
+    coordinator=_ExitCoordinator(ctl,notifier)
+    coordinator.finished.connect(lambda:completed.append(True))
+    coordinator.waiting.connect(waiting.append)
+    coordinator.blocked.connect(blocked.append)
+    generated=datetime.now(timezone.utc)
+    snapshot={"generation":w._idle_snapshot_generation,
+              "brief_period":"daily","brief_epoch":w._brief_request_epoch,
+              "brief_since":(generated-timedelta(days=1)).isoformat(),
+              "brief_generated":generated}
+    try:
+        w._idle_brief_inflight=True
+        w._begin_idle_brief_read(snapshot)
+        assert entered.wait(2)
+        assert ctl._brief_reader_count==1 and w._idle_brief_worker_active
+        coordinator.begin({})
+        assert wait_until(lambda:bool(waiting),timeout=6)
+        assert not completed and not blocked
+        assert not coordinator.completed and not coordinator.failed
+        assert not ctl.store._closed and ctl.store.stats()["events"]==1
+        release.set()
+        assert wait_until(lambda:coordinator.completed,timeout=6)
+        assert completed==[True] and not blocked
+        assert ctl.store._closed and ctl._brief_reader_count==0
+        assert not w._idle_brief_worker_active
+        assert w._deferred_brief_events is None
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+        if coordinator.started and not coordinator.completed:
+            wait_until(lambda:coordinator.completed or coordinator.failed,timeout=6)
+        coordinator.timer.stop()
+
+
+def test_reader_start_failure_rolls_back_lease_and_sync_close_refuses_active_reader(desktop):
+    from global_pulse.controller import ShutdownPending
+    app,ctl,w=desktop
+    with patch.object(threading.Thread,"start",side_effect=RuntimeError("fixture start failure")):
+        with pytest.raises(RuntimeError,match="fixture start failure"):
+            ctl.start_brief_reader(lambda:None,name="failed-fixture-reader")
+    assert ctl._brief_reader_count==0 and ctl._settle_brief_readers(timeout=0)
+    entered,release=threading.Event(),threading.Event()
+    def read():
+        entered.set()
+        assert release.wait(8)
+        ctl.store.content_revision()
+    try:
+        ctl.start_brief_reader(read,name="sync-close-fixture-reader")
+        assert entered.wait(2)
+        with pytest.raises(ShutdownPending,match="Brief archive reader"):
+            ctl.close()
+        assert not ctl.store._closed and ctl._brief_reader_count==1
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+        ctl.close()
+        assert ctl.store._closed
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
