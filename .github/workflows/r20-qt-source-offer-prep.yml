@@ -1,0 +1,108 @@
+name: R20 held corresponding-source archive verification
+on:
+  push:
+    branches: [eng/r20-qt-source-offer-prep-d4ff8fb-20261127]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: r20-qt-source-offer-prep-d4ff8fb
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: qt-core
+            index: 0
+          - component: pyside
+            index: 1
+          - component: webengine-pdf
+            index: 2
+    env:
+      GP_SOURCE: 'd4ff8fb70b1dc8ae41b14f23ad519ca04450679a'
+      COMPONENT: ${{ matrix.component }}
+      SOURCE_INDEX: ${{ matrix.index }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: d4ff8fb70b1dc8ae41b14f23ad519ca04450679a
+          persist-credentials: false
+      - name: Fetch exact upstream archive and verify pinned bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GP_SOURCE"
+          python - <<'PY'
+          import hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          pin = Path("packaging/licenses/QT-6.12.0-OPEN-SOURCE-COMPLIANCE.json")
+          row = json.loads(pin.read_text(encoding="utf-8"))["exact_source_archives"][int(os.environ["SOURCE_INDEX"])]
+          url = urlsplit(row["url"])
+          assert url.scheme == "https" and url.hostname == "download.qt.io" and not url.username and not url.password
+          filename = Path(url.path).name
+          assert filename.endswith((".zip",".tar.xz"))
+          out = Path(os.environ["RUNNER_TEMP"]) / "source-custody"
+          out.mkdir()
+          archive = out / filename
+          subprocess.run(["curl","--fail","--silent","--show-error","--location","--proto","=https","--proto-redir","=https",
+                          "--connect-timeout","30","--max-time","900","--retry","1","-o",str(archive),row["url"]],check=True)
+          assert archive.stat().st_size == row["bytes"], "Archive length mismatch"
+          with archive.open("rb") as f:
+              actual = hashlib.file_digest(f,"sha256").hexdigest()
+          assert actual == row["sha256"], "Archive SHA-256 mismatch"
+          receipt = {"candidate_source":os.environ["GP_SOURCE"],"component":os.environ["COMPONENT"],
+                     "upstream":row,"archive_filename":filename,"verified_bytes":archive.stat().st_size,
+                     "verified_sha256":actual,"scope":"Exact archive retrieval and staged custody only; not proof of full corresponding-source compliance or public source-offer availability."}
+          (out/"SOURCE_RECEIPT.json").write_text(json.dumps(receipt,indent=2)+"\n",encoding="utf-8")
+          shutil.copy2(pin,out/pin.name)
+          shutil.copy2("packaging/licenses/qt-webengine-pdf/SOURCE-AND-REPLACEMENT.md",out/"SOURCE-AND-REPLACEMENT.md")
+          print("SOURCE_ARCHIVE_VERIFIED="+json.dumps(receipt,sort_keys=True),flush=True)
+          PY
+      - name: Retain verified upstream source unchanged in held staging
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: GlobalPulse-R20-HELD-SOURCE-${{ matrix.component }}-d4ff8fb70b1dc8ae41b14f23ad519ca04450679a
+          path: ${{ runner.temp }}/source-custody/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Verify actual staged archive by download and stream rehash
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "dietrichailabs-oss/Global-News-Pulse"
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 600 --retry 1 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" -o "$RUNNER_TEMP/source-readback.zip"
+          printf '%s  %s\n' "$ARTIFACT_DIGEST" "$RUNNER_TEMP/source-readback.zip" | sha256sum --check
+          python - <<'PY'
+          import hashlib,json,os,zipfile
+          from pathlib import Path
+          pin=Path("packaging/licenses/QT-6.12.0-OPEN-SOURCE-COMPLIANCE.json")
+          row=json.loads(pin.read_text(encoding="utf-8"))["exact_source_archives"][int(os.environ["SOURCE_INDEX"])]
+          name=row["url"].rsplit("/",1)[-1]
+          with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"])/"source-readback.zip") as z:
+              assert len(z.namelist()) == len(set(z.namelist())) == 4
+              assert set(z.namelist()) == {name,"SOURCE_RECEIPT.json",pin.name,"SOURCE-AND-REPLACEMENT.md"}
+              assert z.read(pin.name)==pin.read_bytes()
+              assert z.read("SOURCE-AND-REPLACEMENT.md")==Path("packaging/licenses/qt-webengine-pdf/SOURCE-AND-REPLACEMENT.md").read_bytes()
+              receipt=json.loads(z.read("SOURCE_RECEIPT.json"))
+              assert receipt["candidate_source"]==os.environ["GP_SOURCE"] and receipt["upstream"]==row
+              assert z.getinfo(name).file_size==row["bytes"]
+              with z.open(name) as f:
+                  actual=hashlib.file_digest(f,"sha256").hexdigest()
+              assert actual==row["sha256"]
+              print("SOURCE_CUSTODY_READBACK_PASS",os.environ["COMPONENT"],name,row["bytes"],actual,flush=True)
+          PY
+          echo "HELD_SOURCE_ARTIFACT_ID=$ARTIFACT_ID"
+          echo 'Staging verified source bytes only. No public release, source correspondence certification, or durable public source offer claimed.'
