@@ -699,3 +699,110 @@ def test_page_change_rejects_mismatched_period_even_before_period_handler(deskto
         assert "FICTIONAL executive report" not in w.brief_browser.toPlainText()
     finally:
         w.brief_period.blockSignals(blocked)
+
+
+def _begin_automatic_for_test(w):
+    # Exercise the real callback and owned worker. The separate churn
+    # regression exercises the actual timer and collection signal.
+    w.open_page(5)
+    w._workspace_warm_timer.stop()
+    w._evidence_refresh_timer.stop()
+    w._provisional_brief_timer.stop()
+    w._recover_provisional_brief()
+
+
+def test_populated_opening_never_automatically_replaced(desktop,monkeypatch):
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None and
+                     w._daily_brief_snapshot is not None and
+                     w._daily_brief_snapshot["manifest"])
+    opening=w._daily_brief_snapshot
+    w.open_page(5)
+    ctl.store.ingest([_report(2,"high","Health")])
+    ctl.evidence_changed.emit()
+    assert not w._provisional_brief_timer.isActive()
+    w._recover_provisional_brief()
+    assert w._requested_brief_job is None
+    assert w._daily_brief_snapshot is opening
+
+
+@pytest.mark.parametrize("action",["navigate","period","close","manual"])
+def test_automatic_reader_supersession_preserves_single_flight(desktop,monkeypatch,action):
+    app,ctl,w=desktop
+    opening=w._daily_brief_snapshot
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    original=ctl.brief_events
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    def read(**kwargs):
+        if threading.current_thread().name=="pulse-requested-brief":
+            calls.append(kwargs["period"])
+            rows=original(**kwargs)
+            if len(calls)==1:
+                entered.set()
+                assert release.wait(8)
+            return rows
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    try:
+        _begin_automatic_for_test(w)
+        assert entered.wait(2)
+        job=w._requested_brief_job
+        assert w._automatic_brief_target==job[0]
+        if action=="navigate":
+            w.open_page(0)
+        elif action=="period":
+            w.brief_period.setCurrentIndex(1)
+        elif action=="close":
+            ctl.begin_close()
+        else:
+            w._request_brief()
+            assert w._automatic_brief_target is None
+            assert w._requested_brief_target==job[0]
+            w.open_page(0)
+        assert w._requested_brief_job==job
+        assert calls==["daily"]
+        if action in {"navigate","period"}:
+            assert w._requested_brief_target is None
+        release.set()
+        assert wait_until(lambda:w._requested_brief_job is None)
+        assert ctl._settle_brief_readers(timeout=5)
+        assert calls==["daily"]
+        if action=="manual":
+            assert w._daily_brief_snapshot is not opening
+            assert w._daily_brief_snapshot["manifest"]
+        else:
+            assert w._daily_brief_snapshot is opening
+            assert w._displayed_brief_snapshot is None
+            assert not w.brief_export_button.isEnabled()
+    finally:
+        release.set()
+        assert ctl._settle_brief_readers(timeout=5)
+
+
+@pytest.mark.parametrize("first_outcome",["error","empty"])
+def test_automatic_failure_or_empty_recovers_on_next_collection(desktop,monkeypatch,first_outcome):
+    app,ctl,w=desktop
+    original=ctl.brief_events
+    calls=[]
+    def read(**kwargs):
+        if threading.current_thread().name=="pulse-requested-brief":
+            calls.append(kwargs["period"])
+            if len(calls)==1 and first_outcome=="error":
+                raise RuntimeError("offline automatic read failure")
+        return original(**kwargs)
+    monkeypatch.setattr(ctl,"brief_events",read)
+    _begin_automatic_for_test(w)
+    assert wait_until(lambda:w._requested_brief_job is None)
+    assert calls==["daily"]
+    assert w._daily_brief_snapshot is not None
+    assert not w._daily_brief_snapshot["manifest"]
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    ctl.evidence_changed.emit()
+    assert wait_until(lambda:w._daily_brief_snapshot is not None
+                     and bool(w._daily_brief_snapshot["manifest"])
+                     and w._displayed_brief_snapshot is w._daily_brief_snapshot
+                     and w.brief_export_button.isEnabled())
+    assert "FICTIONAL executive report 1" in w.brief_browser.toPlainText()

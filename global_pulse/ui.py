@@ -489,6 +489,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._requested_brief_serial=0
         self._requested_brief_deadline=0.0
         self._last_provisional_brief_attempt=0.0
+        self._automatic_brief_target=None
+        self._provisional_brief_signal_pending=False
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -1276,7 +1278,14 @@ class MainWindow(SituationActions, QMainWindow):
         if self._background_warm_enabled:
             self._last_navigation_at=time.monotonic()
             self._schedule_workspace_warm()
-            if index==5 and self._events:
+            if index!=5:
+                self._provisional_brief_timer.stop()
+                if (self._automatic_brief_target is not None
+                        and self._requested_brief_target==self._automatic_brief_target):
+                    self._retire_automatic_brief()
+                    self._clear_brief_presentation("Opening briefing pending. Return to Briefs to continue.")
+                    self._dirty_pages.add(5)
+            elif self._events or self._provisional_brief_signal_pending:
                 self._schedule_provisional_brief()
             return
         if index in self._dirty_pages:
@@ -3215,8 +3224,17 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_evidence_refresh()
 
     def _brief_period_changed(self,*_args):
+        # Period changes supersede an automatic opening read without turning
+        # it into a user-requested Weekly generation. An explicit request
+        # still carries the owner's intent to the newly selected period.
+        automatic=self._automatic_brief_target
         requested=(self._requested_brief_target is not None
-                   or self._requested_brief_job is not None)
+                   and self._requested_brief_target!=automatic
+                   or self._requested_brief_target is None
+                   and self._requested_brief_job is not None
+                   and self._requested_brief_job[0]!=automatic)
+        self._provisional_brief_timer.stop()
+        self._retire_automatic_brief()
         self._requested_brief_target=None
         self._brief_request_epoch+=1
         self._discard_brief_read()
@@ -3229,21 +3247,46 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_workspace_warm()
             self._schedule_evidence_refresh()
 
-    def _can_recover_provisional_brief(self):
+    def _visible_provisional_brief(self):
         return (self._background_warm_enabled and not self._force_close
                 and not getattr(self.controller,"_closed",False)
                 and self.isEnabled() and self.pages.currentIndex()==5
                 and self.brief_period.currentText().lower()=="daily"
                 and self._has_current_daily_brief("daily")
-                and not self._daily_brief_snapshot["manifest"]
+                and not self._daily_brief_snapshot["manifest"])
+
+    def _can_recover_provisional_brief(self):
+        return (self._visible_provisional_brief()
                 and self._requested_brief_target is None
                 and self._requested_brief_job is None)
+
+    def _retire_automatic_brief(self):
+        automatic=self._automatic_brief_target
+        if automatic is None:
+            return
+        if self._requested_brief_target==automatic:
+            self._requested_brief_target=None
+            # Returning to the visible provisional opening may need a new
+            # attempt, but no second reader may start before the old drains.
+            self._provisional_brief_signal_pending=True
+        if self._requested_brief_job is None or self._requested_brief_job[0]!=automatic:
+            self._automatic_brief_target=None
+
+    def _resume_provisional_signal(self):
+        if self._provisional_brief_signal_pending:
+            self._schedule_provisional_brief()
 
     @Slot()
     def _schedule_provisional_brief(self):
         # A continually changing Monitor revision may never reach its
         # separate Brief prewarm. The visible provisional Daily has its own
         # first-due timer; do not restart it on every collection signal.
+        if not self._visible_provisional_brief():
+            return
+        # Preserve a real evidence notification arriving during an owned read.
+        # Otherwise a last collection arriving just before an empty/error
+        # result could be lost until an unrelated future collector tick.
+        self._provisional_brief_signal_pending=True
         if (self._can_recover_provisional_brief()
                 and not self._provisional_brief_timer.isActive()):
             elapsed=time.monotonic()-self._last_provisional_brief_attempt
@@ -3264,6 +3307,13 @@ class MainWindow(SituationActions, QMainWindow):
         period=self.brief_period.currentText().lower()
         target=self._requested_brief_target
         if target is not None and target[1]==period:
+            if not automatic and self._automatic_brief_target==target:
+                # A deliberate click takes ownership of the existing read
+                # rather than launching another worker.
+                self._automatic_brief_target=None
+                self._provisional_brief_signal_pending=False
+                if period=="daily":
+                    self._daily_brief_snapshot=None
             return  # Coalesce repeated clicks, not an unbounded read queue.
         if automatic and not self._can_recover_provisional_brief():
             return
@@ -3285,6 +3335,8 @@ class MainWindow(SituationActions, QMainWindow):
         self._requested_brief_serial+=1
         target=(self._requested_brief_serial,period)
         self._requested_brief_target=target
+        self._automatic_brief_target=target if automatic else None
+        self._provisional_brief_signal_pending=False
         self._requested_brief_attempts=0
         self._requested_brief_deadline=time.monotonic()+45
         if self._requested_brief_job is not None or self._idle_brief_worker_active:
@@ -3302,6 +3354,9 @@ class MainWindow(SituationActions, QMainWindow):
         self._clear_brief_presentation(
             "Brief request timed out; no document published. Click Generate brief to retry after the previous read finishes.")
         self._dirty_pages.discard(5)
+        if self._automatic_brief_target==target and self._requested_brief_job is None:
+            self._automatic_brief_target=None
+            self._resume_provisional_signal()
 
     def _start_requested_brief(self):
         target=self._requested_brief_target
@@ -3312,7 +3367,9 @@ class MainWindow(SituationActions, QMainWindow):
         if time.monotonic()>=self._requested_brief_deadline:
             self._expire_requested_brief(target)
             return
-        if target[1]!=self.brief_period.currentText().lower():
+        if (target[1]!=self.brief_period.currentText().lower()
+                or self._automatic_brief_target==target and not self._visible_provisional_brief()):
+            self._retire_automatic_brief()
             self._requested_brief_target=None
             self._schedule_workspace_warm()
             return
@@ -3385,10 +3442,15 @@ class MainWindow(SituationActions, QMainWindow):
                 "Archive read still running. No new document or export until verified.")
 
     def _requested_brief_failed(self,message):
+        was_automatic=(self._automatic_brief_target is not None
+                       and self._requested_brief_target==self._automatic_brief_target)
         self._requested_brief_target=None
         self._requested_brief_job=None
+        self._automatic_brief_target=None
         self._clear_brief_presentation(message)
         self._dirty_pages.discard(5)
+        if was_automatic:
+            self._resume_provisional_signal()
 
     def _requested_brief_valid(self,result):
         store=self.controller.store
@@ -3406,15 +3468,24 @@ class MainWindow(SituationActions, QMainWindow):
         if self._force_close or getattr(self.controller,"_closed",False):
             self._requested_brief_job=None
             self._requested_brief_target=None
+            self._automatic_brief_target=None
+            self._provisional_brief_timer.stop()
             return
         target,attempt=job
         period=target[1]
+        if (self._automatic_brief_target==target
+                and self._requested_brief_target==target
+                and not self._visible_provisional_brief()):
+            self._retire_automatic_brief()
         if (self._requested_brief_target==target
                 and time.monotonic()>=self._requested_brief_deadline):
             self._expire_requested_brief(target)
         if (self._requested_brief_target!=target
                 or period!=self.brief_period.currentText().lower()):
             self._requested_brief_job=None
+            if self._automatic_brief_target==target:
+                self._automatic_brief_target=None
+                self._resume_provisional_signal()
             # A newer explicit request may have arrived during this read.
             self._start_requested_brief()
             self._schedule_workspace_warm()
@@ -3470,6 +3541,11 @@ class MainWindow(SituationActions, QMainWindow):
             self._dirty_pages.discard(5)
             self._requested_brief_job=None
             self._requested_brief_target=None
+            self._automatic_brief_target=None
+            if snapshot["manifest"]:
+                self._provisional_brief_signal_pending=False
+            else:
+                self._resume_provisional_signal()
         except Exception as exc:
             self._requested_brief_failed("Brief presentation failed: "+str(exc)[:160]+" · Click Generate brief to retry.")
 
