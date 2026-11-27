@@ -25,11 +25,12 @@ class HeadlineTranslations(QObject):
     MAX_DEFERRED = 512
     DEFERRED_NOTIFY_BATCH = 64
 
-    def __init__(self, translator, worker, enabled, parent=None):
+    def __init__(self, translator, worker, enabled, parent=None, *, enabled_if_available=None):
         super().__init__(parent)
         self.translator = translator
         self.worker = worker
         self.enabled = enabled
+        self.enabled_if_available = enabled_if_available
         self.cache = OrderedDict()
         self.language_cache = OrderedDict()
         # First-paint UI previews enqueue only unknown headline-language routing.
@@ -76,7 +77,21 @@ class HeadlineTranslations(QObject):
         return code
 
     def _drain_deferred(self):
-        if self.closed or self.enabled() is not True:
+        # The timer runs on Qt. Collector-owned SQLite may be busy; do not
+        # treat contention as consent, cancellation, or a reason to wait on Qt.
+        if self.closed:
+            allowed = False
+        elif self.enabled_if_available is None:
+            allowed = self.enabled() is True
+        else:
+            allowed = self.enabled_if_available()
+            if allowed is None:
+                if self.deferred_timer.interval() != 25:
+                    self.deferred_timer.setInterval(25)
+                return
+        if self.deferred_timer.interval() != 1:
+            self.deferred_timer.setInterval(1)
+        if allowed is not True:
             self.deferred_timer.stop()
             self.deferred.clear()
             self.deferred_completed = 0
@@ -213,6 +228,7 @@ class HeadlineTranslations(QObject):
 
     def cancel_pending(self):
         self.deferred_timer.stop()
+        self.deferred_timer.setInterval(1)
         self.deferred.clear()
         self.deferred_completed = 0
         identities = list(self.pending)
