@@ -1524,6 +1524,13 @@ class MainWindow(SituationActions, QMainWindow):
             kept.append(projected)
         return kept
 
+    def _set_headline_read_pause(self, reason, paused):
+        # The GUI owns this lifecycle. No polling, no preference read and no
+        # Qt objects are passed to the archive worker.
+        setter=getattr(self.controller,"set_headline_deferred_pause",None)
+        if setter is not None and not self._force_close:
+            setter(reason,paused)
+
     def _start_idle_snapshot(self):
         """Read a bounded collector revision off the main thread, never paint there.
 
@@ -1741,8 +1748,16 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 # The native window may have been destroyed during shutdown.
                 pass
-        threading.Thread(target=collect, name="pulse-idle-evidence",
-                         daemon=True).start()
+        self._set_headline_read_pause("evidence",True)
+        try:
+            threading.Thread(target=collect, name="pulse-idle-evidence",
+                             daemon=True).start()
+        except Exception:
+            self._idle_snapshot_inflight=False
+            if brief_pending:
+                self._idle_brief_inflight=False
+            self._set_headline_read_pause("evidence",False)
+            raise
 
     def _begin_idle_brief_read(self, snapshot):
         """Read source-balanced brief only AFTER the critical Qt refresh completes.
@@ -1783,11 +1798,26 @@ class MainWindow(SituationActions, QMainWindow):
             except RuntimeError:
                 pass
 
-        threading.Thread(target=collect_brief,name="pulse-idle-brief",
-                         daemon=True).start()
+        self._set_headline_read_pause("brief",True)
+        try:
+            threading.Thread(target=collect_brief,name="pulse-idle-brief",
+                             daemon=True).start()
+        except Exception:
+            self._idle_brief_inflight=False
+            self._set_headline_read_pause("brief",False)
+            raise
 
     @Slot(object)
     def _apply_idle_snapshot(self, snapshot):
+        try:
+            self._apply_idle_snapshot_result(snapshot)
+        finally:
+            # A retry of the SAME result retains single-flight ownership.
+            # Error, stale generation and successful commit release the pause.
+            if not self._idle_snapshot_inflight:
+                self._set_headline_read_pause("evidence",False)
+
+    def _apply_idle_snapshot_result(self, snapshot):
         """Apply only a current, source-consistent worker result on Qt thread."""
         self._idle_snapshot_inflight=False
         if self._force_close or getattr(self.controller,"_closed",False):
@@ -1865,6 +1895,13 @@ class MainWindow(SituationActions, QMainWindow):
 
     @Slot(object)
     def _apply_idle_brief(self, brief):
+        try:
+            self._apply_idle_brief_result(brief)
+        finally:
+            if not self._idle_brief_inflight:
+                self._set_headline_read_pause("brief",False)
+
+    def _apply_idle_brief_result(self, brief):
         """Validate an idle Brief result without waiting for worker-owned SQLite.
 
         A completed Brief read may arrive while the next collector holds the

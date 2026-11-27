@@ -38,6 +38,7 @@ class HeadlineTranslations(QObject):
         # This queue is session-only; it does not contain article bodies.
         self.deferred = OrderedDict()
         self.deferred_completed = 0
+        self._deferred_pause_reasons = set()
         self.deferred_timer = QTimer(self)
         self.deferred_timer.setInterval(1)
         self.deferred_timer.timeout.connect(self._drain_deferred)
@@ -75,7 +76,28 @@ class HeadlineTranslations(QObject):
             self.language_cache.popitem(last=False)
         return code
 
+    def set_deferred_pause(self, reason, paused):
+        """Suspend passive routing while an owned archive read is in flight.
+
+        Keep queued original titles and notification accounting intact. A
+        resumed tick checks the live preference before any language work.
+        Multiple simultaneous readers must each release their own reason.
+        """
+        if self.closed:
+            return
+        if paused:
+            self._deferred_pause_reasons.add(reason)
+            self.deferred_timer.stop()
+        else:
+            self._deferred_pause_reasons.discard(reason)
+            if (not self._deferred_pause_reasons and self.deferred
+                    and not self.deferred_timer.isActive()):
+                self.deferred_timer.start()
+
     def _drain_deferred(self):
+        if self._deferred_pause_reasons:
+            self.deferred_timer.stop()
+            return
         if self.closed or self.enabled() is not True:
             self.deferred_timer.stop()
             self.deferred.clear()
@@ -131,7 +153,7 @@ class HeadlineTranslations(QObject):
             self.deferred.move_to_end(key)
             while len(self.deferred) > self.MAX_DEFERRED:
                 self.deferred.popitem(last=False)
-            if not self.deferred_timer.isActive():
+            if not self._deferred_pause_reasons and not self.deferred_timer.isActive():
                 self.deferred_timer.start()
             result.update(state="detecting",
                           label="Original · identifying headline language locally")
@@ -223,6 +245,7 @@ class HeadlineTranslations(QObject):
 
     def close(self):
         self.closed = True
+        self._deferred_pause_reasons.clear()
         self.notify.stop()
         self.deferred_timer.stop()
         self.deferred.clear()

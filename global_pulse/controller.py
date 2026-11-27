@@ -337,6 +337,10 @@ class Controller(QObject):
     def gdelt_review_retry(self):
         self._gdelt.review_retry()
 
+    def set_headline_deferred_pause(self, reason, paused):
+        if not self._closed:
+            self._headlines.set_deferred_pause(reason, paused)
+
     def headline_view(self, event, *, defer_language=False, enabled_override=None):
         # Feed previews may route unknown languages after first GUI paint.
         # Selected-event evidence still uses the synchronous, exact route.
