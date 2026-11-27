@@ -485,6 +485,7 @@ class MainWindow(SituationActions, QMainWindow):
         self._requested_brief_attempts=0
         self._requested_brief_serial=0
         self._requested_brief_deadline=0.0
+        self._last_provisional_brief_attempt=0.0
         self._archive_selection_id=""
         self._archive_selection_scope=None  # Explicit user navigation only.
         # A selected ordinary feed story may later fall beyond the newest 500.
@@ -622,6 +623,7 @@ class MainWindow(SituationActions, QMainWindow):
         # is coalesced to prevent high-frequency map rebuilds between clicks.
         controller.data_changed.connect(self._on_user_data_changed)
         controller.evidence_changed.connect(self._schedule_evidence_refresh)
+        controller.evidence_changed.connect(self._schedule_provisional_brief)
         if hasattr(controller,"archive_reports_pruned"):
             controller.archive_reports_pruned.connect(self._brief_reports_pruned)
         if hasattr(controller, "notification_changed"):
@@ -985,6 +987,9 @@ class MainWindow(SituationActions, QMainWindow):
         panel.layout.addWidget(self.brief_state_label)
         panel.layout.addWidget(label("Daily is the dated opening snapshot. An empty opening waits for first eligible evidence; Generate brief, a new UTC day, or a change/removal of included evidence replaces it. Monitor continues to update.","Muted",True));self.pages.addWidget(panel)
         self.brief_period.currentIndexChanged.connect(self._brief_period_changed)
+        self._provisional_brief_timer=QTimer(self)
+        self._provisional_brief_timer.setSingleShot(True)
+        self._provisional_brief_timer.timeout.connect(self._recover_provisional_brief)
         self._brief_clock_timer=QTimer(self)
         self._brief_clock_timer.setInterval(30000)
         self._brief_clock_timer.timeout.connect(self._brief_clock_tick)
@@ -1260,6 +1265,8 @@ class MainWindow(SituationActions, QMainWindow):
         if self._background_warm_enabled:
             self._last_navigation_at=time.monotonic()
             self._schedule_workspace_warm()
+            if index==5 and self._events:
+                self._schedule_provisional_brief()
             return
         if index in self._dirty_pages:
             self._populate_workspace(index)
@@ -3149,7 +3156,34 @@ class MainWindow(SituationActions, QMainWindow):
             self._schedule_workspace_warm()
             self._schedule_evidence_refresh()
 
-    def _request_brief(self,*_args):
+    def _can_recover_provisional_brief(self):
+        return (self._background_warm_enabled and not self._force_close
+                and not getattr(self.controller,"_closed",False)
+                and self.isEnabled() and self.pages.currentIndex()==5
+                and self.brief_period.currentText().lower()=="daily"
+                and self._has_current_daily_brief("daily")
+                and not self._daily_brief_snapshot["manifest"]
+                and self._requested_brief_target is None
+                and self._requested_brief_job is None)
+
+    @Slot()
+    def _schedule_provisional_brief(self):
+        # A continually changing Monitor revision may never reach its
+        # separate Brief prewarm. The visible provisional Daily has its own
+        # first-due timer; do not restart it on every collection signal.
+        if (self._can_recover_provisional_brief()
+                and not self._provisional_brief_timer.isActive()):
+            elapsed=time.monotonic()-self._last_provisional_brief_attempt
+            self._provisional_brief_timer.start(max(1800,int((3.0-elapsed)*1000)))
+
+    @Slot()
+    def _recover_provisional_brief(self):
+        if not self._can_recover_provisional_brief():
+            return
+        self._last_provisional_brief_attempt=time.monotonic()
+        self._request_brief(automatic=True)
+
+    def _request_brief(self,*_args,automatic=False):
         # A user-requested document is independent of Monitor category/map
         # refresh and navigation cooldown. Never wait for the next collection.
         if not self._background_warm_enabled:
@@ -3158,11 +3192,19 @@ class MainWindow(SituationActions, QMainWindow):
         target=self._requested_brief_target
         if target is not None and target[1]==period:
             return  # Coalesce repeated clicks, not an unbounded read queue.
-        if period=="daily":
+        if automatic and not self._can_recover_provisional_brief():
+            return
+        self._provisional_brief_timer.stop()
+        if period=="daily" and not automatic:
             self._daily_brief_snapshot=None
+        # Preserve the provisional empty opening as a retry marker until
+        # first eligible evidence is admitted. The shared requested reader
+        # already checks an exact manifest before and after HTML preparation.
         self._brief_request_epoch+=1
         self._discard_brief_read()
-        self._clear_brief_presentation("Generating current source-linked briefing…")
+        self._clear_brief_presentation(
+            "Preparing first source-linked briefing…" if automatic else
+            "Generating current source-linked briefing…")
         self._dirty_pages.add(5)
         # Explicit request ownership is separate from the hidden Daily
         # snapshot's invalidation epoch. Its own exact manifest still gates
