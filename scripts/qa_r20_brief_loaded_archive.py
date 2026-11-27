@@ -23,7 +23,7 @@ from collections import defaultdict
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
-from PySide6.QtCore import QCoreApplication,QEvent,QTimer
+from PySide6.QtCore import QCoreApplication,QEvent,QEventLoop,QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from global_pulse.brief_selection import critical_alerts,overview_evidence_candidates,overview_html
@@ -178,7 +178,7 @@ class PhaseRecorder:
                 "_mapped_country_paths","_visible_country_badge_specs","paintEvent")),
             (WarningAreaLayer,"WarningAreaLayer",("set_events","paint","visible")),
             (QTextBrowser,"QTextBrowser",("setHtml","setPlainText")),
-            (HeadlineTranslations,"HeadlineTranslations",("_drain_deferred","view","_headline_language")),
+            (HeadlineTranslations,"HeadlineTranslations",("_drain_deferred","view","_headline_language","set_deferred_pause")),
             (Translator,"Translator",("installed",)),
             (Controller,"Controller",("_headline_preference_if_available",)),
             (selection,"selection",("overview_evidence_candidates","overview_html","overview_documents")),
@@ -249,7 +249,9 @@ def main():
     parser.add_argument("--baseline",action="store_true")
     args=parser.parse_args()
     app=QApplication.instance() or QApplication([])
-    summary={"baseline":args.baseline,"trial":os.environ.get("R20_MATCHED_TRIAL","1")}
+    summary={"baseline":args.baseline,"trial":os.environ.get("R20_MATCHED_TRIAL","1"),
+             "wait_mode":os.environ.get("R20_WAIT_MODE","pump")}
+    assert summary["wait_mode"] in {"pump","eventloop"}
     started=time.perf_counter()
     runner_root=private_fixture_root()
     with tempfile.TemporaryDirectory(prefix="gp-r20-load-",dir=runner_root) as directory, PhaseRecorder() as profiler:
@@ -433,10 +435,35 @@ def main():
                     phase=time.perf_counter()
                     w.category.setCurrentIndex(ix)
                     deadline=time.monotonic()+90
-                    while w._filter_refresh_pending and time.monotonic()<deadline:
-                        app.processEvents()
-                        QTest.qWait(10)
+                    if summary["wait_mode"]=="eventloop":
+                        loop=QEventLoop()
+                        observe=QTimer()
+                        observe.setInterval(10)
+                        def check():
+                            if not w._filter_refresh_pending or time.monotonic()>=deadline:
+                                loop.quit()
+                        observe.timeout.connect(check)
+                        observe.start()
+                        try:
+                            if w._filter_refresh_pending:
+                                loop.exec()
+                        finally:
+                            observe.stop()
+                    else:
+                        while w._filter_refresh_pending and time.monotonic()<deadline:
+                            app.processEvents()
+                            QTest.qWait(10)
                     settles.append((time.perf_counter()-phase)*1000)
+                    print("R20_LOAD_FILTER="+json.dumps({
+                        "category":category,"wait_mode":summary["wait_mode"],
+                        "elapsed_ms":settles[-1],"pending":w._filter_refresh_pending,
+                        "inflight":w._idle_snapshot_inflight,
+                        "generation":w._idle_snapshot_generation,
+                        "filter_timer":w._filter_refresh_timer.isActive(),
+                        "status":w.status_label.text()[:240],
+                        "pause_reasons":sorted(getattr(ctl._headlines,"_deferred_pause_reasons",())),
+                        "deferred_active":ctl._headlines.deferred_timer.isActive(),
+                        "deferred_count":len(ctl._headlines.deferred)},sort_keys=True),flush=True)
                     assert not w._filter_refresh_pending,"category did not settle"
                     assert not writer_errors,writer_errors
                     assert w.geometry()==geometry and w.windowState()==state
@@ -445,6 +472,9 @@ def main():
                     w._workspace_warm_timer.stop()
             timer.stop()
             summary["category_settle"]=stats(settles)
+            assert not w._idle_snapshot_inflight
+            assert "evidence" not in getattr(ctl._headlines,"_deferred_pause_reasons",())
+            assert written.is_set() and not writer_errors
             summary["heartbeat"]=stats(gaps)
             summary["final_point_candidates"]=len(w.world_map.events)
             summary["final_warning_areas"]=len(w.world_map.area_layer.paths)
