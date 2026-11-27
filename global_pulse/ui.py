@@ -3225,11 +3225,28 @@ class MainWindow(SituationActions, QMainWindow):
                 before=controller.store.content_revision()
                 events=controller.brief_events(since=since,period=period)
                 after=controller.store.content_revision()
-                from .core import build_brief
-                result.update(events=events,before=before,after=after,
-                    manifest=tuple(sorted((str(e["id"]),e.get("revision"))
-                                          for e in events if e.get("id"))),
-                    markdown=build_brief(events,period,generated_at=generated))
+                manifest=tuple(sorted((str(e["id"]),e.get("revision"))
+                                      for e in events if e.get("id")))
+                result.update(before=before,after=after,manifest=manifest)
+                # Reject evidence already superseded before spending time on
+                # HTML. This is the reader thread, not the Qt event loop.
+                if manifest:
+                    current=controller.store.brief_manifest_matches(manifest)
+                else:
+                    current=controller.store.content_revision()==before==after
+                if current is not True:
+                    result["retry_source"]=True
+                else:
+                    from .core import build_brief
+                    from .brief_rendering import brief_html
+                    markdown=build_brief(events,period,generated_at=generated)
+                    # QTextDocument/QTextCursor are reentrant when each thread
+                    # constructs and uses its own instance. The existing
+                    # renderer creates a private document; no QWidget, shared
+                    # document or Qt resource crosses this boundary. Only
+                    # immutable text and the manifest reach the GUI callback.
+                    result.update(markdown=markdown,
+                                  html=brief_html(events,period,markdown=markdown))
             except Exception as exc:
                 result["error"]=type(exc).__name__+": "+str(exc)[:160]
             try:
@@ -3290,6 +3307,10 @@ class MainWindow(SituationActions, QMainWindow):
         if "error" in result:
             self._requested_brief_failed("Brief read failed: "+result["error"]+" · Click Generate brief to retry.")
             return
+        if result.get("retry_source"):
+            self._requested_brief_job=None
+            self._start_requested_brief()
+            return
         generated=result["generated"]
         if period=="daily" and generated.date()!=datetime.now(timezone.utc).date():
             self._requested_brief_job=None
@@ -3297,12 +3318,10 @@ class MainWindow(SituationActions, QMainWindow):
             return
         result.setdefault("validation_deadline",time.monotonic()+15)
         try:
+            # The worker has already constructed the complete styled HTML.
+            # Recheck the exact manifest after rendering and immediately
+            # before presenting it; no source/period/deadline gate is relaxed.
             checked=self._requested_brief_valid(result)
-            if checked is True and "html" not in result:
-                from .brief_rendering import brief_html
-                result["html"]=brief_html(result["events"],period,markdown=result["markdown"])
-                # Never expose a document corrected or pruned during rendering.
-                checked=self._requested_brief_valid(result)
             if checked is None:
                 if time.monotonic()>=result["validation_deadline"]:
                     self._requested_brief_failed("Archive busy; briefing not published. Click Generate brief to retry.")

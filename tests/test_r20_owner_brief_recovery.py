@@ -253,3 +253,52 @@ def test_hidden_daily_correction_does_not_cancel_requested_weekly(desktop,monkey
         assert w.brief_export_button.isEnabled()
     finally:
         release.set()
+
+
+def test_requested_html_is_constructed_off_gui_and_preserves_exact_renderer_output(desktop,monkeypatch):
+    from global_pulse import brief_rendering
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster"),_report(2,"high","Health")])
+    owner=threading.get_ident()
+    original=brief_rendering.brief_html
+    calls=[]
+    def render(events,period,*,markdown=None):
+        assert threading.get_ident()!=owner,"requested HTML constructed on GUI"
+        calls.append((period,markdown))
+        return original(events,period,markdown=markdown)
+    monkeypatch.setattr(brief_rendering,"brief_html",render)
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None
+                     and w._displayed_brief_snapshot is not None)
+    snapshot=w._displayed_brief_snapshot
+    assert calls==[("daily",snapshot["markdown"])]
+    assert snapshot["html"]==original([],"daily",markdown=snapshot["markdown"])
+    assert "FICTIONAL executive report 1" in w.brief_browser.toPlainText()
+    assert ctl.store.brief_manifest_matches(snapshot["manifest"])
+    assert w.brief_export_button.isEnabled()
+
+
+def test_requested_worker_render_correction_is_revalidated_before_publication(desktop,monkeypatch):
+    from global_pulse import brief_rendering
+    app,ctl,w=desktop
+    ctl.store.ingest([_report(1,"critical","Disaster")])
+    owner=threading.get_ident()
+    original=brief_rendering.brief_html
+    calls=[]
+    def render(events,period,*,markdown=None):
+        assert threading.get_ident()!=owner
+        html=original(events,period,markdown=markdown)
+        calls.append(markdown)
+        if len(calls)==1:
+            ctl.store.ingest([dict(_report(1,"critical","Disaster"),
+                                   title="FICTIONAL corrected during HTML preparation")])
+        return html
+    monkeypatch.setattr(brief_rendering,"brief_html",render)
+    w._request_brief()
+    assert wait_until(lambda:w._requested_brief_job is None
+                     and w._displayed_brief_snapshot is not None)
+    assert len(calls)==2
+    assert "FICTIONAL corrected during HTML preparation" not in calls[0]
+    assert "FICTIONAL corrected during HTML preparation" in w.brief_browser.toPlainText()
+    assert ctl.store.brief_manifest_matches(w._displayed_brief_snapshot["manifest"])
+    assert w.brief_export_button.isEnabled()
